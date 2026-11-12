@@ -55,10 +55,15 @@ def fake_prompts(count: int) -> list[Prompt]:
 class FakeGenerator:
     """Stands in for the model. Reasoning is kept apart from code.
 
-    With n greater than 1 the fake returns n identical candidates. The fake path
-    always asks for one. Task 4 changes the fake or the loop when group sampling
-    needs distinct candidates.
+    With n greater than 1 the fake returns n identical candidates. Task 8 adds
+    the group update seam: `update` is a no-op that counts calls, and the
+    checkpoint methods are no-ops too, because the fake has no weights.
     """
+
+    def __init__(self) -> None:
+        self.update_calls: list[tuple[str, tuple[float, ...]]] = []
+        self.save_calls: list[str] = []
+        self.load_calls: list[str] = []
 
     def generate(
         self,
@@ -88,6 +93,23 @@ class FakeGenerator:
             mean_entropy=round(((seed >> 24) % 180) / 100 + 0.05, 4),
         )
         return [generation] * n
+
+    def update(
+        self,
+        prompt: Prompt,
+        generations: list[Generation],
+        rewards: list[float],
+    ) -> None:
+        """No-op GRPO update. Records the call so tests can assert the group shape."""
+        self.update_calls.append((prompt.prompt_id, tuple(rewards)))
+
+    def save_checkpoint(self, directory) -> None:
+        """No-op. The fake has no weights, only the manifest is written."""
+        self.save_calls.append(str(directory))
+
+    def load_checkpoint(self, directory) -> None:
+        """No-op. The fake has no weights to restore."""
+        self.load_calls.append(str(directory))
 
 
 class FakeTestRunner:
