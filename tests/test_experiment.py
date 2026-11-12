@@ -309,14 +309,18 @@ def test_a_judge_score_of_one_gives_the_top_reward(arm, expected, tmp_path) -> N
 
 @pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
 @pytest.mark.parametrize("passed,total", [(0, 2), (1, 2)])
+@pytest.mark.parametrize(
+    "error_class", ["wrong_answer", "syntax_error", "runtime_error", "runner_error"]
+)
 def test_gated_arms_score_zero_and_skip_the_judge_on_a_failed_test(
-    arm, passed, total, tmp_path
+    arm, passed, total, error_class, tmp_path
 ) -> None:
     judge = SpyJudge()
-    runner = StubTestRunner(total=total, passes=passed)
+    runner = StubTestRunner(total=total, passes=passed, error_class=error_class)
     store = RecordingStore()
     build(arm, tmp_path, judge=judge, runner=runner, store=store).run()
     assert judge.output_calls == []
+    assert {record.error_class for record in store.rollouts} == {error_class}
     assert {record.reward for record in store.rollouts} == {0.0}
     assert {record.judge_score for record in store.rollouts} == {None}
     assert {record.code_score for record in store.rollouts} == {passed / total}
