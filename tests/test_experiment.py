@@ -58,7 +58,7 @@ class StubTestRunner:
         self.calls.append(code)
         if "FAIL" in code:
             return Outcome(tests_passed=0, tests_total=self.total, error_class="assertion")
-        return Outcome(tests_passed=self.total, tests_total=self.total, error_class="")
+        return Outcome(tests_passed=self.total, tests_total=self.total, error_class="pass")
 
 
 class StubJudge:
@@ -147,7 +147,7 @@ def test_records_are_built_from_generator_runner_and_judge(tmp_path) -> None:
     assert record.completion_tokens == 20
     assert record.mean_entropy == 0.5
     assert record.tests_passed == 2 and record.tests_total == 2
-    assert record.error_class == ""
+    assert record.error_class == "pass"
     assert record.code_score == 1.0
 
 

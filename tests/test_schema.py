@@ -45,7 +45,7 @@ def valid_record(arm: str = "code-score", step: int = 1) -> dict:
         "mean_entropy": 0.35,
         "tests_passed": 3,
         "tests_total": 3,
-        "error_class": "",
+        "error_class": "pass",
         "code_score": 1.0,
         "judge_score": None,
         "process_score": None,
@@ -174,10 +174,10 @@ def test_tests_passed_must_not_exceed_tests_total() -> None:
         RolloutRecord.from_dict(payload)
 
 
-def test_error_class_is_a_string_and_empty_when_none() -> None:
-    # Task 2 defines the exact classes. Any string is valid, "" means no error.
-    assert valid_record()["error_class"] == ""
-    for value in ("", "timeout", "assertion", "syntax", "runtime", "future-class"):
+def test_error_class_is_a_string_with_pass_for_success() -> None:
+    # Task 2 defines the exact classes. Success is "pass", never "".
+    assert valid_record()["error_class"] == "pass"
+    for value in ("pass", "", "timeout", "assertion", "syntax", "runtime", "future-class"):
         payload = valid_record()
         payload["error_class"] = value
         assert RolloutRecord.from_dict(payload).error_class == value

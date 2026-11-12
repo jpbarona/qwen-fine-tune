@@ -147,7 +147,7 @@ for index, test in enumerate(tests):
         failures.append("runtime_error")
     else:
         results.append(
-            {"index": index, "passed": True, "error_class": "", "detail": ""}
+            {"index": index, "passed": True, "error_class": "pass", "detail": ""}
         )
 
 if all(result["passed"] for result in results):
@@ -343,9 +343,9 @@ class DockerTestRunner:
                     continue
                 if not isinstance(passed, bool):
                     continue
-                item_class = item.get("error_class", "")
+                item_class = item.get("error_class", "pass" if passed else "wrong_answer")
                 if not isinstance(item_class, str):
-                    item_class = ""
+                    item_class = "pass" if passed else "wrong_answer"
                 item_detail = item.get("detail", "")
                 if not isinstance(item_detail, str):
                     item_detail = ""

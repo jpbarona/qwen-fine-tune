@@ -59,7 +59,7 @@ def test_test_runner_is_deterministic_and_bounded() -> None:
     assert first.tests_total > 0
 
 
-def test_test_runner_reports_an_error_class_only_on_failure() -> None:
+def test_test_runner_uses_pass_on_success_and_a_class_on_failure() -> None:
     prompt = Prompt("mbpp-0000", "p")
     results = []
     for index in range(6):
@@ -67,7 +67,7 @@ def test_test_runner_reports_an_error_class_only_on_failure() -> None:
         results.append(FakeTestRunner().run(prompt, code))
     for result in results:
         if result.tests_passed == result.tests_total:
-            assert result.error_class == ""
+            assert result.error_class == "pass"
         else:
             assert result.error_class in {"assertion", "syntax", "runtime", "timeout"}
 

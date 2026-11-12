@@ -126,6 +126,7 @@ def test_passing_code_is_classified_pass(runner: DockerTestRunner) -> None:
     assert outcome.tests_total == 1
     assert outcome.error_class == "pass"
     assert [result.passed for result in outcome.results] == [True]
+    assert [result.error_class for result in outcome.results] == ["pass"]
 
 
 def test_wrong_answer_is_classified_wrong_answer(runner: DockerTestRunner) -> None:
@@ -182,6 +183,11 @@ def test_each_test_runs_separately_and_reports_partial_passes(docker_ready) -> N
     assert outcome.error_class == "wrong_answer"
     assert [result.index for result in outcome.results] == [0, 1, 2]
     assert [result.passed for result in outcome.results] == [True, False, True]
+    assert [result.error_class for result in outcome.results] == [
+        "pass",
+        "wrong_answer",
+        "pass",
+    ]
 
 
 def test_test_setup_code_runs_before_the_tests(docker_ready) -> None:

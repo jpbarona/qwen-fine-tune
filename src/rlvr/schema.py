@@ -7,8 +7,9 @@ consumer.
 
 Notes on the contract:
 
-* `error_class` is any string, empty when no error happened. Task 2 defines the
-  exact classes the Docker runner produces. Do not treat the current names as a
+* `error_class` is `"pass"` when every task test passed. Any other string names
+  the failure. Task 2 defines the exact classes the Docker runner produces. Do
+  not use an empty string for success, and do not treat the current names as a
   closed set.
 * `judge_score` and `process_score` are null when the arm does not use them, or
   when the rollout failed its tests and the judge was never called.
