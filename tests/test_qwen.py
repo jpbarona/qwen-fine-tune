@@ -97,3 +97,15 @@ def test_clipped_surrogate_bounds_a_large_negative_advantage() -> None:
 
 def test_clipped_surrogate_leaves_a_unit_ratio_unchanged() -> None:
     assert clipped_surrogate(1.0, 0.3, 0.2) == pytest.approx(0.3)
+
+
+def test_qwen_module_imports_without_importing_torch() -> None:
+    # The real trainer imports torch lazily so the CPU suite can import the
+    # module. This test fails if a top-level torch import is ever added.
+    import importlib
+    import sys
+
+    sys.modules.pop("torch", None)
+    module = importlib.import_module("rlvr.qwen")
+    assert "torch" not in sys.modules
+    assert module.extract_code_from_answer("```python\nx = 1\n```") == "x = 1"
