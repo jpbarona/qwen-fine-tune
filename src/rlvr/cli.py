@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .config import Config, ConfigError, default_config_path, load_config
-from .experiment import Experiment, Judge, Prompt
+from .experiment import Experiment, Judge, JudgeResult, Prompt
 from .fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 from .judge import JudgeClient, MissingAPIKeyError
 from .reward import (
@@ -44,10 +44,10 @@ class UsageError(ValueError):
 class UnusedJudge:
     """A judge for arms that never score with one. Calling it is a bug."""
 
-    def score_output(self, prompt: Prompt, code: str):
+    def score_output(self, prompt: Prompt, code: str) -> JudgeResult:
         raise AssertionError("this arm must never call the output judge")
 
-    def score_process(self, prompt: Prompt, reasoning: str):
+    def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
         raise AssertionError("this arm must never call the process judge")
 
 
