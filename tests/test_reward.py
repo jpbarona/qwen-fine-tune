@@ -1,7 +1,8 @@
 """Tests for reward composition. The table is frozen in SPEC.md.
 
-Tasks 4 and 5 implement the code-score, hybrid, and gated-judge arms. The
-gated-process arm is named and must fail clearly until Task 6 lands.
+All four arms are implemented. The gated-process arm gates on the tests like
+the other judge arms, then splits the reward evenly between the trace score and
+the code score.
 """
 
 from __future__ import annotations
@@ -12,7 +13,6 @@ from rlvr.reward import (
     ARM_REWARDS,
     ARMS,
     PENDING_ARMS,
-    ArmNotImplemented,
     RewardError,
     all_tests_passed,
     check_arm_implemented,
@@ -21,6 +21,7 @@ from rlvr.reward import (
     gates_on_tests,
     reward_code_score,
     reward_gated_judge,
+    reward_gated_process,
     reward_hybrid,
     uses_output_judge,
     uses_process_judge,
@@ -88,9 +89,9 @@ def test_counts_must_be_sane() -> None:
 
 
 def test_the_reward_table_is_the_single_arm_list() -> None:
-    assert set(ARM_REWARDS) == {"code-score", "hybrid", "gated-judge"}
+    assert set(ARM_REWARDS) == set(ARMS)
     assert set(ARM_REWARDS) | PENDING_ARMS == set(ARMS)
-    assert PENDING_ARMS == {"gated-process"}
+    assert PENDING_ARMS == frozenset()
     for arm in ARM_REWARDS:
         check_arm_implemented(arm)
 
@@ -148,6 +149,14 @@ def test_a_judge_score_outside_the_unit_range_fails_loudly(bad: float) -> None:
             compose_reward(
                 arm, tests_passed=4, tests_total=4, judge_score=bad
             )
+    with pytest.raises(RewardError, match="judge"):
+        compose_reward(
+            "gated-process",
+            tests_passed=4,
+            tests_total=4,
+            judge_score=bad,
+            process_score=1.0,
+        )
 
 
 def test_a_boolean_judge_score_is_not_a_number() -> None:
@@ -164,16 +173,78 @@ def test_the_process_score_is_ignored_by_the_hybrid_arm() -> None:
     ) == pytest.approx(1.0)
 
 
-def test_the_process_arm_fails_clearly() -> None:
-    with pytest.raises(ArmNotImplemented, match="gated-process"):
-        check_arm_implemented("gated-process")
-    with pytest.raises(ArmNotImplemented, match="gated-process"):
+@pytest.mark.parametrize("judge", [0.0, 0.25, 0.5, 0.75, 1.0])
+@pytest.mark.parametrize("process", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_gated_process_on_a_full_pass_is_half_process_plus_half_judge(
+    judge: float, process: float
+) -> None:
+    expected = 0.5 * process + 0.5 * judge
+    assert reward_gated_process(
+        tests_passed=2,
+        tests_total=2,
+        judge_score=judge,
+        process_score=process,
+    ) == pytest.approx(expected)
+    assert compose_reward(
+        "gated-process",
+        tests_passed=2,
+        tests_total=2,
+        judge_score=judge,
+        process_score=process,
+    ) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("passed,total", [(0, 4), (1, 4), (3, 4), (0, 0)])
+def test_gated_process_scores_zero_when_the_gate_is_closed(
+    passed: int, total: int
+) -> None:
+    # No scores are supplied, which proves the gate closes before either
+    # judge score is consulted.
+    assert compose_reward(
+        "gated-process", tests_passed=passed, tests_total=total
+    ) == 0.0
+
+
+def test_a_process_pass_without_a_process_score_fails_loudly() -> None:
+    with pytest.raises(RewardError, match="process"):
         compose_reward(
             "gated-process",
             tests_passed=4,
             tests_total=4,
             judge_score=1.0,
+        )
+
+
+def test_a_process_pass_without_a_judge_score_fails_loudly() -> None:
+    with pytest.raises(RewardError, match="judge"):
+        compose_reward(
+            "gated-process",
+            tests_passed=4,
+            tests_total=4,
             process_score=1.0,
+        )
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.1, float("nan"), float("inf")])
+def test_a_process_score_outside_the_unit_range_fails_loudly(bad: float) -> None:
+    with pytest.raises(RewardError, match="process"):
+        compose_reward(
+            "gated-process",
+            tests_passed=4,
+            tests_total=4,
+            judge_score=1.0,
+            process_score=bad,
+        )
+
+
+def test_a_boolean_process_score_is_not_a_number() -> None:
+    with pytest.raises(RewardError, match="process"):
+        compose_reward(
+            "gated-process",
+            tests_passed=4,
+            tests_total=4,
+            judge_score=1.0,
+            process_score=True,
         )
 
 
