@@ -11,7 +11,16 @@ revision = "unpinned"
 [judge]
 model = "deepseek-v4.1-flash"
 temperature = 0.0
+# Bounded in-flight judge calls.
 concurrency = 32
+# Total attempts per call, including the first. Retries cover 408, 429, 5xx,
+# timeouts, and connection errors. Other 4xx responses fail at once.
+max_attempts = 4
+timeout_seconds = 60
+# File cache for identical requests. Relative paths use the working directory.
+cache_dir = "judge-cache"
+# The reasoning effort parameter is omitted on purpose. The OpenCode Go docs do
+# not define a "normal" value, so the provider default applies.
 
 [data]
 name = "mbpp"
