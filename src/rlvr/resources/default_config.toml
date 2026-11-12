@@ -15,6 +15,9 @@ concurrency = 32
 
 [data]
 name = "mbpp"
+# Offline merge of the MBPP full configuration: 374 train + 90 validation +
+# 500 test = 964 rows. The 10 few-shot prompt rows are excluded.
+dataset = "data/mbpp_full.jsonl"
 split_seed = 1234
 train_size = 714
 test_size = 250
