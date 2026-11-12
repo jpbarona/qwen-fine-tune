@@ -269,3 +269,92 @@ def test_console_script_reports_unknown_arm_without_a_traceback(tmp_path) -> Non
     assert result.returncode != 0
     assert "bogus" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_summary_prints_the_metrics_and_writes_the_report(
+    config_path, tmp_path, capsys
+) -> None:
+    runs_root = tmp_path / "runs"
+    main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    )
+    capsys.readouterr()
+
+    report = tmp_path / "report.html"
+    code = main(["summary", str(runs_root), "--html", str(report)])
+
+    printed = capsys.readouterr().out
+    assert code == 0
+    for title in ("reward per step", "pass@1 per step", "entropy per step", "length per step"):
+        assert title in printed
+    assert "code-score" in printed
+    assert f"report: {report}" in printed
+    assert report.is_file()
+    assert "<!DOCTYPE html>" in report.read_text(encoding="utf-8")
+
+
+def test_summary_accepts_more_than_one_run_folder(config_path, tmp_path, capsys) -> None:
+    runs_root = tmp_path / "runs"
+    run_dirs = []
+    for arm in ("code-score", "hybrid"):
+        main(
+            ["run", "--arm", arm, "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+        )
+        run_dirs.append(str(next((runs_root / arm).iterdir())))
+    capsys.readouterr()
+
+    assert main(["summary", *run_dirs, "--no-html"]) == 0
+    printed = capsys.readouterr().out
+    assert "code-score" in printed
+    assert "hybrid" in printed
+
+
+def test_summary_without_html_does_not_write_a_file(config_path, tmp_path, capsys) -> None:
+    runs_root = tmp_path / "runs"
+    main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    )
+    capsys.readouterr()
+    assert main(["summary", str(runs_root), "--no-html"]) == 0
+    assert not (tmp_path / "report.html").exists()
+
+
+def test_summary_rejects_a_folder_that_is_not_a_run(tmp_path, capsys) -> None:
+    code = main(["summary", str(tmp_path / "nothing"), "--no-html"])
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "not a run folder" in captured.err
+
+
+def test_summary_needs_at_least_one_path(capsys) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        main(["summary", "--no-html"])
+    assert excinfo.value.code != 0
+
+
+def test_publish_pushes_the_report_to_a_local_bare_repo(tmp_path, capsys) -> None:
+    bare = tmp_path / "pages.git"
+    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+    report = tmp_path / "report.html"
+    report.write_text("<!DOCTYPE html><p>study</p>\n", encoding="utf-8")
+
+    code = main(["publish", "--report", str(report), "--remote", str(bare)])
+
+    assert code == 0
+    assert "published" in capsys.readouterr().out
+    shown = subprocess.run(
+        ["git", "--git-dir", str(bare), "show", "gh-pages:index.html"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert shown.stdout.strip() == "<!DOCTYPE html><p>study</p>"
+
+
+def test_publish_reports_a_missing_report(tmp_path, capsys) -> None:
+    code = main(
+        ["publish", "--report", str(tmp_path / "absent.html"), "--remote", str(tmp_path / "bare.git")]
+    )
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "report not found" in captured.err
