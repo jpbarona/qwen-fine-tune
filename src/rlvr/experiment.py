@@ -108,10 +108,16 @@ class Outcome:
 
 @dataclass(frozen=True)
 class JudgeResult:
-    """A judge score in [0, 1] and whether the answer came from the cache."""
+    """A judge score in [0, 1], whether the answer came from the cache, and
+    the short reason the judge returned.
+
+    `reason` has a default so every existing fake and test stays valid. The
+    score and cache fields are the frozen part of this seam.
+    """
 
     score: float
     cache_hit: bool
+    reason: str = ""
 
 
 class Generator(Protocol):
