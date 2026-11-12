@@ -40,6 +40,48 @@ steps = 2
 prompts_per_step = 2
 """
 
+EVAL_CONFIG_TEXT = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "r"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 1
+
+[fake]
+steps = 4
+prompts_per_step = 1
+
+[run]
+eval_every_steps = 2
+eval_questions = 3
+eval_subset_seed = 77
+"""
+
+FINAL_EVAL_CONFIG_TEXT = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "r"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 1
+
+[fake]
+steps = 1
+prompts_per_step = 1
+
+[run]
+eval_every_steps = 100
+eval_questions = 100
+eval_subset_seed = 77
+"""
+
 
 class StubGenerator:
     def __init__(self, codes: dict[str, str] | None = None) -> None:
@@ -188,12 +230,35 @@ class RecordingStore:
         self.eval = payload
 
 
+class MultiEvalStore(RecordingStore):
+    """Keeps every eval payload, to show eval.json is rewritten per evaluation."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.evals: list[dict] = []
+
+    def write_eval(self, payload: dict) -> None:
+        super().write_eval(payload)
+        self.evals.append(payload)
+
+
 def make_prompts(count: int = 2) -> list[Prompt]:
     return [Prompt(prompt_id=f"mbpp-{i:04d}", problem=f"problem {i}") for i in range(count)]
 
 
-def build(arm: str, tmp_path, *, generator=None, judge=None, runner=None, store=None, prompts=None):
-    config = load_config(_write_config(tmp_path))
+def build(
+    arm: str,
+    tmp_path,
+    *,
+    generator=None,
+    judge=None,
+    runner=None,
+    store=None,
+    prompts=None,
+    eval_prompts=(),
+    config_text: str = CONFIG_TEXT,
+):
+    config = load_config(_write_config(tmp_path, config_text))
     return Experiment(
         arm=arm,
         config=config,
@@ -202,12 +267,13 @@ def build(arm: str, tmp_path, *, generator=None, judge=None, runner=None, store=
         test_runner=runner or StubTestRunner(),
         store=store or RecordingStore(),
         prompts=prompts if prompts is not None else make_prompts(),
+        eval_prompts=eval_prompts,
     )
 
 
-def _write_config(tmp_path) -> Path:
+def _write_config(tmp_path, text: str = CONFIG_TEXT) -> Path:
     path = tmp_path / "config.toml"
-    path.write_text(CONFIG_TEXT, encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
     return path
 
 
@@ -621,3 +687,119 @@ def test_run_is_reusable_and_writes_only_new_records(tmp_path) -> None:
     experiment.run()
     experiment.run()
     assert len(store.rollouts) == 8
+
+
+def test_every_rollout_records_entropy_and_completion_length(tmp_path) -> None:
+    store = RecordingStore()
+    build("code-score", tmp_path, store=store).run()
+    assert [record.mean_entropy for record in store.rollouts] == [0.5] * 4
+    assert [record.completion_tokens for record in store.rollouts] == [20] * 4
+
+
+def test_a_checkpoint_eval_runs_every_configured_step_and_the_final_eval_covers_the_pool(
+    tmp_path,
+) -> None:
+    store = MultiEvalStore()
+    eval_prompts = make_prompts(5)
+    build(
+        "code-score",
+        tmp_path,
+        store=store,
+        prompts=make_prompts(1),
+        eval_prompts=eval_prompts,
+        config_text=EVAL_CONFIG_TEXT,
+    ).run()
+
+    evaluations = store.eval["evaluations"]
+    assert [(point["step"], point["kind"]) for point in evaluations] == [
+        (2, "checkpoint"),
+        (4, "checkpoint"),
+        (4, "final"),
+    ]
+    assert [point["count"] for point in evaluations] == [3, 3, 5]
+    assert evaluations[-1]["prompt_ids"] == [prompt.prompt_id for prompt in eval_prompts]
+
+
+def test_the_checkpoint_subset_is_fixed_by_its_own_seed(tmp_path) -> None:
+    store = MultiEvalStore()
+    eval_prompts = make_prompts(5)
+    build(
+        "code-score",
+        tmp_path,
+        store=store,
+        prompts=make_prompts(1),
+        eval_prompts=eval_prompts,
+        config_text=EVAL_CONFIG_TEXT,
+    ).run()
+
+    evaluations = store.eval["evaluations"]
+    checkpoint_ids = evaluations[0]["prompt_ids"]
+    assert checkpoint_ids == evaluations[1]["prompt_ids"]
+    assert checkpoint_ids != [prompt.prompt_id for prompt in eval_prompts[:3]]
+    assert store.eval["subset"] == {
+        "method": "seeded_sample",
+        "seed": 77,
+        "requested": 3,
+        "selected": 3,
+        "pool_size": 5,
+    }
+
+
+def test_eval_json_has_step_pass_at_1_count_and_timestamp(tmp_path) -> None:
+    store = MultiEvalStore()
+    build(
+        "code-score",
+        tmp_path,
+        store=store,
+        prompts=make_prompts(1),
+        eval_prompts=make_prompts(5),
+        config_text=EVAL_CONFIG_TEXT,
+    ).run()
+    assert store.eval["step"] == 4
+    assert store.eval["count"] == 5
+    assert store.eval["timestamp"] == "20261112T000000Z"
+    assert store.eval["pass_at_1"] == pytest.approx(1.0)
+
+
+def test_eval_json_is_rewritten_after_every_evaluation(tmp_path) -> None:
+    store = MultiEvalStore()
+    build(
+        "code-score",
+        tmp_path,
+        store=store,
+        prompts=make_prompts(1),
+        eval_prompts=make_prompts(5),
+        config_text=EVAL_CONFIG_TEXT,
+    ).run()
+    assert [len(payload["evaluations"]) for payload in store.evals] == [1, 2, 3]
+    assert [payload["step"] for payload in store.evals] == [2, 4, 4]
+
+
+def test_the_final_eval_covers_all_250_test_questions(tmp_path) -> None:
+    generator = StubGenerator()
+    store = MultiEvalStore()
+    eval_prompts = make_prompts(250)
+    build(
+        "code-score",
+        tmp_path,
+        generator=generator,
+        store=store,
+        prompts=make_prompts(1),
+        eval_prompts=eval_prompts,
+        config_text=FINAL_EVAL_CONFIG_TEXT,
+    ).run()
+
+    assert store.eval["count"] == 250
+    assert store.eval["evaluations"][-1]["pass_at_1"] == pytest.approx(1.0)
+    greedy = [call for call in generator.calls if call[1] == 0.0]
+    assert len(greedy) == 250
+    assert {call[0] for call in greedy} == {prompt.prompt_id for prompt in eval_prompts}
+
+
+def test_without_eval_prompts_the_training_prompts_are_evaluated(tmp_path) -> None:
+    generator = StubGenerator()
+    store = MultiEvalStore()
+    build("code-score", tmp_path, generator=generator, store=store).run()
+    greedy = [call for call in generator.calls if call[1] == 0.0]
+    assert greedy == [("mbpp-0000", 0.0), ("mbpp-0001", 0.0)]
+    assert store.eval["count"] == 2

@@ -11,6 +11,16 @@ Required keys:
     [data]  split_seed
     [fake]  steps, prompts_per_step
 
+Optional keys, with the defaults shown:
+
+    [run] eval_every_steps = 100
+    [run] eval_questions   = 100
+    [run] eval_subset_seed = 2026
+
+`eval_subset_seed` chooses the fixed checkpoint subset from the test pool. It is
+deliberately separate from `data.split_seed`, so the eval subset is not tied to
+the train/test cut.
+
 Extra keys and tables are kept and ignored here. Later tasks add the training,
 data, and judge settings they need without changing this loader's contract.
 
@@ -30,6 +40,12 @@ __all__ = ["Config", "ConfigError", "default_config_path", "load_config"]
 #: Resource path of the config used when --config is not given.
 DEFAULT_CONFIG_RESOURCE = "resources/default_config.toml"
 
+#: Defaults for the optional [run] table. The spec's schedule is one checkpoint
+#: evaluation every 100 steps over 100 fixed questions.
+DEFAULT_EVAL_EVERY_STEPS = 100
+DEFAULT_EVAL_QUESTIONS = 100
+DEFAULT_EVAL_SUBSET_SEED = 2026
+
 
 class ConfigError(ValueError):
     """The config file is missing, unreadable, or invalid."""
@@ -45,6 +61,9 @@ class Config:
     split_seed: int
     steps: int
     prompts_per_step: int
+    eval_every_steps: int = DEFAULT_EVAL_EVERY_STEPS
+    eval_questions: int = DEFAULT_EVAL_QUESTIONS
+    eval_subset_seed: int = DEFAULT_EVAL_SUBSET_SEED
 
 
 def default_config_path() -> Path:
@@ -100,6 +119,28 @@ def _shown(value: Any) -> str:
     return f"{type(value).__name__} {value!r}"
 
 
+def _optional(raw: dict[str, Any], dotted: str, default: Any) -> Any:
+    """The value at `dotted`, or `default` when the key or its table is absent."""
+    node: Any = raw
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return default
+        node = node[part]
+    return node
+
+
+def _optional_positive_int(raw: dict[str, Any], dotted: str, default: int) -> int:
+    if _optional(raw, dotted, None) is None:
+        return default
+    return _positive_int(raw, dotted)
+
+
+def _optional_non_negative_int(raw: dict[str, Any], dotted: str, default: int) -> int:
+    if _optional(raw, dotted, None) is None:
+        return default
+    return _non_negative_int(raw, dotted)
+
+
 def load_config(path: str | Path) -> Config:
     """Read and validate a config file. Raises ConfigError with a clear message."""
     file_path = Path(path)
@@ -129,4 +170,13 @@ def load_config(path: str | Path) -> Config:
         split_seed=_non_negative_int(raw, "data.split_seed"),
         steps=_positive_int(raw, "fake.steps"),
         prompts_per_step=_positive_int(raw, "fake.prompts_per_step"),
+        eval_every_steps=_optional_positive_int(
+            raw, "run.eval_every_steps", DEFAULT_EVAL_EVERY_STEPS
+        ),
+        eval_questions=_optional_positive_int(
+            raw, "run.eval_questions", DEFAULT_EVAL_QUESTIONS
+        ),
+        eval_subset_seed=_optional_non_negative_int(
+            raw, "run.eval_subset_seed", DEFAULT_EVAL_SUBSET_SEED
+        ),
     )

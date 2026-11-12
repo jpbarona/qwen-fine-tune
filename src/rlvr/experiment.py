@@ -31,6 +31,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from . import repro
 from .config import Config
+from .evaluation import pass_at_1, select_eval_subset, subset_selector
 from .reward import (
     all_tests_passed,
     check_arm_implemented,
@@ -73,7 +74,15 @@ class Prompt:
 
 @dataclass(frozen=True)
 class Generation:
-    """One model output, with reasoning kept apart from code."""
+    """One model output, with reasoning kept apart from code.
+
+    `mean_entropy` is the mean Shannon entropy of the model's next-token
+    distribution at each generated token position, in nats, averaged over the
+    generated tokens only. Prompt tokens are excluded. The value comes from the
+    logprobs the generator already receives, so the generator computes it and
+    the Experiment only records it. It is logged, not rewarded, and it is not
+    bounded by 1. The fake generator returns a deterministic synthetic value.
+    """
 
     reasoning: str
     code: str
@@ -178,12 +187,18 @@ class Experiment:
     test_runner: TestRunner
     store: Store
     prompts: Sequence[Prompt]
+    eval_prompts: Sequence[Prompt] = ()
 
     def run(self) -> RunSummary:
-        """Run every training step, then evaluate, and return a summary.
+        """Run every training step, evaluate on schedule, and summarize.
 
         Records are not held in memory. Only running sums are kept, so a long
-        run costs the same as a short one.
+        run costs the same as a short one. `eval.json` is replaced after every
+        evaluation, so a crash keeps the last checkpoint result.
+
+        Task 8 adds resume and budget guards around this loop. The loop is split
+        into `_training_step` and `_evaluate` so both can wrap it without
+        changing the record or eval contracts.
         """
         self._check_arm()
         if not self.prompts:
@@ -191,18 +206,44 @@ class Experiment:
 
         self.store.write_meta(self.build_meta())
 
+        eval_pool = self._eval_pool()
+        checkpoint_prompts = select_eval_subset(
+            eval_pool, count=self.config.eval_questions, seed=self.config.eval_subset_seed
+        )
+        checkpoint_subset = subset_selector(
+            eval_pool,
+            count=self.config.eval_questions,
+            seed=self.config.eval_subset_seed,
+            subset=checkpoint_prompts,
+        )
+
         rollouts = 0
         reward_sum = 0.0
+        last_step = 0
+        evaluations: list[dict[str, Any]] = []
         for step in range(1, self.config.steps + 1):
-            step_records = [self._one_rollout(prompt, step) for prompt in self.prompts]
+            step_records = self._training_step(step)
+            last_step = step
             for record in step_records:
                 self.store.append_rollout(record)
                 rollouts += 1
                 reward_sum += record.reward
             self.store.append_metric(self._metric_row(step, step_records))
 
-        evaluation = self._evaluate(self.config.steps)
-        self.store.write_eval(self._eval_payload([evaluation]))
+            if step % self.config.eval_every_steps == 0:
+                evaluations.append(
+                    self._evaluate(
+                        step,
+                        checkpoint_prompts,
+                        kind="checkpoint",
+                        subset=checkpoint_subset,
+                    )
+                )
+                self.store.write_eval(self._eval_payload(evaluations, checkpoint_subset))
+
+        final = self._evaluate(last_step, eval_pool, kind="final", subset=None)
+        evaluations.append(final)
+        self.store.write_eval(self._eval_payload(evaluations, checkpoint_subset))
 
         return RunSummary(
             arm=self.arm,
@@ -210,7 +251,7 @@ class Experiment:
             steps=self.config.steps,
             rollouts=rollouts,
             mean_reward=reward_sum / rollouts,
-            pass_at_1=evaluation["pass_at_1"],
+            pass_at_1=final["pass_at_1"],
         )
 
     def build_meta(self) -> dict[str, Any]:
@@ -233,6 +274,23 @@ class Experiment:
         folder and touches no backend.
         """
         check_arm_implemented(self.arm)
+
+    def _eval_pool(self) -> tuple[Prompt, ...]:
+        """The questions the final eval covers.
+
+        The real path passes the 250 held-out test questions. When a caller
+        does not separate them, evaluation falls back to the training prompts.
+        That keeps the fake path and the unit tests honest without pretending
+        a small pool is the 250-question test set.
+        """
+        pool = tuple(self.eval_prompts) if self.eval_prompts else tuple(self.prompts)
+        if not pool:
+            raise ValueError("experiment needs at least one evaluation prompt")
+        return pool
+
+    def _training_step(self, step: int) -> list[RolloutRecord]:
+        """Generate, run, judge, and record one rollout per training prompt."""
+        return [self._one_rollout(prompt, step) for prompt in self.prompts]
 
     def _one_rollout(self, prompt: Prompt, step: int) -> RolloutRecord:
         generation = self.generator.generate(
@@ -310,31 +368,44 @@ class Experiment:
             "cache_hits": sum(1 for record in records if record.cache_hit),
         }
 
-    def _evaluate(self, step: int) -> dict[str, Any]:
-        """Greedy pass@1 over the prompts in this run."""
+    def _evaluate(
+        self,
+        step: int,
+        prompts: Sequence[Prompt],
+        *,
+        kind: str,
+        subset: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Greedy pass@1 over `prompts`. One generation per question."""
         prompt_ids: list[str] = []
-        passed_count = 0
-        for prompt in self.prompts:
+        passed: list[bool] = []
+        for prompt in prompts:
             generation = self.generator.generate(prompt, n=1, temperature=EVAL_TEMPERATURE)[0]
             result = self.test_runner.run(prompt, generation.code)
             prompt_ids.append(prompt.prompt_id)
-            if all_tests_passed(result.tests_passed, result.tests_total):
-                passed_count += 1
-        total = len(prompt_ids)
+            passed.append(all_tests_passed(result.tests_passed, result.tests_total))
         return {
             "step": step,
-            "pass_at_1": passed_count / total,
-            "num_prompts": total,
+            "kind": kind,
+            "pass_at_1": pass_at_1(passed),
+            "count": len(prompt_ids),
             "prompt_ids": prompt_ids,
+            "subset": dict(subset) if subset is not None else None,
         }
 
-    def _eval_payload(self, evaluations: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    def _eval_payload(
+        self,
+        evaluations: Sequence[Mapping[str, Any]],
+        checkpoint_subset: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """The whole eval.json. The last evaluation is the final one."""
         final = evaluations[-1]
         return {
             "arm": self.arm,
             "timestamp": self.store.timestamp,
+            "step": final["step"],
             "pass_at_1": final["pass_at_1"],
-            "num_prompts": final["num_prompts"],
-            "eval_prompt_ids": list(final["prompt_ids"]),
+            "count": final["count"],
+            "subset": dict(checkpoint_subset),
             "evaluations": [dict(evaluation) for evaluation in evaluations],
         }

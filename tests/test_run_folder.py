@@ -113,10 +113,78 @@ def test_eval_json_reports_pass_at_1_for_the_final_eval(run_fake) -> None:
     assert eval_payload["arm"] == "code-score"
     assert eval_payload["timestamp"] == TIMESTAMP
     assert 0.0 <= eval_payload["pass_at_1"] <= 1.0
-    assert eval_payload["num_prompts"] == 2
-    assert eval_payload["eval_prompt_ids"] == ["mbpp-0000", "mbpp-0001"]
+    assert eval_payload["step"] == 3
+    assert eval_payload["count"] == 2
     assert [row["step"] for row in eval_payload["evaluations"]] == [3]
+    assert eval_payload["evaluations"][0]["kind"] == "final"
+    assert eval_payload["evaluations"][0]["prompt_ids"] == ["mbpp-0000", "mbpp-0001"]
     assert isinstance(eval_payload["evaluations"][0]["pass_at_1"], float)
+
+
+def test_eval_json_records_the_checkpoint_subset_selector(run_fake) -> None:
+    config = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "fake-revision"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 1234
+
+[fake]
+steps = 3
+prompts_per_step = 2
+
+[run]
+eval_every_steps = 2
+eval_questions = 2
+eval_subset_seed = 5
+"""
+    eval_payload = read_json(run_fake("code-score", config_text=config)[0] / "eval.json")
+    assert eval_payload["subset"] == {
+        "method": "seeded_sample",
+        "seed": 5,
+        "requested": 2,
+        "selected": 2,
+        "pool_size": 2,
+    }
+    assert [row["kind"] for row in eval_payload["evaluations"]] == [
+        "checkpoint",
+        "final",
+    ]
+    assert [row["step"] for row in eval_payload["evaluations"]] == [2, 3]
+
+
+def test_eval_json_is_written_atomically(tmp_path, monkeypatch) -> None:
+    from rlvr.runs import RunStore
+
+    store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
+    store.write_eval({"pass_at_1": 0.5})
+    before = store.eval_path.read_text(encoding="utf-8")
+
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("rlvr.runs.os.replace", fail)
+    with pytest.raises(OSError, match="disk full"):
+        store.write_eval({"pass_at_1": 0.9})
+
+    assert store.eval_path.read_text(encoding="utf-8") == before
+    assert [path.name for path in store.run_dir.iterdir() if path.name.endswith(".tmp")] == []
+
+
+def test_meta_json_is_written_atomically(tmp_path, monkeypatch) -> None:
+    from rlvr.runs import RunStore
+
+    store = RunStore(tmp_path / "runs", "hybrid", timestamp=TIMESTAMP)
+    store.write_meta({"arm": "hybrid"})
+    before = store.meta_path.read_text(encoding="utf-8")
+    monkeypatch.setattr("rlvr.runs.os.replace", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(OSError):
+        store.write_meta({"arm": "other"})
+    assert store.meta_path.read_text(encoding="utf-8") == before
 
 
 def test_two_fake_runs_produce_the_same_rollouts(run_fake) -> None:

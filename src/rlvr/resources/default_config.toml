@@ -44,8 +44,13 @@ max_completion_tokens = 768
 
 [run]
 checkpoint_every_steps = 50
+# Checkpoint evaluation: every N steps, on a fixed subset of the test pool,
+# greedy decoding. The final evaluation always covers the whole test pool.
 eval_every_steps = 100
 eval_questions = 100
+# Separate seed for the checkpoint subset. It must not be the data split seed,
+# so the evaluated subset is not tied to the train/test cut.
+eval_subset_seed = 2026
 
 # Backends used by `rlvr run --arm <arm> --fake`.
 [fake]
