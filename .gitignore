@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 .venv/
 judge-cache/
+*.egg-info/
+.pytest_cache/
