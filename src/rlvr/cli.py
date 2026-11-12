@@ -1,15 +1,22 @@
 """Command line interface.
 
     rlvr run --arm <code-score|hybrid|gated-judge|gated-process> --fake
+    rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
+    rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
 
 This build implements the fake path only. Real backends arrive in later tasks
 and plug into the same Experiment seam without changing this parser. The judge
 backend is chosen before the run folder is made, so a judge arm with no key
 fails at startup.
 
+`summary` reads run folders that already exist. It prints one table per metric
+with arms side by side and writes a static, self-contained HTML report.
+`publish` force-pushes that report to a Pages branch. It needs a remote the
+caller's git can already write to.
+
 Exit codes: 0 success, 2 for a bad command line, unknown or unimplemented arm,
-bad config, or a missing judge key. Messages for those cases go to stderr
-without a traceback.
+bad config, a missing judge key, a bad run folder, or a failed publish. Messages
+for those cases go to stderr without a traceback.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ from .config import Config, ConfigError, default_config_path, load_config
 from .experiment import Experiment, Judge, JudgeResult, Prompt
 from .fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 from .judge import JudgeClient, MissingAPIKeyError
+from .publish import PublishError, publish_report
 from .reward import (
     ARMS,
     ArmNotImplemented,
@@ -31,6 +39,7 @@ from .reward import (
     uses_process_judge,
 )
 from .runs import RunStore
+from .summary import SummaryError, format_summary, load_reports, write_report
 
 __all__ = ["build_judge", "build_parser", "main"]
 
@@ -89,6 +98,53 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("runs"),
         help="folder that holds run folders (default: ./runs)",
     )
+
+    summary = subparsers.add_parser(
+        "summary", help="print run metrics and write the static HTML report"
+    )
+    summary.add_argument(
+        "paths",
+        nargs="+",
+        type=Path,
+        metavar="RUN",
+        help="run folders, arm folders, or a runs root",
+    )
+    summary.add_argument(
+        "--html",
+        type=Path,
+        default=Path("report.html"),
+        help="where to write the report (default: ./report.html)",
+    )
+    summary.add_argument(
+        "--no-html",
+        action="store_true",
+        help="print the tables and skip the HTML report",
+    )
+
+    publish = subparsers.add_parser(
+        "publish", help="force-push the HTML report to a GitHub Pages branch"
+    )
+    publish.add_argument(
+        "--report",
+        type=Path,
+        default=Path("report.html"),
+        help="report to publish (default: ./report.html)",
+    )
+    publish.add_argument(
+        "--remote",
+        required=True,
+        help="git remote URL or path, for example git@github.com:<user>/<repo>.git",
+    )
+    publish.add_argument(
+        "--branch",
+        default="gh-pages",
+        help="branch to write (default: gh-pages). It is replaced each time.",
+    )
+    publish.add_argument(
+        "--message",
+        default=None,
+        help="commit message for the published report",
+    )
     return parser
 
 
@@ -135,12 +191,52 @@ def run_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def summary_command(args: argparse.Namespace) -> int:
+    """Print the metric tables and write the report."""
+    try:
+        reports = load_reports(args.paths)
+    except SummaryError as error:
+        raise UsageError(str(error)) from error
+
+    print(format_summary(reports), end="")
+
+    if not args.no_html:
+        try:
+            written = write_report(args.html, reports)
+        except OSError as error:
+            raise UsageError(f"cannot write the report: {error}") from error
+        print(f"report: {written}")
+    return 0
+
+
+def publish_command(args: argparse.Namespace) -> int:
+    """Push an existing report to the Pages branch."""
+    try:
+        commit = publish_report(
+            args.report,
+            remote=args.remote,
+            branch=args.branch,
+            message=args.message,
+        )
+    except PublishError as error:
+        raise UsageError(str(error)) from error
+    print(
+        f"published {args.report} to {args.branch} on {args.remote} "
+        f"at {commit[:12]}"
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         if args.command == "run":
             return run_command(args)
+        if args.command == "summary":
+            return summary_command(args)
+        if args.command == "publish":
+            return publish_command(args)
         raise UsageError(f"unknown command {args.command!r}")
     except (UsageError, ConfigError, MissingAPIKeyError) as error:
         print(f"rlvr: {error}", file=sys.stderr)
