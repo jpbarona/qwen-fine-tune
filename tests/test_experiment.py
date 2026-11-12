@@ -289,6 +289,8 @@ def build(
     prompts=None,
     eval_prompts=None,
     config_text: str = CONFIG_TEXT,
+    resume_step: int = 0,
+    prior_evaluations=None,
 ):
     config = load_config(_write_config(tmp_path, config_text))
     training = prompts if prompts is not None else make_prompts()
@@ -304,6 +306,8 @@ def build(
         # Experiment itself has no such fallback, and the CLI passes the real
         # held-out split.
         eval_prompts=training if eval_prompts is None else eval_prompts,
+        resume_step=resume_step,
+        prior_evaluations=prior_evaluations or (),
     )
 
 
@@ -862,3 +866,139 @@ def test_the_experiment_refuses_to_evaluate_without_eval_prompts(tmp_path) -> No
     assert generator.calls == []
     assert store.rollouts == []
     assert store.meta is None
+
+
+BUDGET_STEPS_CONFIG = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "r"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 1
+
+[fake]
+steps = 4
+prompts_per_step = 1
+
+[budget]
+max_steps = 2
+"""
+
+BUDGET_JUDGE_CONFIG = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "r"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 1
+
+[fake]
+steps = 4
+prompts_per_step = 1
+
+[budget]
+max_judge_calls = 5
+"""
+
+
+def test_one_update_call_per_step_with_eight_rewards(tmp_path) -> None:
+    generator = StubGenerator()
+    build("code-score", tmp_path, generator=generator, store=RecordingStore()).run()
+    assert [prompt_id for prompt_id, _ in generator.update_calls] == [
+        "mbpp-0000",
+        "mbpp-0001",
+    ]
+    assert all(len(rewards) == 8 for _, rewards in generator.update_calls)
+
+
+def test_update_receives_the_rewards_of_its_group(tmp_path) -> None:
+    generator = StubGenerator()
+    runner = StubTestRunner(total=4, passes=1)
+    build("code-score", tmp_path, generator=generator, runner=runner, store=RecordingStore()).run()
+    _, rewards = generator.update_calls[0]
+    assert rewards == pytest.approx((0.25,) * 8)
+
+
+def test_max_steps_budget_stops_the_run_early(tmp_path) -> None:
+    store = RecordingStore()
+    result = build(
+        "code-score", tmp_path, store=store, config_text=BUDGET_STEPS_CONFIG
+    ).run()
+    assert result.stop_reason == "max_steps"
+    assert result.steps == 2
+    assert len(store.rollouts) == 16
+    assert store.eval["stop_reason"] == "max_steps"
+
+
+def test_max_judge_calls_budget_stops_the_run_early(tmp_path) -> None:
+    judge = SpyJudge(score=0.5)
+    store = RecordingStore()
+    result = build(
+        "hybrid", tmp_path, judge=judge, store=store, config_text=BUDGET_JUDGE_CONFIG
+    ).run()
+    assert result.stop_reason == "max_judge_calls"
+    assert result.steps == 1
+    # One full-pass group makes 8 judge calls, crossing the cap of 5.
+    assert len(judge.output_calls) == 8
+
+
+def test_resume_starts_after_the_checkpoint_step_and_skips_meta(tmp_path) -> None:
+    store = RecordingStore()
+    prior = [
+        {
+            "step": 1,
+            "kind": "checkpoint",
+            "pass_at_1": 0.5,
+            "count": 2,
+            "prompt_ids": ["mbpp-0000", "mbpp-0001"],
+            "subset": None,
+        }
+    ]
+    result = build("code-score", tmp_path, store=store, resume_step=1, prior_evaluations=prior).run()
+    assert result.steps == 2
+    assert len(store.rollouts) == 8
+    assert {record.step for record in store.rollouts} == {2}
+    # A resume does not rewrite meta.json and carries the prior evaluation over.
+    assert store.meta is None
+    assert [point["kind"] for point in store.eval["evaluations"]] == [
+        "checkpoint",
+        "final",
+    ]
+
+
+def test_a_checkpoint_manifest_is_saved_every_configured_steps(tmp_path) -> None:
+    from rlvr.checkpoint import find_latest_checkpoint
+    from rlvr.fake import FakeGenerator, FakeTestRunner
+    from rlvr.runs import RunStore
+
+    config_text = (
+        "[model]\nname = \"Qwen/Qwen3-0.6B\"\nrevision = \"r\"\n"
+        "[judge]\nmodel = \"fake-judge-model\"\n"
+        "[data]\nsplit_seed = 1\n"
+        "[fake]\nsteps = 3\nprompts_per_step = 1\n"
+        "[run]\ncheckpoint_every_steps = 2\n"
+    )
+    config = load_config(_write_config(tmp_path, config_text))
+    generator = FakeGenerator()
+    store = RunStore(tmp_path / "runs", "code-score", timestamp="20261112T000000Z")
+    Experiment(
+        arm="code-score",
+        config=config,
+        generator=generator,
+        judge=ExplodingJudge(),
+        test_runner=FakeTestRunner(),
+        store=store,
+        prompts=make_prompts(1),
+        eval_prompts=make_prompts(1),
+    ).run()
+
+    latest = find_latest_checkpoint(store.checkpoints_dir)
+    assert latest is not None and latest.step == 2
+    assert len(generator.save_calls) == 1
+    assert generator.save_calls[0].endswith("step-00000002")
