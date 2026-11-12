@@ -86,6 +86,9 @@ class Generation:
 class TestResult:
     """One task test, run on its own. `error_class` is `"pass"` when it passed."""
 
+    # The name starts with "Test", so tell pytest this is not a test class.
+    __test__ = False
+
     index: int
     passed: bool
     error_class: str = "pass"
