@@ -178,7 +178,12 @@ class RunSummary:
 
 @dataclass
 class Experiment:
-    """Runs one arm end to end using the injected backends."""
+    """Runs one arm end to end using the injected backends.
+
+    `prompts` holds the training questions. `eval_prompts` holds the held-out
+    test questions and must be non-empty. The two lists must not overlap. The
+    CLI builds both from the fixed MBPP split.
+    """
 
     arm: str
     config: Config
@@ -203,10 +208,15 @@ class Experiment:
         self._check_arm()
         if not self.prompts:
             raise ValueError("experiment needs at least one prompt")
+        if not self.eval_prompts:
+            raise ValueError(
+                "experiment needs at least one evaluation prompt. "
+                "Pass the held-out test questions as eval_prompts."
+            )
 
         self.store.write_meta(self.build_meta())
 
-        eval_pool = self._eval_pool()
+        eval_pool = tuple(self.eval_prompts)
         checkpoint_prompts = select_eval_subset(
             eval_pool, count=self.config.eval_questions, seed=self.config.eval_subset_seed
         )
@@ -274,19 +284,6 @@ class Experiment:
         folder and touches no backend.
         """
         check_arm_implemented(self.arm)
-
-    def _eval_pool(self) -> tuple[Prompt, ...]:
-        """The questions the final eval covers.
-
-        The real path passes the 250 held-out test questions. When a caller
-        does not separate them, evaluation falls back to the training prompts.
-        That keeps the fake path and the unit tests honest without pretending
-        a small pool is the 250-question test set.
-        """
-        pool = tuple(self.eval_prompts) if self.eval_prompts else tuple(self.prompts)
-        if not pool:
-            raise ValueError("experiment needs at least one evaluation prompt")
-        return pool
 
     def _training_step(self, step: int) -> list[RolloutRecord]:
         """Generate, run, judge, and record one rollout per training prompt."""

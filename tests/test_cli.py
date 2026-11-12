@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.cli import build_judge, main
+from rlvr.cli import build_judge, build_prompts, main
 from rlvr.config import load_config
+from rlvr.data import load_split, prompt_id_for
 from rlvr.fake import FakeJudge
 
 CONFIG = """\
@@ -358,3 +359,118 @@ def test_publish_reports_a_missing_report(tmp_path, capsys) -> None:
     captured = capsys.readouterr()
     assert code != 0
     assert "report not found" in captured.err
+
+
+SPLIT_CONFIG = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "r"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 7
+
+[fake]
+steps = 1
+prompts_per_step = 1
+
+[run]
+eval_every_steps = 1
+eval_questions = 100
+eval_subset_seed = 2026
+"""
+
+
+def write_split_config(tmp_path) -> Path:
+    path = tmp_path / "split.toml"
+    path.write_text(SPLIT_CONFIG, encoding="utf-8")
+    return path
+
+
+def test_build_prompts_separates_the_train_and_test_questions(tmp_path) -> None:
+    config = load_config(write_split_config(tmp_path))
+    train, evaluation = build_prompts(config)
+
+    assert len(train) == 714
+    assert len(evaluation) == 250
+    assert {prompt.prompt_id for prompt in train}.isdisjoint(
+        {prompt.prompt_id for prompt in evaluation}
+    )
+    split = load_split(seed=7)
+    assert {prompt.prompt_id for prompt in train} == {
+        prompt_id_for(question) for question in split.train
+    }
+    assert {prompt.prompt_id for prompt in evaluation} == {
+        prompt_id_for(question) for question in split.test
+    }
+    assert train[0].problem.startswith("Write a Python function")
+
+
+def test_a_fake_run_evaluates_the_held_out_test_split(tmp_path, capsys) -> None:
+    runs_root = tmp_path / "runs"
+    assert (
+        main(
+            [
+                "run",
+                "--arm",
+                "code-score",
+                "--fake",
+                "--config",
+                str(write_split_config(tmp_path)),
+                "--runs-root",
+                str(runs_root),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    run_dir = next((runs_root / "code-score").iterdir())
+    payload = json.loads((run_dir / "eval.json").read_text(encoding="utf-8"))
+    split = load_split(seed=7)
+    train_ids = {prompt_id_for(question) for question in split.train}
+    test_ids = {prompt_id_for(question) for question in split.test}
+
+    final = payload["evaluations"][-1]
+    assert payload["step"] == 1
+    assert payload["count"] == 250
+    assert final["kind"] == "final"
+    assert final["count"] == 250
+    assert set(final["prompt_ids"]) == test_ids
+
+    checkpoints = [
+        point for point in payload["evaluations"] if point["kind"] == "checkpoint"
+    ]
+    assert len(checkpoints) == 1
+    assert checkpoints[0]["count"] == 100
+    assert len(set(checkpoints[0]["prompt_ids"])) == 100
+    assert set(checkpoints[0]["prompt_ids"]) <= test_ids
+
+    records = [
+        json.loads(line)
+        for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert {record["prompt_id"] for record in records} == train_ids
+    assert {record["prompt_id"] for record in records}.isdisjoint(test_ids)
+
+
+def test_a_bad_split_stops_before_the_run_folder(
+    config_path, tmp_path, monkeypatch, capsys
+) -> None:
+    from rlvr import cli
+    from rlvr.data import DatasetError
+
+    def fail(*args, **kwargs):
+        raise DatasetError("dataset file not found")
+
+    monkeypatch.setattr(cli, "load_split", fail)
+    runs_root = tmp_path / "runs"
+    code = main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    )
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "MBPP split" in captured.err
+    assert not (runs_root / "code-score").exists()

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from rlvr.config import load_config
-from rlvr.experiment import Experiment
+from rlvr.experiment import Experiment, Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 from rlvr.runs import RunStore
 
@@ -30,6 +30,14 @@ prompts_per_step = 2
 """
 
 FIXED_TIMESTAMP = "20261112T000000Z"
+
+
+def fake_eval_prompts(count: int) -> list[Prompt]:
+    """Held-out prompts for the run-folder fixture, kept apart from training."""
+    return [
+        Prompt(prompt_id=f"eval-{index:04d}", problem=f"eval problem {index}")
+        for index in range(count)
+    ]
 
 
 @pytest.fixture
@@ -68,6 +76,7 @@ def run_fake(tmp_path: Path):
             test_runner=FakeTestRunner(),
             store=store,
             prompts=fake_prompts(config.prompts_per_step),
+            eval_prompts=fake_eval_prompts(config.prompts_per_step),
         )
         return store.run_dir, experiment.run()
 

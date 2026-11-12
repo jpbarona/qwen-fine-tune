@@ -117,7 +117,7 @@ def test_eval_json_reports_pass_at_1_for_the_final_eval(run_fake) -> None:
     assert eval_payload["count"] == 2
     assert [row["step"] for row in eval_payload["evaluations"]] == [3]
     assert eval_payload["evaluations"][0]["kind"] == "final"
-    assert eval_payload["evaluations"][0]["prompt_ids"] == ["mbpp-0000", "mbpp-0001"]
+    assert eval_payload["evaluations"][0]["prompt_ids"] == ["eval-0000", "eval-0001"]
     assert isinstance(eval_payload["evaluations"][0]["pass_at_1"], float)
 
 
