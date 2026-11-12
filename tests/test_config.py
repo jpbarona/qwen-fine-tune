@@ -138,3 +138,48 @@ def test_config_path_accepts_str_and_path(tmp_path) -> None:
     path.write_text(GOOD, encoding="utf-8")
     assert load_config(str(path)).steps == 3
     assert load_config(path).steps == 3
+
+
+def test_eval_settings_default_when_the_run_table_is_absent(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(GOOD, encoding="utf-8")
+    config = load_config(path)
+    assert config.eval_every_steps == 100
+    assert config.eval_questions == 100
+    assert config.eval_subset_seed == 2026
+
+
+def test_eval_settings_are_read_from_the_run_table(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        GOOD + "\n[run]\neval_every_steps = 50\neval_questions = 25\neval_subset_seed = 7\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    assert config.eval_every_steps == 50
+    assert config.eval_questions == 25
+    assert config.eval_subset_seed == 7
+
+
+@pytest.mark.parametrize(
+    "line, key",
+    [
+        ("eval_every_steps = 0", "run.eval_every_steps"),
+        ("eval_every_steps = 2.5", "run.eval_every_steps"),
+        ("eval_questions = -1", "run.eval_questions"),
+        ("eval_subset_seed = -2", "run.eval_subset_seed"),
+        ("eval_subset_seed = true", "run.eval_subset_seed"),
+    ],
+)
+def test_a_bad_eval_setting_is_named(tmp_path, line: str, key: str) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(GOOD + f"\n[run]\n{line}\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match=key):
+        load_config(path)
+
+
+def test_the_default_config_sets_the_eval_schedule() -> None:
+    config = load_config(default_config_path())
+    assert config.eval_every_steps == 100
+    assert config.eval_questions == 100
+    assert isinstance(config.eval_subset_seed, int)

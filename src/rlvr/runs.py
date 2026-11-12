@@ -18,6 +18,8 @@ visible.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -79,7 +81,7 @@ class RunStore:
 
     def write_meta(self, meta: Mapping[str, Any]) -> None:
         """Write meta.json. Called once, before the first rollout."""
-        self.meta_path.write_text(_dumps(dict(meta)) + "\n", encoding="utf-8")
+        self._write_atomic(self.meta_path, _dumps(dict(meta)) + "\n")
 
     def append_rollout(self, record: RolloutRecord) -> None:
         """Append one rollout record."""
@@ -93,8 +95,32 @@ class RunStore:
         )
 
     def write_eval(self, payload: Mapping[str, Any]) -> None:
-        """Write eval.json."""
-        self.eval_path.write_text(_dumps(dict(payload)) + "\n", encoding="utf-8")
+        """Replace eval.json atomically.
+
+        The file is rewritten after every evaluation, checkpoint and final. A
+        reader sees the previous complete file or the new complete file, never
+        a half-written one.
+        """
+        self._write_atomic(self.eval_path, _dumps(dict(payload)) + "\n")
+
+    @staticmethod
+    def _write_atomic(path: Path, text: str) -> None:
+        """Write `text` to `path` through a temporary file in the same folder."""
+        descriptor, temporary = tempfile.mkstemp(
+            dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        except BaseException:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+            raise
 
     @staticmethod
     def _append_line(path: Path, line: str) -> None:
