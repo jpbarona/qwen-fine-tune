@@ -10,9 +10,15 @@ from rlvr.qwen import (
     ATTENTION_TARGET_MODULES,
     categorical_entropy,
     clipped_surrogate,
+    completion_logprobs,
+    completion_truncated,
     extract_code_from_answer,
     group_advantages,
+    k3_divergence,
+    log_softmax,
+    seed_rngs,
     split_thinking_and_code,
+    truncate_prompt,
 )
 
 
@@ -109,3 +115,85 @@ def test_qwen_module_imports_without_importing_torch() -> None:
     module = importlib.import_module("rlvr.qwen")
     assert "torch" not in sys.modules
     assert module.extract_code_from_answer("```python\nx = 1\n```") == "x = 1"
+
+
+def test_completion_logprobs_skips_the_prompt_positions() -> None:
+    # Vocab 3, prompt length 2, completion [2, 0]. The first completion token is
+    # predicted by logits[1], the second by logits[2], never by logits[0].
+    logits = [
+        [0.0, 0.0, 0.0],  # position 0, a prompt token
+        [1.0, 0.0, 0.0],  # predicts the first completion token
+        [0.0, 0.0, 2.0],  # predicts the second completion token
+        [9.0, 9.0, 9.0],  # unused
+    ]
+    token_ids = [2, 0]
+    result = completion_logprobs(logits, token_ids, prompt_length=2)
+    expected = [log_softmax([1.0, 0.0, 0.0])[2], log_softmax([0.0, 0.0, 2.0])[0]]
+    assert result == pytest.approx(expected)
+
+
+def test_ratio_is_one_when_the_policy_has_not_changed() -> None:
+    # The property that guards the temperature-mix bug: old and new logprobs are
+    # computed by the same function from the same forward logits, so the per-token
+    # ratio is exactly 1.0 before any update.
+    logits = [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]
+    token_ids = [1, 2]
+    prompt_length = 1
+    old = completion_logprobs(logits, token_ids, prompt_length)
+    new = completion_logprobs(logits, token_ids, prompt_length)
+    assert old == new
+    for old_lp, new_lp in zip(old, new):
+        assert math.exp(new_lp - old_lp) == pytest.approx(1.0)
+
+
+def test_k3_divergence_is_zero_when_distributions_match() -> None:
+    assert k3_divergence([0.0, -1.0], [0.0, -1.0]) == pytest.approx(0.0)
+
+
+def test_k3_divergence_matches_a_known_value() -> None:
+    # One token with d = ln(2): exp(d) - d - 1 = 2 - ln(2) - 1.
+    expected = 2 - math.log(2) - 1
+    assert k3_divergence([math.log(2)], [0.0]) == pytest.approx(expected)
+
+
+def test_k3_divergence_is_per_token_not_the_summed_ratio() -> None:
+    # Two tokens each with d = 1. The per-token estimator is 2*(e - 2), which is
+    # not the k3 of the summed log-ratio exp(2) - 2 - 1.
+    per_token = k3_divergence([1.0, 1.0], [0.0, 0.0])
+    assert per_token == pytest.approx(2 * (math.e - 2))
+    summed = math.exp(2.0) - 2.0 - 1.0
+    assert per_token != pytest.approx(summed)
+
+
+def test_truncate_prompt_caps_a_long_prompt() -> None:
+    ids = list(range(600))
+    kept, truncated = truncate_prompt(ids, 512)
+    assert len(kept) == 512
+    assert kept == ids[:512]
+    assert truncated is True
+
+
+def test_truncate_prompt_leaves_a_short_prompt() -> None:
+    ids = list(range(100))
+    kept, truncated = truncate_prompt(ids, 512)
+    assert kept == ids
+    assert truncated is False
+
+
+def test_completion_truncated_flags_a_missing_end_token() -> None:
+    assert completion_truncated([1, 2, 3], eos_token_id=99) is True
+    assert completion_truncated([1, 2, 99], eos_token_id=99) is False
+
+
+def test_seed_rngs_seeds_the_python_rng() -> None:
+    import random
+
+    seed_rngs(1234)
+    first = random.random()
+    seed_rngs(1234)
+    second = random.random()
+    assert first == second

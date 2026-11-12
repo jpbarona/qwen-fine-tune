@@ -34,6 +34,7 @@ max_prompt_tokens = 512
 max_completion_tokens = 768
 clip_epsilon = 0.2
 kl_beta = 0.0
+seed = 0
 
 [run]
 checkpoint_every_steps = 50

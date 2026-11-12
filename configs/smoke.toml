@@ -33,6 +33,7 @@ max_prompt_tokens = 512
 max_completion_tokens = 768
 clip_epsilon = 0.2
 kl_beta = 0.0
+seed = 0
 
 # The step budget caps the run at 8 steps (8 prompt groups, 64 rollouts).
 [budget]

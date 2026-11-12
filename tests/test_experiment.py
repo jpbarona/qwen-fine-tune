@@ -1002,3 +1002,39 @@ def test_a_checkpoint_manifest_is_saved_every_configured_steps(tmp_path) -> None
     assert latest is not None and latest.step == 2
     assert len(generator.save_calls) == 1
     assert generator.save_calls[0].endswith("step-00000002")
+
+
+def test_generation_defaults_truncation_flags_to_false() -> None:
+    generation = Generation(
+        reasoning="r", code="c", prompt_tokens=1, completion_tokens=1, mean_entropy=0.0
+    )
+    assert generation.truncated is False
+    assert generation.prompt_truncated is False
+
+
+class TruncatingGenerator(StubGenerator):
+    """Returns half truncated completions and all prompt-truncated generations."""
+
+    def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
+        base = super().generate(prompt, n=n, temperature=temperature)
+        return [
+            Generation(
+                reasoning=generation.reasoning,
+                code=generation.code,
+                prompt_tokens=generation.prompt_tokens,
+                completion_tokens=generation.completion_tokens,
+                mean_entropy=generation.mean_entropy,
+                truncated=(index % 2 == 0),
+                prompt_truncated=True,
+            )
+            for index, generation in enumerate(base)
+        ]
+
+
+def test_metric_row_carries_the_truncation_rates(tmp_path) -> None:
+    store = RecordingStore()
+    build("code-score", tmp_path, generator=TruncatingGenerator(), store=store).run()
+    row = store.metrics[0]
+    assert row["rollouts"] == 8
+    assert row["truncation_rate"] == pytest.approx(0.5)
+    assert row["prompt_truncation_rate"] == pytest.approx(1.0)

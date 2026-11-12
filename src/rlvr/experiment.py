@@ -93,6 +93,10 @@ class Generation:
     logprobs the generator already receives, so the generator computes it and
     the Experiment only records it. It is logged, not rewarded, and it is not
     bounded by 1. The fake generator returns a deterministic synthetic value.
+
+    `truncated` is true when the completion hit the max length without an end
+    token. `prompt_truncated` is true when the prompt was cut at max prompt
+    tokens. Neither is part of the rollout record; they feed the step metric.
     """
 
     reasoning: str
@@ -100,6 +104,8 @@ class Generation:
     prompt_tokens: int
     completion_tokens: int
     mean_entropy: float
+    truncated: bool = False
+    prompt_truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -269,14 +275,16 @@ class Experiment:
         evaluations: list[dict[str, Any]] = [dict(e) for e in self.prior_evaluations]
 
         for step in range(self.resume_step + 1, effective_steps + 1):
-            step_records = self._training_step(step)
+            step_records, truncated, prompt_truncated = self._training_step(step)
             last_step = step
             for record in step_records:
                 self.store.append_rollout(record)
                 rollouts += 1
                 reward_sum += record.reward
                 judge_calls += self._judge_calls_for(record)
-            self.store.append_metric(self._metric_row(step, step_records))
+            self.store.append_metric(
+                self._metric_row(step, step_records, truncated, prompt_truncated)
+            )
 
             if step % self.config.eval_every_steps == 0:
                 evaluations.append(
@@ -365,12 +373,13 @@ class Experiment:
         group per step, cycling through the training prompts."""
         return self.prompts[(step - 1) % len(self.prompts)]
 
-    def _training_step(self, step: int) -> list[RolloutRecord]:
+    def _training_step(self, step: int) -> tuple[list[RolloutRecord], int, int]:
         """Sample one prompt group, run and judge all of it, update once.
 
         All 8 generations are tested. Each is judged only on a full test pass
         for its arm, so a failed rollout still costs no judge call. The group's
-        rewards are passed to `update` once, then the 8 records are returned.
+        rewards are passed to `update` once. Returns the 8 records plus the
+        counts of truncated and prompt-truncated generations for the step metric.
         """
         prompt = self._prompt_for_step(step)
         generations = self.generator.generate(
@@ -383,7 +392,11 @@ class Experiment:
         ]
         rewards = [record.reward for record in records]
         self.generator.update(prompt, generations, rewards)
-        return records
+        truncated = sum(1 for generation in generations if generation.truncated)
+        prompt_truncated = sum(
+            1 for generation in generations if generation.prompt_truncated
+        )
+        return records, truncated, prompt_truncated
 
     def _one_rollout(
         self, prompt: Prompt, generation: Generation, step: int
@@ -465,7 +478,12 @@ class Experiment:
         )
 
     @staticmethod
-    def _metric_row(step: int, records: Sequence[RolloutRecord]) -> dict[str, Any]:
+    def _metric_row(
+        step: int,
+        records: Sequence[RolloutRecord],
+        truncated: int = 0,
+        prompt_truncated: int = 0,
+    ) -> dict[str, Any]:
         count = len(records)
         passed = sum(
             1
@@ -481,6 +499,8 @@ class Experiment:
             "mean_entropy": sum(record.mean_entropy for record in records) / count,
             "mean_completion_tokens": sum(record.completion_tokens for record in records) / count,
             "cache_hits": sum(1 for record in records if record.cache_hit),
+            "truncation_rate": truncated / count,
+            "prompt_truncation_rate": prompt_truncated / count,
         }
 
     def _evaluate(

@@ -230,6 +230,7 @@ def build_generator(config: Config, *, fake: bool):
             max_completion_tokens=config.max_completion_tokens,
             clip_epsilon=config.clip_epsilon,
             kl_beta=config.kl_beta,
+            seed=config.seed,
         )
     except ImportError as error:
         raise UsageError(
