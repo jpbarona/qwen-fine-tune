@@ -32,4 +32,15 @@ case "$arm" in
     ;;
 esac
 
-exec .venv/bin/rlvr run --arm "$arm" --config configs/real.toml "$@"
+# Only add the default config when the caller did not supply one.
+has_config=false
+for arg in "$@"; do
+  case "$arg" in
+    --config|--config=*) has_config=true ;;
+  esac
+done
+if [ "$has_config" = false ]; then
+  set -- --config configs/real.toml "$@"
+fi
+
+exec .venv/bin/rlvr run --arm "$arm" "$@"

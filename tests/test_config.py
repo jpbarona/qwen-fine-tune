@@ -288,3 +288,9 @@ def test_the_shipped_smoke_config_loads() -> None:
     assert config.max_judge_calls == 64
     assert config.eval_questions == 4
     assert config.eval_final_questions == 8
+
+
+def test_seed_defaults_to_zero_and_is_read(write_config) -> None:
+    assert load_config(write_config(GOOD)).seed == 0
+    path = write_config(GOOD + "\n[training]\nseed = 7\n", name="seed.toml")
+    assert load_config(path).seed == 7

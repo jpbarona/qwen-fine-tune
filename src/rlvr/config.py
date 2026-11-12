@@ -31,6 +31,7 @@ Optional keys, with the defaults shown:
     [training] max_completion_tokens = 768
     [training] clip_epsilon = 0.2
     [training] kl_beta = 0.0
+    [training] seed = 0
 
     [budget] max_steps = (unset: run all of fake.steps)
     [budget] max_judge_calls = (unset: no judge call cap)
@@ -82,6 +83,7 @@ DEFAULT_MAX_PROMPT_TOKENS = 512
 DEFAULT_MAX_COMPLETION_TOKENS = 768
 DEFAULT_CLIP_EPSILON = 0.2
 DEFAULT_KL_BETA = 0.0
+DEFAULT_SEED = 0
 
 
 class ConfigError(ValueError):
@@ -113,6 +115,7 @@ class Config:
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
     clip_epsilon: float = DEFAULT_CLIP_EPSILON
     kl_beta: float = DEFAULT_KL_BETA
+    seed: int = DEFAULT_SEED
     max_steps: int | None = None
     max_judge_calls: int | None = None
 
@@ -289,6 +292,7 @@ def load_config(path: str | Path) -> Config:
         kl_beta=_optional_float(
             raw, "training.kl_beta", DEFAULT_KL_BETA, positive=False
         ),
+        seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
         max_steps=_optional_int_none(raw, "budget.max_steps"),
         max_judge_calls=_optional_int_none(raw, "budget.max_judge_calls"),
     )

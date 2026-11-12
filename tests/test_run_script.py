@@ -46,3 +46,30 @@ def test_run_sh_accepts_all_four_arms() -> None:
     # code-score arm needs no key, so it is the one that reaches the run.
     for arm in ("code-score", "hybrid", "gated-judge", "gated-process"):
         assert "unknown arm" not in _run(arm).stderr
+
+
+def test_run_sh_honors_a_caller_supplied_config(tmp_path) -> None:
+    import json
+
+    config = tmp_path / "custom.toml"
+    config.write_text(
+        '[model]\nname = "Qwen/Qwen3-0.6B"\nrevision = "r"\n'
+        '[judge]\nmodel = "fake-judge-model"\n'
+        "[data]\nsplit_seed = 7\n"
+        "[fake]\nsteps = 2\nprompts_per_step = 1\n",
+        encoding="utf-8",
+    )
+    runs_root = tmp_path / "runs"
+    result = _run(
+        "code-score", "--config", str(config), "--fake", "--runs-root", str(runs_root)
+    )
+    assert result.returncode == 0, result.stderr
+    run_dir = next((runs_root / "code-score").iterdir())
+    metric_steps = [
+        json.loads(line)["step"]
+        for line in (run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    # Two steps proves the caller config (steps = 2) was used, not the default
+    # real.toml (no [fake] table, so one step).
+    assert metric_steps == [1, 2]
