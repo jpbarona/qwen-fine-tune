@@ -27,8 +27,15 @@ from pathlib import Path
 from typing import Sequence
 
 from .config import Config, ConfigError, default_config_path, load_config
+from .data import (
+    TEST_SIZE,
+    TRAIN_SIZE,
+    DatasetError,
+    load_split,
+    prompts_for_questions,
+)
 from .experiment import Experiment, Judge, JudgeResult, Prompt
-from .fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
+from .fake import FakeGenerator, FakeJudge, FakeTestRunner
 from .judge import JudgeClient, MissingAPIKeyError
 from .publish import PublishError, publish_report
 from .reward import (
@@ -41,7 +48,7 @@ from .reward import (
 from .runs import RunStore
 from .summary import SummaryError, format_summary, load_reports, write_report
 
-__all__ = ["build_judge", "build_parser", "main"]
+__all__ = ["build_judge", "build_parser", "build_prompts", "main"]
 
 USAGE_ERROR = 2
 
@@ -148,6 +155,38 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
+    """Load the fixed split and return the train and test prompts.
+
+    Training uses the 714 train questions and evaluation uses the 250 test
+    questions. The split and the prompt format come from `data.py`, so every
+    arm and the fake path see the same questions. The two lists never share a
+    question. A wrong or empty split stops the run before a folder is made.
+    """
+    try:
+        split = load_split(seed=config.split_seed)
+    except DatasetError as error:
+        raise UsageError(f"cannot load the MBPP split: {error}") from error
+
+    if len(split.train) != TRAIN_SIZE or len(split.test) != TEST_SIZE:
+        raise UsageError(
+            f"the split must be {TRAIN_SIZE} train and {TEST_SIZE} test questions, "
+            f"got {len(split.train)} and {len(split.test)}"
+        )
+    train_ids = {question.task_id for question in split.train}
+    test_ids = {question.task_id for question in split.test}
+    if train_ids & test_ids:
+        raise UsageError(
+            f"the train and test split overlap on {len(train_ids & test_ids)} task ids"
+        )
+
+    train_prompts = prompts_for_questions(split.train)
+    eval_prompts = prompts_for_questions(split.test)
+    if not train_prompts or not eval_prompts:
+        raise UsageError("the split produced an empty train or test prompt list")
+    return train_prompts, eval_prompts
+
+
 def run_command(args: argparse.Namespace) -> int:
     if args.arm not in ARMS:
         raise UsageError(f"unknown arm {args.arm!r}. valid arms: {', '.join(ARMS)}")
@@ -167,6 +206,8 @@ def run_command(args: argparse.Namespace) -> int:
             f"real backends for arm {args.arm!r} are not implemented yet, add --fake"
         )
 
+    train_prompts, eval_prompts = build_prompts(config)
+
     try:
         store = RunStore(args.runs_root, args.arm)
     except OSError as error:
@@ -179,7 +220,8 @@ def run_command(args: argparse.Namespace) -> int:
         judge=judge,
         test_runner=FakeTestRunner(),
         store=store,
-        prompts=fake_prompts(config.prompts_per_step),
+        prompts=train_prompts,
+        eval_prompts=eval_prompts,
     )
     summary = experiment.run()
 

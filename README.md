@@ -13,7 +13,10 @@ python3 -m venv .venv
 ## Run the fake pipeline
 
 The fake path needs no GPU, no network, no Docker, and no model download. It is
-deterministic: the same command produces the same rollout records.
+deterministic: the same command produces the same rollout records. The CLI
+still reads the committed MBPP split, so the run trains on the 714 train
+questions and evaluates the 250 held-out test questions. Only the model, judge,
+and Docker runner are replaced by fakes.
 
 ```bash
 .venv/bin/rlvr run --arm code-score --fake
@@ -86,9 +89,12 @@ last checkpoint result.
 }
 ```
 
-The fake CLI path has no dataset prompts, so its evaluation falls back to the
-training prompts. The 100/250 schedule is exercised through `Experiment` with
-injected eval prompts.
+The CLI loads the fixed MBPP split with `data.load_split`, uses the 714 train
+questions as training prompts, and the 250 test questions as eval prompts. Fake
+mode uses the same split, so a fake run also evaluates held-out questions and
+never evaluates a training question. The `Experiment` itself has no fallback.
+It refuses to run when `eval_prompts` is empty. A wrong or empty split stops the
+command before a run folder is made.
 
 ## The rollouts record: entropy and length
 

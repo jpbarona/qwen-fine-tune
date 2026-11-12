@@ -255,10 +255,11 @@ def build(
     runner=None,
     store=None,
     prompts=None,
-    eval_prompts=(),
+    eval_prompts=None,
     config_text: str = CONFIG_TEXT,
 ):
     config = load_config(_write_config(tmp_path, config_text))
+    training = prompts if prompts is not None else make_prompts()
     return Experiment(
         arm=arm,
         config=config,
@@ -266,8 +267,11 @@ def build(
         judge=judge or ExplodingJudge(),
         test_runner=runner or StubTestRunner(),
         store=store or RecordingStore(),
-        prompts=prompts if prompts is not None else make_prompts(),
-        eval_prompts=eval_prompts,
+        prompts=training,
+        # Unit tests default the eval pool to the training prompts. The
+        # Experiment itself has no such fallback, and the CLI passes the real
+        # held-out split.
+        eval_prompts=training if eval_prompts is None else eval_prompts,
     )
 
 
@@ -796,10 +800,17 @@ def test_the_final_eval_covers_all_250_test_questions(tmp_path) -> None:
     assert {call[0] for call in greedy} == {prompt.prompt_id for prompt in eval_prompts}
 
 
-def test_without_eval_prompts_the_training_prompts_are_evaluated(tmp_path) -> None:
+def test_the_experiment_refuses_to_evaluate_without_eval_prompts(tmp_path) -> None:
     generator = StubGenerator()
     store = MultiEvalStore()
-    build("code-score", tmp_path, generator=generator, store=store).run()
-    greedy = [call for call in generator.calls if call[1] == 0.0]
-    assert greedy == [("mbpp-0000", 0.0), ("mbpp-0001", 0.0)]
-    assert store.eval["count"] == 2
+    with pytest.raises(ValueError, match="evaluation prompt"):
+        build(
+            "code-score",
+            tmp_path,
+            generator=generator,
+            store=store,
+            eval_prompts=(),
+        ).run()
+    assert generator.calls == []
+    assert store.rollouts == []
+    assert store.meta is None
