@@ -16,6 +16,22 @@ Optional keys, with the defaults shown:
     [run] eval_every_steps = 100
     [run] eval_questions   = 100
     [run] eval_subset_seed = 2026
+    [run] checkpoint_every_steps = 50
+    [run] eval_final_questions   = (unset: the whole pool)
+
+    [training] generations_per_prompt = 8
+    [training] epochs = 5
+    [training] temperature = 0.9
+    [training] learning_rate = 1e-5
+    [training] lora_rank = 32
+    [training] lora_alpha = 64
+    [training] max_prompt_tokens = 512
+    [training] max_completion_tokens = 768
+    [training] clip_epsilon = 0.2
+    [training] kl_beta = 0.0
+
+    [budget] max_steps = (unset: run all of fake.steps)
+    [budget] max_judge_calls = (unset: no judge call cap)
 
 `eval_subset_seed` chooses the fixed checkpoint subset from the test pool. It is
 deliberately separate from `data.split_seed`, so the eval subset is not tied to
@@ -30,6 +46,7 @@ the task that calls the judge.
 
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +62,20 @@ DEFAULT_CONFIG_RESOURCE = "resources/default_config.toml"
 DEFAULT_EVAL_EVERY_STEPS = 100
 DEFAULT_EVAL_QUESTIONS = 100
 DEFAULT_EVAL_SUBSET_SEED = 2026
+DEFAULT_CHECKPOINT_EVERY_STEPS = 50
+
+#: Defaults for the optional [training] table. These match SPEC.md and are only
+#: read by the real Qwen trainer. The fake path ignores them.
+DEFAULT_GENERATIONS_PER_PROMPT = 8
+DEFAULT_EPOCHS = 5
+DEFAULT_TEMPERATURE = 0.9
+DEFAULT_LEARNING_RATE = 1e-5
+DEFAULT_LORA_RANK = 32
+DEFAULT_LORA_ALPHA = 64
+DEFAULT_MAX_PROMPT_TOKENS = 512
+DEFAULT_MAX_COMPLETION_TOKENS = 768
+DEFAULT_CLIP_EPSILON = 0.2
+DEFAULT_KL_BETA = 0.0
 
 
 class ConfigError(ValueError):
@@ -64,6 +95,20 @@ class Config:
     eval_every_steps: int = DEFAULT_EVAL_EVERY_STEPS
     eval_questions: int = DEFAULT_EVAL_QUESTIONS
     eval_subset_seed: int = DEFAULT_EVAL_SUBSET_SEED
+    checkpoint_every_steps: int = DEFAULT_CHECKPOINT_EVERY_STEPS
+    eval_final_questions: int | None = None
+    generations_per_prompt: int = DEFAULT_GENERATIONS_PER_PROMPT
+    epochs: int = DEFAULT_EPOCHS
+    temperature: float = DEFAULT_TEMPERATURE
+    learning_rate: float = DEFAULT_LEARNING_RATE
+    lora_rank: int = DEFAULT_LORA_RANK
+    lora_alpha: int = DEFAULT_LORA_ALPHA
+    max_prompt_tokens: int = DEFAULT_MAX_PROMPT_TOKENS
+    max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
+    clip_epsilon: float = DEFAULT_CLIP_EPSILON
+    kl_beta: float = DEFAULT_KL_BETA
+    max_steps: int | None = None
+    max_judge_calls: int | None = None
 
 
 def default_config_path() -> Path:
@@ -141,6 +186,31 @@ def _optional_non_negative_int(raw: dict[str, Any], dotted: str, default: int) -
     return _non_negative_int(raw, dotted)
 
 
+def _optional_float(raw: dict[str, Any], dotted: str, default: float, *, positive: bool) -> float:
+    """A finite float from `dotted`, or `default`. `positive` rejects 0 and negatives."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"config: '{dotted}' must be a number, got {_shown(value)}")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ConfigError(f"config: '{dotted}' must be finite, got {value!r}")
+    if positive and number <= 0.0:
+        raise ConfigError(f"config: '{dotted}' must be positive, got {value!r}")
+    if not positive and number < 0.0:
+        raise ConfigError(f"config: '{dotted}' must not be negative, got {value!r}")
+    return number
+
+
+def _optional_int_none(raw: dict[str, Any], dotted: str) -> int | None:
+    """An optional positive integer that may be absent (None), never zero."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return None
+    return _positive_int(raw, dotted)
+
+
 def load_config(path: str | Path) -> Config:
     """Read and validate a config file. Raises ConfigError with a clear message."""
     file_path = Path(path)
@@ -179,4 +249,38 @@ def load_config(path: str | Path) -> Config:
         eval_subset_seed=_optional_non_negative_int(
             raw, "run.eval_subset_seed", DEFAULT_EVAL_SUBSET_SEED
         ),
+        checkpoint_every_steps=_optional_positive_int(
+            raw, "run.checkpoint_every_steps", DEFAULT_CHECKPOINT_EVERY_STEPS
+        ),
+        eval_final_questions=_optional_int_none(raw, "run.eval_final_questions"),
+        generations_per_prompt=_optional_positive_int(
+            raw, "training.generations_per_prompt", DEFAULT_GENERATIONS_PER_PROMPT
+        ),
+        epochs=_optional_positive_int(raw, "training.epochs", DEFAULT_EPOCHS),
+        temperature=_optional_float(
+            raw, "training.temperature", DEFAULT_TEMPERATURE, positive=True
+        ),
+        learning_rate=_optional_float(
+            raw, "training.learning_rate", DEFAULT_LEARNING_RATE, positive=True
+        ),
+        lora_rank=_optional_positive_int(
+            raw, "training.lora_rank", DEFAULT_LORA_RANK
+        ),
+        lora_alpha=_optional_positive_int(
+            raw, "training.lora_alpha", DEFAULT_LORA_ALPHA
+        ),
+        max_prompt_tokens=_optional_positive_int(
+            raw, "training.max_prompt_tokens", DEFAULT_MAX_PROMPT_TOKENS
+        ),
+        max_completion_tokens=_optional_positive_int(
+            raw, "training.max_completion_tokens", DEFAULT_MAX_COMPLETION_TOKENS
+        ),
+        clip_epsilon=_optional_float(
+            raw, "training.clip_epsilon", DEFAULT_CLIP_EPSILON, positive=True
+        ),
+        kl_beta=_optional_float(
+            raw, "training.kl_beta", DEFAULT_KL_BETA, positive=False
+        ),
+        max_steps=_optional_int_none(raw, "budget.max_steps"),
+        max_judge_calls=_optional_int_none(raw, "budget.max_judge_calls"),
     )
