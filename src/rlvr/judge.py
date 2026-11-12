@@ -598,6 +598,18 @@ class JudgeClient:
     def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
         return self._score("process", prompt, reasoning)
 
+    def score_outputs(self, items: Sequence[tuple[Prompt, str]]) -> list[JudgeResult]:
+        """Batch the output judge over (prompt, code) pairs, preserving order."""
+        return self.score_batch(
+            [JudgeRequest(kind="output", prompt=prompt, text=text) for prompt, text in items]
+        )
+
+    def score_processes(self, items: Sequence[tuple[Prompt, str]]) -> list[JudgeResult]:
+        """Batch the process judge over (prompt, reasoning) pairs, preserving order."""
+        return self.score_batch(
+            [JudgeRequest(kind="process", prompt=prompt, text=text) for prompt, text in items]
+        )
+
     # --- batch API -------------------------------------------------------
 
     def score_batch(

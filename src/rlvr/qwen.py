@@ -12,8 +12,10 @@ entropy formula) have no such dependency and are unit tested.
 
 The entropy value on every generation is the mean Shannon entropy in nats of the
 model's per-token output distribution over the generated tokens only. It is
-computed from the per-step logits `generate` already asks for, never from a
-proxy.
+computed from the per-step logits `generate` already asks for. Those logits are
+temperature-scaled by the sampler, so the entropy is the entropy of the sampling
+distribution at the training temperature (0.9), not the raw model distribution
+at temperature 1.0. Entropy is logged, not rewarded.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ __all__ = [
     "group_advantages",
     "k3_divergence",
     "log_softmax",
+    "mean_token_loss",
     "seed_rngs",
     "split_thinking_and_code",
     "truncate_prompt",
@@ -117,6 +120,24 @@ def group_advantages(rewards: Sequence[float]) -> list[float]:
     if std < 1e-8:
         return [0.0] * count
     return [(value - mean) / std for value in values]
+
+
+def mean_token_loss(per_token_losses: Sequence[Sequence[float]]) -> float:
+    """Mean per-token loss over a group of completions.
+
+    Every per-token loss is summed and the total is divided once by the total
+    token count across the group. A token in a short completion weighs the same
+    as a token in a long one, so the normalization is per token, never per
+    sequence. This is the pure reference for the torch loss normalization.
+    """
+    total = 0.0
+    count = 0
+    for sequence in per_token_losses:
+        total += sum(sequence)
+        count += len(sequence)
+    if count == 0:
+        return 0.0
+    return total / count
 
 
 def clipped_surrogate(ratio: float, advantage: float, epsilon: float) -> float:
@@ -318,11 +339,21 @@ class QwenGenerator:
     # --- generation ------------------------------------------------------
 
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
-        """Sample `n` generations for one prompt, splitting thinking from code."""
+        """Sample `n` generations for one prompt, splitting thinking from code.
+
+        Greedy evaluation (temperature 0.0) runs the model in eval mode and does
+        no group bookkeeping, so it never clobbers the training group cached for
+        the next update. Sampling runs in train mode and caches the group.
+        """
         if n < 1:
             raise ValueError(f"n must be at least 1, got {n}")
         torch = self._torch
         do_sample = temperature > 0.0
+
+        if do_sample:
+            self.model.train()
+        else:
+            self.model.eval()
 
         text = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": prompt.problem}],
@@ -355,15 +386,14 @@ class QwenGenerator:
 
         generations: list[Generation] = []
         group: list[_GroupEntry] = []
+        eos = self.tokenizer.eos_token_id
         for index in range(n):
             raw_ids = outputs.sequences[index][prompt_length:].tolist()
-            eos = self.tokenizer.eos_token_id
-            if eos is not None and eos in raw_ids:
-                generated_ids = raw_ids[: raw_ids.index(eos) + 1]
-                truncated = False
-            else:
+            truncated = completion_truncated(raw_ids, eos)
+            if truncated:
                 generated_ids = raw_ids
-                truncated = True
+            else:
+                generated_ids = raw_ids[: raw_ids.index(eos) + 1]
             split = self._split_at_think_end(generated_ids)
             reasoning = self.tokenizer.decode(
                 generated_ids[: split], skip_special_tokens=True
@@ -378,15 +408,6 @@ class QwenGenerator:
             logits = torch.stack([scores[t][index] for t in range(generated_length)])
             mean_entropy = self._mean_entropy(logits).item()
 
-            with torch.no_grad():
-                sequence = torch.tensor(
-                    [prompt_ids + generated_ids[:generated_length]], device=self._device
-                )
-                old_logprobs = self._completion_logprobs(sequence, prompt_length).tolist()
-            reference_logprobs = self._reference_logprobs(
-                prompt_ids, generated_ids[:generated_length]
-            )
-
             generations.append(
                 Generation(
                     reasoning=reasoning,
@@ -398,16 +419,27 @@ class QwenGenerator:
                     prompt_truncated=prompt_truncated,
                 )
             )
-            group.append(
-                _GroupEntry(
-                    input_ids=prompt_ids + generated_ids[:generated_length],
-                    prompt_length=prompt_length,
-                    old_logprobs=old_logprobs,
-                    reference_logprobs=reference_logprobs,
-                )
-            )
 
-        self._last_group = group
+            if do_sample:
+                with torch.no_grad():
+                    sequence = torch.tensor(
+                        [prompt_ids + generated_ids[:generated_length]], device=self._device
+                    )
+                    old_logprobs = self._completion_logprobs(sequence, prompt_length).tolist()
+                reference_logprobs = self._reference_logprobs(
+                    prompt_ids, generated_ids[:generated_length]
+                )
+                group.append(
+                    _GroupEntry(
+                        input_ids=prompt_ids + generated_ids[:generated_length],
+                        prompt_length=prompt_length,
+                        old_logprobs=old_logprobs,
+                        reference_logprobs=reference_logprobs,
+                    )
+                )
+
+        if do_sample:
+            self._last_group = group
         return generations
 
     def _split_at_think_end(self, generated_ids: list[int]) -> int:
@@ -419,7 +451,12 @@ class QwenGenerator:
 
     @staticmethod
     def _mean_entropy(logits: Any) -> Any:
-        """Mean per-token entropy in nats over a batch of logits."""
+        """Mean per-token entropy in nats over a batch of logits.
+
+        The logits come from the sampler and are temperature-scaled, so this is
+        the entropy of the sampling distribution at the training temperature,
+        not the raw model distribution at temperature 1.0.
+        """
         import torch  # lazy
 
         log_probs = torch.log_softmax(logits, dim=-1)
@@ -474,9 +511,10 @@ class QwenGenerator:
     ) -> None:
         """One GRPO step over the last sampled group.
 
-        The advantage is group-normalized. The ratio is per-token and clipped,
-        and a per-token k3 KL term against the frozen base model is added when
-        `kl_beta` is positive. The prompt and generations are accepted for
+        The advantage is group-normalized. The per-token clipped surrogate and
+        the per-token k3 KL are summed over the whole group and divided once by
+        the total token count, so a token in a short completion weighs the same
+        as a token in a long one. The prompt and generations are accepted for
         interface symmetry with the seam; the token data comes from the group
         cached by `generate`.
         """
@@ -489,21 +527,36 @@ class QwenGenerator:
             )
 
         torch = self._torch
+        self.model.train()
+
         advantages = group_advantages(list(rewards))
         advantages_tensor = torch.tensor(advantages, device=self._device)
 
         self.optimizer.zero_grad()
-        losses: list[Any] = []
+        surrogate_total = None
+        kl_total = None
+        token_count = 0
         for entry, advantage in zip(self._last_group, advantages_tensor):
-            losses.append(self._group_loss(entry, advantage))
-        total = torch.stack(losses).mean()
-        total.backward()
+            surrogate_sum, kl_sum, count = self._group_terms(entry, advantage)
+            token_count += count
+            surrogate_total = (
+                surrogate_sum if surrogate_total is None else surrogate_total + surrogate_sum
+            )
+            if kl_sum is not None:
+                kl_total = kl_sum if kl_total is None else kl_total + kl_sum
+
+        loss = -surrogate_total / token_count
+        if kl_total is not None:
+            loss = loss + self.kl_beta * kl_total / token_count
+        loss.backward()
         self.optimizer.step()
         self.step += 1
         self._last_group = None
 
-    def _group_loss(self, entry: _GroupEntry, advantage: Any) -> Any:
-        """The per-token clipped surrogate loss plus optional per-token KL."""
+    def _group_terms(
+        self, entry: _GroupEntry, advantage: Any
+    ) -> tuple[Any, Any | None, int]:
+        """The summed per-token surrogate and KL for one generation, plus its count."""
         torch = self._torch
         inputs = torch.tensor([entry.input_ids], device=self._device)
         new_logprobs = self._completion_logprobs(inputs, entry.prompt_length)
@@ -512,15 +565,15 @@ class QwenGenerator:
         ratio = torch.exp(new_logprobs - old_logprobs)
         ratio_clipped = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon)
         surrogate = torch.min(ratio * advantage, ratio_clipped * advantage)
-        loss = -surrogate.mean()
+        surrogate_sum = surrogate.sum()
 
+        kl_sum: Any | None = None
         if self.kl_beta > 0.0 and entry.reference_logprobs is not None:
             reference = torch.tensor(entry.reference_logprobs, device=new_logprobs.device)
             divergence = reference - new_logprobs
-            kl = (torch.exp(divergence) - divergence - 1.0).mean()
-            loss = loss + self.kl_beta * kl
+            kl_sum = (torch.exp(divergence) - divergence - 1.0).sum()
 
-        return loss
+        return surrogate_sum, kl_sum, new_logprobs.numel()
 
     # --- checkpoint save and load ----------------------------------------
 

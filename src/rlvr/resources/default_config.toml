@@ -67,4 +67,3 @@ eval_subset_seed = 2026
 # Backends used by `rlvr run --arm <arm> --fake`.
 [fake]
 steps = 4
-prompts_per_step = 8

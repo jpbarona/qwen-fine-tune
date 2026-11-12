@@ -75,8 +75,8 @@ def run_fake(tmp_path: Path):
             judge=FakeJudge(),
             test_runner=FakeTestRunner(),
             store=store,
-            prompts=fake_prompts(config.prompts_per_step),
-            eval_prompts=fake_eval_prompts(config.prompts_per_step),
+            prompts=fake_prompts(2),
+            eval_prompts=fake_eval_prompts(2),
         )
         return store.run_dir, experiment.run()
 

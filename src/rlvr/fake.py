@@ -17,9 +17,13 @@ from __future__ import annotations
 
 import hashlib
 
-from .experiment import Generation, JudgeResult, Prompt, Outcome, TRAINING_TEMPERATURE
+from .experiment import Generation, JudgeResult, Prompt, Outcome
 
 __all__ = ["FakeGenerator", "FakeJudge", "FakeTestRunner", "fake_prompts"]
+
+#: Default sampling temperature used by the fake generator's signature. The real
+#: generator reads this from config. The fake keeps its own default.
+TRAINING_TEMPERATURE = 0.9
 
 #: Error classes the fake runner reports on failure. Success is "pass".
 FAKE_ERROR_CLASSES: tuple[str, ...] = ("assertion", "syntax", "runtime", "timeout")
@@ -137,6 +141,12 @@ class FakeJudge:
 
     def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
         return self._score("process", prompt.prompt_id, reasoning)
+
+    def score_outputs(self, items: list[tuple[Prompt, str]]) -> list[JudgeResult]:
+        return [self.score_output(prompt, text) for prompt, text in items]
+
+    def score_processes(self, items: list[tuple[Prompt, str]]) -> list[JudgeResult]:
+        return [self.score_process(prompt, text) for prompt, text in items]
 
     def _score(self, kind: str, prompt_id: str, text: str) -> JudgeResult:
         key = "\x1f".join((kind, prompt_id, text))
