@@ -26,7 +26,7 @@ split_seed = 7
 
 [fake]
 steps = 2
-prompts_per_step = 1
+prompts_per_step = 2
 """
 
 
