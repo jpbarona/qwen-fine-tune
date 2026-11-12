@@ -83,11 +83,11 @@ class Generation:
 
 @dataclass(frozen=True)
 class TestResult:
-    """One task test, run on its own. `error_class` is empty when it passed."""
+    """One task test, run on its own. `error_class` is `"pass"` when it passed."""
 
     index: int
     passed: bool
-    error_class: str = ""
+    error_class: str = "pass"
     detail: str = ""
 
 

@@ -21,7 +21,7 @@ from .experiment import Generation, JudgeResult, Prompt, Outcome, TRAINING_TEMPE
 
 __all__ = ["FakeGenerator", "FakeJudge", "FakeTestRunner", "fake_prompts"]
 
-#: Error classes the fake runner reports. Task 2 defines the real vocabulary.
+#: Error classes the fake runner reports on failure. Success is "pass".
 FAKE_ERROR_CLASSES: tuple[str, ...] = ("assertion", "syntax", "runtime", "timeout")
 
 #: Test groups the fake runner uses, so partial passes exist.
@@ -98,7 +98,7 @@ class FakeTestRunner:
         total = FAKE_TEST_COUNTS[seed % len(FAKE_TEST_COUNTS)]
         passed = (seed >> 8) % (total + 1)
         if passed == total:
-            error_class = ""
+            error_class = "pass"
         else:
             error_class = FAKE_ERROR_CLASSES[(seed >> 16) % len(FAKE_ERROR_CLASSES)]
         return Outcome(tests_passed=passed, tests_total=total, error_class=error_class)

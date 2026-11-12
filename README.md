@@ -70,7 +70,7 @@ and types are a contract.
 | `mean_entropy` | float | mean per-token entropy, logged not rewarded, can exceed 1 |
 | `tests_passed` | int | |
 | `tests_total` | int | |
-| `error_class` | str | empty when no error, vocabulary set by task 2 |
+| `error_class` | str | `pass` when every test passed, otherwise the failure class set by task 2 |
 | `code_score` | float | passed / total, in [0, 1] |
 | `judge_score` | float or null | null when the arm does not judge or tests failed |
 | `process_score` | float or null | null except in `gated-process` on a pass |
