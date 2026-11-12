@@ -9,7 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.cli import main
+from rlvr.cli import build_judge, main
+from rlvr.config import load_config
+from rlvr.fake import FakeJudge
 
 CONFIG = """\
 [model]
@@ -42,18 +44,89 @@ def test_run_fake_exits_zero_for_the_code_score_arm(config_path, tmp_path, capsy
     assert "runs/code-score" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("arm", ["hybrid", "gated-judge", "gated-process"])
-def test_pending_arms_exit_with_a_clear_message(arm, config_path, tmp_path, capsys) -> None:
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+def test_judge_arms_run_fake_and_populate_judge_scores(arm, config_path, tmp_path) -> None:
+    runs_root = tmp_path / "runs"
+    assert main(
+        ["run", "--arm", arm, "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+    run_dir = next((runs_root / arm).iterdir())
+    records = [
+        json.loads(line)
+        for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert all(record["process_score"] is None for record in records)
+    for record in records:
+        if record["judge_score"] is None:
+            assert record["reward"] == 0.0
+        else:
+            assert 0.0 <= record["judge_score"] <= 1.0
+            assert 0.0 <= record["reward"] <= 1.0
+    assert any(record["judge_score"] is not None for record in records)
+
+
+def test_pending_arm_exits_with_a_clear_message(config_path, tmp_path, capsys) -> None:
     runs_root = tmp_path / "runs"
     code = main(
-        ["run", "--arm", arm, "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+        [
+            "run",
+            "--arm",
+            "gated-process",
+            "--fake",
+            "--config",
+            str(config_path),
+            "--runs-root",
+            str(runs_root),
+        ]
     )
     captured = capsys.readouterr()
     assert code != 0
     assert captured.out == ""
-    assert arm in captured.err
+    assert "gated-process" in captured.err
     assert "not implemented" in captured.err
+    assert not (runs_root / "gated-process").exists()
+
+
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+def test_a_judge_arm_fails_before_the_run_folder_when_the_key_is_missing(
+    arm, config_path, tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
+    runs_root = tmp_path / "runs"
+    code = main(
+        ["run", "--arm", arm, "--config", str(config_path), "--runs-root", str(runs_root)]
+    )
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "OPENCODE_GO_API_KEY" in captured.err
     assert not (runs_root / arm).exists()
+
+
+def test_build_judge_only_builds_a_client_for_arms_that_judge(
+    write_config, monkeypatch
+) -> None:
+    from rlvr import cli
+
+    built = []
+
+    class StubClient:
+        @classmethod
+        def from_config(cls, config, **kwargs):
+            built.append(config)
+            return FakeJudge()
+
+    monkeypatch.setattr(cli, "JudgeClient", StubClient)
+    config = load_config(write_config())
+
+    build_judge("code-score", config, fake=False)
+    assert built == []
+
+    build_judge("hybrid", config, fake=False)
+    build_judge("gated-judge", config, fake=False)
+    assert built == [config, config]
+
+    build_judge("hybrid", config, fake=True)
+    assert built == [config, config]
 
 
 def test_run_writes_the_four_files(config_path, tmp_path) -> None:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from rlvr.experiment import Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 
@@ -88,6 +90,30 @@ def test_fake_code_score_run_never_judges(run_fake) -> None:
     assert all(record["process_score"] is None for record in records)
     assert all(record["cache_hit"] is False for record in records)
     assert all(record["reward"] == record["code_score"] for record in records)
+
+
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+def test_fake_judge_arm_run_populates_scores(run_fake, arm: str) -> None:
+    run_dir, _ = run_fake(arm)
+    records = [
+        json.loads(line)
+        for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert all(record["process_score"] is None for record in records)
+    for record in records:
+        passed = record["tests_total"] > 0 and record["tests_passed"] == record["tests_total"]
+        if passed:
+            assert isinstance(record["judge_score"], float)
+            if arm == "gated-judge":
+                expected = record["judge_score"]
+            else:
+                expected = 0.5 + 0.5 * record["judge_score"]
+            assert record["reward"] == pytest.approx(expected)
+        else:
+            assert record["judge_score"] is None
+            assert record["reward"] == 0.0
+    assert any(record["judge_score"] is not None for record in records)
+    assert any(record["judge_score"] is None for record in records)
 
 
 def test_fake_code_score_run_has_a_spread_of_rewards(run_fake) -> None:
