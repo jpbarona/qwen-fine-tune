@@ -1,0 +1,69 @@
+# Default config for the RLVR reward study.
+# Copy this file and pass --config to change anything for a run.
+# The whole file is recorded in meta.json of every run folder.
+# Never put a key or token in here. The judge key comes from the environment.
+
+[model]
+name = "Qwen/Qwen3-0.6B"
+# Pinned to the model weights commit so every arm trains the same weights.
+revision = "c1899de289a04d12100db370d81485cdf75e47ca"
+
+[judge]
+model = "deepseek-v4.1-flash"
+temperature = 0.0
+# Bounded in-flight judge calls.
+concurrency = 32
+# Total attempts per call, including the first. Retries cover 408, 429, 5xx,
+# timeouts, and connection errors. Other 4xx responses fail at once.
+max_attempts = 4
+timeout_seconds = 60
+# File cache for identical requests. Relative paths use the working directory.
+cache_dir = "judge-cache"
+# Requests send reasoning_effort = "medium", the normal default the gateway
+# accepts, plus a concrete User-Agent and a stable x-opencode-session header.
+
+[data]
+name = "mbpp"
+# Offline merge of the MBPP full configuration: 374 train + 90 validation +
+# 500 test = 964 rows. The 10 few-shot prompt rows are excluded.
+dataset = "data/mbpp_full.jsonl"
+split_seed = 1234
+train_size = 714
+test_size = 250
+
+[training]
+method = "grpo"
+generations_per_prompt = 8
+temperature = 0.9
+learning_rate = 1e-5
+epochs = 5
+lora_rank = 32
+lora_alpha = 64
+max_prompt_tokens = 512
+max_completion_tokens = 768
+# GRPO clipping window and the KL coefficient against the frozen reference.
+# beta 0.0 keeps the loss pure clipped GRPO; see the task 8 report.
+clip_epsilon = 0.2
+kl_beta = 0.0
+
+[budget]
+# Hard caps. Unset means the run trains every planned step. These stop the loop
+# cleanly and record the reason in eval.json.
+# max_steps = 1000
+# max_judge_calls = 100000
+
+[run]
+checkpoint_every_steps = 50
+# Checkpoint evaluation: every N steps, on a fixed subset of the test pool,
+# greedy decoding. The final evaluation always covers the whole test pool.
+eval_every_steps = 100
+eval_questions = 100
+# Optional cap on the final evaluation pool. Unset means the whole test pool.
+# eval_final_questions = 250
+# Separate seed for the checkpoint subset. It must not be the data split seed,
+# so the evaluated subset is not tied to the train/test cut.
+eval_subset_seed = 2026
+
+# Backends used by `rlvr run --arm <arm> --fake`.
+[fake]
+steps = 4
