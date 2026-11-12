@@ -1,4 +1,8 @@
-"""Tests for the Experiment seam: injected Generator, Judge, TestRunner, Store."""
+"""Tests for the Experiment seam: injected Generator, Judge, TestRunner, Store.
+
+Task 4 covers the code-score arm end to end. The other three arms must stop the
+run before any injected backend is called.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,7 @@ import pytest
 
 from rlvr.config import load_config
 from rlvr.experiment import Experiment, Generation, JudgeResult, Prompt, Outcome
+from rlvr.reward import ArmNotImplemented, RewardError
 from rlvr.schema import RolloutRecord
 
 CONFIG_TEXT = """\
@@ -30,7 +35,7 @@ prompts_per_step = 2
 class StubGenerator:
     def __init__(self, codes: dict[str, str] | None = None) -> None:
         self.codes = codes or {}
-        self.calls: list[tuple[str, int]] = []
+        self.calls: list[tuple[str, float]] = []
 
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
         self.calls.append((prompt.prompt_id, temperature))
@@ -48,33 +53,43 @@ class StubGenerator:
 
 
 class StubTestRunner:
-    """Passes every test unless the code contains FAIL."""
+    """Passes every test unless the code contains FAIL.
 
-    def __init__(self, total: int = 2) -> None:
+    A fixed `passes` count overrides that, so partial and full pass counts can
+    be driven from a test.
+    """
+
+    def __init__(self, total: int = 2, passes: int | None = None) -> None:
         self.total = total
+        self.passes = passes
         self.calls: list[str] = []
 
     def run(self, prompt: Prompt, code: str) -> Outcome:
         self.calls.append(code)
+        if self.passes is not None:
+            return Outcome(
+                tests_passed=self.passes,
+                tests_total=self.total,
+                error_class="pass" if self.passes == self.total else "assertion",
+            )
         if "FAIL" in code:
             return Outcome(tests_passed=0, tests_total=self.total, error_class="assertion")
         return Outcome(tests_passed=self.total, tests_total=self.total, error_class="pass")
 
 
-class StubJudge:
-    def __init__(self, score: float = 0.4, cache_hit: bool = False) -> None:
-        self.score = score
-        self.cache_hit = cache_hit
-        self.output_calls: list[str] = []
-        self.process_calls: list[str] = []
+class ExplodingJudge:
+    """A judge that fails the test if the code-score arm calls it at all."""
+
+    def __init__(self) -> None:
+        self.calls = 0
 
     def score_output(self, prompt: Prompt, code: str) -> JudgeResult:
-        self.output_calls.append(code)
-        return JudgeResult(score=self.score, cache_hit=self.cache_hit)
+        self.calls += 1
+        raise AssertionError("code-score must never call the output judge")
 
     def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
-        self.process_calls.append(reasoning)
-        return JudgeResult(score=self.score, cache_hit=self.cache_hit)
+        self.calls += 1
+        raise AssertionError("code-score must never call the process judge")
 
 
 class RecordingStore:
@@ -109,7 +124,7 @@ def build(arm: str, tmp_path, *, generator=None, judge=None, runner=None, store=
         arm=arm,
         config=config,
         generator=generator or StubGenerator(),
-        judge=judge or StubJudge(),
+        judge=judge or ExplodingJudge(),
         test_runner=runner or StubTestRunner(),
         store=store or RecordingStore(),
         prompts=prompts if prompts is not None else make_prompts(),
@@ -122,15 +137,14 @@ def _write_config(tmp_path) -> Path:
     return path
 
 
-@pytest.mark.parametrize("arm", ["code-score", "hybrid", "gated-judge", "gated-process"])
-def test_run_covers_the_injected_backends_and_returns_counts(arm, tmp_path) -> None:
+def test_run_covers_the_injected_backends_and_returns_counts(tmp_path) -> None:
     store = RecordingStore()
-    result = build(arm, tmp_path, store=store).run()
+    result = build("code-score", tmp_path, store=store).run()
     assert result.steps == 2
     assert result.rollouts == 4
     assert len(store.rollouts) == 4
     assert len(store.metrics) == 2
-    assert store.meta is not None and store.meta["arm"] == arm
+    assert store.meta is not None and store.meta["arm"] == "code-score"
     assert store.eval is not None
 
 
@@ -152,11 +166,10 @@ def test_records_are_built_from_generator_runner_and_judge(tmp_path) -> None:
 
 
 def test_code_score_arm_never_calls_the_judge(tmp_path) -> None:
-    judge = StubJudge()
+    judge = ExplodingJudge()
     store = RecordingStore()
     build("code-score", tmp_path, judge=judge, store=store).run()
-    assert judge.output_calls == []
-    assert judge.process_calls == []
+    assert judge.calls == 0
     for record in store.rollouts:
         assert record.judge_score is None
         assert record.process_score is None
@@ -164,58 +177,53 @@ def test_code_score_arm_never_calls_the_judge(tmp_path) -> None:
         assert record.reward == record.code_score
 
 
-def test_partial_pass_reward_equals_the_fraction(tmp_path) -> None:
-    runner = StubTestRunner(total=4)
+def test_reward_is_zero_when_every_test_fails(tmp_path) -> None:
     generator = StubGenerator(codes={"mbpp-0000": "FAIL"})
     store = RecordingStore()
-    build("code-score", tmp_path, generator=generator, runner=runner, store=store).run()
+    build("code-score", tmp_path, generator=generator, store=store).run()
     failed = [r for r in store.rollouts if r.prompt_id == "mbpp-0000"]
     assert {r.reward for r in failed} == {0.0}
+    assert {r.code_score for r in failed} == {0.0}
     assert failed[0].error_class == "assertion"
 
 
-def test_failing_tests_short_circuit_the_gated_arms(tmp_path) -> None:
-    for arm in ("hybrid", "gated-judge", "gated-process"):
-        judge = StubJudge(score=1.0)
-        runner = StubTestRunner(total=2)
-        generator = StubGenerator(codes={pid: "FAIL" for pid in ("mbpp-0000", "mbpp-0001")})
-        store = RecordingStore()
-        build(arm, tmp_path, generator=generator, judge=judge, runner=runner, store=store).run()
-        assert judge.output_calls == [], arm
-        assert judge.process_calls == [], arm
-        assert {r.reward for r in store.rollouts} == {0.0}, arm
-        assert all(r.judge_score is None and r.process_score is None for r in store.rollouts), arm
-
-
-def test_hybrid_reward_on_a_pass(tmp_path) -> None:
-    judge = StubJudge(score=0.6)
+def test_reward_is_partial_when_some_tests_fail(tmp_path) -> None:
+    runner = StubTestRunner(total=4, passes=1)
     store = RecordingStore()
-    build("hybrid", tmp_path, judge=judge, store=store).run()
-    assert [r.reward for r in store.rollouts] == pytest.approx([0.8] * 4)
-    assert [r.judge_score for r in store.rollouts] == pytest.approx([0.6] * 4)
-    assert all(r.process_score is None for r in store.rollouts)
+    build("code-score", tmp_path, runner=runner, store=store).run()
+    assert [r.tests_passed for r in store.rollouts] == [1, 1, 1, 1]
+    assert [r.tests_total for r in store.rollouts] == [4, 4, 4, 4]
+    assert [r.reward for r in store.rollouts] == pytest.approx([0.25] * 4)
 
 
-def test_gated_judge_reward_on_a_pass(tmp_path) -> None:
-    judge = StubJudge(score=0.6)
+def test_reward_is_one_when_every_test_passes(tmp_path) -> None:
+    runner = StubTestRunner(total=3, passes=3)
     store = RecordingStore()
-    build("gated-judge", tmp_path, judge=judge, store=store).run()
-    assert [r.reward for r in store.rollouts] == pytest.approx([0.6] * 4)
+    build("code-score", tmp_path, runner=runner, store=store).run()
+    assert [r.reward for r in store.rollouts] == [1.0] * 4
 
 
-def test_gated_process_mixes_both_scores(tmp_path) -> None:
-    judge = StubJudge(score=0.8)
+def test_a_zero_test_rollout_fails_loudly(tmp_path) -> None:
+    runner = StubTestRunner(total=0, passes=0)
     store = RecordingStore()
-    build("gated-process", tmp_path, judge=judge, store=store).run()
-    assert judge.process_calls == [f"trace for mbpp-{i:04d}" for i in (0, 1, 0, 1)]
-    assert [r.process_score for r in store.rollouts] == pytest.approx([0.8] * 4)
-    assert [r.reward for r in store.rollouts] == pytest.approx([0.8] * 4)
+    with pytest.raises(RewardError, match="zero tests"):
+        build("code-score", tmp_path, runner=runner, store=store).run()
+    assert store.rollouts == []
 
 
-def test_cache_hit_is_recorded_from_the_judge(tmp_path) -> None:
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge", "gated-process"])
+def test_pending_arms_fail_before_any_backend_is_called(arm, tmp_path) -> None:
+    generator = StubGenerator()
+    runner = StubTestRunner()
+    judge = ExplodingJudge()
     store = RecordingStore()
-    build("gated-judge", tmp_path, judge=StubJudge(score=0.5, cache_hit=True), store=store).run()
-    assert all(r.cache_hit is True for r in store.rollouts)
+    with pytest.raises(ArmNotImplemented, match=arm):
+        build(arm, tmp_path, generator=generator, runner=runner, judge=judge, store=store).run()
+    assert generator.calls == []
+    assert runner.calls == []
+    assert judge.calls == 0
+    assert store.rollouts == []
+    assert store.meta is None
 
 
 def test_metrics_rows_summarize_the_step(tmp_path) -> None:
@@ -250,8 +258,8 @@ def test_eval_pass_at_1_counts_prompts_that_pass_every_test(tmp_path) -> None:
 
 def test_meta_carries_the_config_and_run_identity(tmp_path) -> None:
     store = RecordingStore()
-    build("hybrid", tmp_path, store=store).run()
-    assert store.meta["arm"] == "hybrid"
+    build("code-score", tmp_path, store=store).run()
+    assert store.meta["arm"] == "code-score"
     assert store.meta["timestamp"] == "20261112T000000Z"
     assert store.meta["judge_model"] == "fake-judge-model"
     assert store.meta["split_seed"] == 1
@@ -259,15 +267,15 @@ def test_meta_carries_the_config_and_run_identity(tmp_path) -> None:
 
 
 def test_unknown_arm_fails_before_any_backend_is_called(tmp_path) -> None:
-    judge = StubJudge()
+    generator = StubGenerator()
     with pytest.raises(ValueError, match="arm"):
-        build("reward-shaping", tmp_path, judge=judge).run()
-    assert judge.output_calls == []
+        build("reward-shaping", tmp_path, generator=generator).run()
+    assert generator.calls == []
 
 
 def test_steps_and_prompt_count_come_from_the_config(tmp_path) -> None:
     store = RecordingStore()
-    build("hybrid", tmp_path, prompts=make_prompts(3), store=store).run()
+    build("code-score", tmp_path, prompts=make_prompts(3), store=store).run()
     assert len(store.rollouts) == 6
     assert len(store.metrics) == 2
 
