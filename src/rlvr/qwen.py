@@ -245,6 +245,11 @@ class QwenGenerator:
         group: list[_GroupEntry] = []
         for index in range(n):
             generated_ids = outputs.sequences[index][prompt_length:].tolist()
+            # Drop padding after the first end-of-sequence token so token counts
+            # and entropy reflect the real completion, not the padded tail.
+            eos = self.tokenizer.eos_token_id
+            if eos is not None and eos in generated_ids:
+                generated_ids = generated_ids[: generated_ids.index(eos) + 1]
             split = self._split_at_think_end(generated_ids)
             reasoning = self.tokenizer.decode(
                 generated_ids[: split], skip_special_tokens=True
@@ -307,7 +312,9 @@ class QwenGenerator:
         import torch  # lazy
 
         log_probs = torch.log_softmax(logits, dim=-1)
-        chosen = log_probs[range(len(token_ids)), token_ids]
+        token_ids_t = torch.tensor(token_ids, device=logits.device)
+        positions = torch.arange(len(token_ids), device=logits.device)
+        chosen = log_probs[positions, token_ids_t]
         return float(chosen.sum().item())
 
     def _reference_logprob(self, prompt_ids: list[int], token_ids: list[int]) -> float | None:
@@ -321,8 +328,14 @@ class QwenGenerator:
         with torch.no_grad():
             with self.model.disable_adapter():
                 logits = self.model(inputs).logits[0]
+        # log_probs[i] predicts the token at position i+1, so the completion
+        # token at position prompt_length is predicted by log_probs[prompt_length - 1].
         log_probs = torch.log_softmax(logits[:-1], dim=-1)
-        chosen = log_probs[range(len(token_ids)), token_ids]
+        token_ids_t = torch.tensor(token_ids, device=self._device)
+        positions = torch.arange(
+            len(prompt_ids) - 1, len(prompt_ids) - 1 + len(token_ids), device=self._device
+        )
+        chosen = log_probs[positions, token_ids_t]
         return float(chosen.sum().item())
 
     # --- the GRPO update -------------------------------------------------
@@ -369,8 +382,16 @@ class QwenGenerator:
         inputs = torch.tensor([entry.input_ids], device=self._device)
         logits = self.model(inputs).logits[0]
         token_ids = entry.input_ids[entry.prompt_length :]
+        # log_probs[i] predicts position i+1, so the completion starts at index
+        # prompt_length - 1 in the shifted distribution.
         log_probs = torch.log_softmax(logits[:-1], dim=-1)
-        new_logprob = log_probs[range(len(token_ids)), token_ids].sum()
+        token_ids_t = torch.tensor(token_ids, device=self._device)
+        positions = torch.arange(
+            entry.prompt_length - 1,
+            entry.prompt_length - 1 + len(token_ids),
+            device=self._device,
+        )
+        new_logprob = log_probs[positions, token_ids_t].sum()
 
         ratio = torch.exp(new_logprob - entry.old_logprob)
         ratio_clipped = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon)
@@ -378,8 +399,8 @@ class QwenGenerator:
         per_token = -surrogate
 
         if self.kl_beta > 0.0 and entry.reference_logprob is not None:
-            reference_ratio = torch.exp(entry.reference_logprob - new_logprob)
-            kl = reference_ratio - torch.log(reference_ratio) - 1.0
+            divergence = entry.reference_logprob - new_logprob
+            kl = torch.exp(divergence) - divergence - 1.0
             per_token = per_token + self.kl_beta * kl
 
         return per_token.mean()
