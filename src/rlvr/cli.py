@@ -4,10 +4,11 @@
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
     rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
 
-This build implements the fake path only. Real backends arrive in later tasks
-and plug into the same Experiment seam without changing this parser. The judge
+This build runs both the fake path and, on a GPU host with the `train` extra
+installed, the real Qwen generator, Docker runner, and GRPO trainer. The judge
 backend is chosen before the run folder is made, so a judge arm with no key
-fails at startup.
+fails at startup. `--resume` continues the latest run folder from its last
+checkpoint.
 
 `summary` reads run folders that already exist. It prints one table per metric
 with arms side by side and writes a static, self-contained HTML report.
@@ -27,6 +28,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .config import Config, ConfigError, default_config_path, load_config
+from .checkpoint import find_latest_checkpoint
 from .data import (
     TEST_SIZE,
     TRAIN_SIZE,
@@ -48,7 +50,7 @@ from .reward import (
 from .runs import RunStore
 from .summary import SummaryError, format_summary, load_reports, write_report
 
-__all__ = ["build_judge", "build_parser", "build_prompts", "main"]
+__all__ = ["build_judge", "build_parser", "build_prompts", "build_test_runner", "main"]
 
 USAGE_ERROR = 2
 
@@ -104,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("runs"),
         help="folder that holds run folders (default: ./runs)",
+    )
+    run.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue the latest run folder from its last checkpoint",
     )
 
     summary = subparsers.add_parser(
@@ -187,6 +194,50 @@ def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
     return train_prompts, eval_prompts
 
 
+def build_test_runner(config: Config, *, fake: bool):
+    """The Docker runner over the full split, or the fake runner.
+
+    The real runner holds every question because training rollouts run the
+    train questions and evaluation runs the held-out test questions. The fake
+    runner ignores questions entirely.
+    """
+    if fake:
+        return FakeTestRunner()
+    try:
+        split = load_split(seed=config.split_seed)
+    except DatasetError as error:
+        raise UsageError(f"cannot load the MBPP split: {error}") from error
+    questions = list(split.train) + list(split.test)
+    from .docker_runner import DockerTestRunner
+
+    return DockerTestRunner(questions)
+
+
+def build_generator(config: Config, *, fake: bool):
+    """The real Qwen trainer, or the fake generator."""
+    if fake:
+        return FakeGenerator()
+    from .qwen import QwenGenerator
+
+    try:
+        return QwenGenerator(
+            model_name=config.model_name,
+            revision=config.model_revision,
+            lora_rank=config.lora_rank,
+            lora_alpha=config.lora_alpha,
+            learning_rate=config.learning_rate,
+            max_prompt_tokens=config.max_prompt_tokens,
+            max_completion_tokens=config.max_completion_tokens,
+            clip_epsilon=config.clip_epsilon,
+            kl_beta=config.kl_beta,
+        )
+    except ImportError as error:
+        raise UsageError(
+            "the real generator needs torch, transformers, and peft. "
+            f"install the train extra or pass --fake. ({error})"
+        ) from error
+
+
 def run_command(args: argparse.Namespace) -> int:
     if args.arm not in ARMS:
         raise UsageError(f"unknown arm {args.arm!r}. valid arms: {', '.join(ARMS)}")
@@ -201,34 +252,52 @@ def run_command(args: argparse.Namespace) -> int:
     # fails before any rollout and leaves no run folder behind.
     judge = build_judge(args.arm, config, fake=args.fake)
 
-    if not args.fake:
-        raise UsageError(
-            f"real backends for arm {args.arm!r} are not implemented yet, add --fake"
-        )
-
     train_prompts, eval_prompts = build_prompts(config)
+    if config.eval_final_questions is not None:
+        eval_prompts = eval_prompts[: config.eval_final_questions]
 
-    try:
-        store = RunStore(args.runs_root, args.arm)
-    except OSError as error:
-        raise UsageError(f"cannot create the run folder: {error}") from error
+    resume_step = 0
+    prior_evaluations: list[dict] = []
+    if args.resume:
+        store = RunStore.resume(args.runs_root, args.arm)
+        checkpoint = find_latest_checkpoint(store.checkpoints_dir)
+        if checkpoint is None:
+            raise UsageError(
+                f"no checkpoint found for arm {args.arm!r} under {store.run_dir}"
+            )
+        store.truncate_to_step(checkpoint.step)
+        prior_evaluations = store.read_evaluations()
+        resume_step = checkpoint.step
+    else:
+        try:
+            store = RunStore(args.runs_root, args.arm)
+        except OSError as error:
+            raise UsageError(f"cannot create the run folder: {error}") from error
+
+    generator = build_generator(config, fake=args.fake)
+    if args.resume:
+        generator.load_checkpoint(checkpoint.directory)
+
+    test_runner = build_test_runner(config, fake=args.fake)
 
     experiment = Experiment(
         arm=args.arm,
         config=config,
-        generator=FakeGenerator(),
+        generator=generator,
         judge=judge,
-        test_runner=FakeTestRunner(),
+        test_runner=test_runner,
         store=store,
         prompts=train_prompts,
         eval_prompts=eval_prompts,
+        resume_step=resume_step,
+        prior_evaluations=prior_evaluations,
     )
     summary = experiment.run()
 
     print(f"arm={summary.arm} steps={summary.steps} rollouts={summary.rollouts}")
     print(
         f"mean_reward={summary.mean_reward:.4f} pass_at_1={summary.pass_at_1:.4f} "
-        f"run folder: {summary.run_dir}"
+        f"stop_reason={summary.stop_reason} run folder: {summary.run_dir}"
     )
     return 0
 
