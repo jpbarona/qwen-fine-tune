@@ -51,6 +51,7 @@ __all__ = [
     "RunSummary",
     "Store",
     "Outcome",
+    "TestResult",
     "TestRunner",
 ]
 
@@ -81,12 +82,28 @@ class Generation:
 
 
 @dataclass(frozen=True)
+class TestResult:
+    """One task test, run on its own. `error_class` is empty when it passed."""
+
+    index: int
+    passed: bool
+    error_class: str = ""
+    detail: str = ""
+
+
+@dataclass(frozen=True)
 class Outcome:
-    """What happened when the task tests ran against generated code."""
+    """What happened when the task tests ran against generated code.
+
+    `results` holds one entry per task test. It defaults to empty so a runner
+    that only counts passes stays valid. The rollout record keeps the counts
+    and the overall class, as frozen in Task 1.
+    """
 
     tests_passed: int
     tests_total: int
     error_class: str
+    results: tuple[TestResult, ...] = ()
 
 
 @dataclass(frozen=True)
