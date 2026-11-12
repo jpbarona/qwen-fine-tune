@@ -9,9 +9,11 @@ Required keys:
     [model] name, revision
     [judge] model
     [data]  split_seed
-    [fake]  steps, prompts_per_step
 
 Optional keys, with the defaults shown:
+
+    [fake]  steps = 1
+    [fake]  prompts_per_step = 1
 
     [run] eval_every_steps = 100
     [run] eval_questions   = 100
@@ -63,6 +65,10 @@ DEFAULT_EVAL_EVERY_STEPS = 100
 DEFAULT_EVAL_QUESTIONS = 100
 DEFAULT_EVAL_SUBSET_SEED = 2026
 DEFAULT_CHECKPOINT_EVERY_STEPS = 50
+
+#: Defaults for the optional [fake] table, used only by `--fake`.
+DEFAULT_STEPS = 1
+DEFAULT_PROMPTS_PER_STEP = 1
 
 #: Defaults for the optional [training] table. These match SPEC.md and are only
 #: read by the real Qwen trainer. The fake path ignores them.
@@ -238,8 +244,10 @@ def load_config(path: str | Path) -> Config:
         model_revision=_string(raw, "model.revision"),
         judge_model=_string(raw, "judge.model"),
         split_seed=_non_negative_int(raw, "data.split_seed"),
-        steps=_positive_int(raw, "fake.steps"),
-        prompts_per_step=_positive_int(raw, "fake.prompts_per_step"),
+        steps=_optional_positive_int(raw, "fake.steps", DEFAULT_STEPS),
+        prompts_per_step=_optional_positive_int(
+            raw, "fake.prompts_per_step", DEFAULT_PROMPTS_PER_STEP
+        ),
         eval_every_steps=_optional_positive_int(
             raw, "run.eval_every_steps", DEFAULT_EVAL_EVERY_STEPS
         ),
