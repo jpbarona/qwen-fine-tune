@@ -19,7 +19,7 @@ from typing import Sequence
 from .config import ConfigError, default_config_path, load_config
 from .experiment import Experiment
 from .fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
-from .reward import ARMS
+from .reward import ARMS, ArmNotImplemented, check_arm_implemented
 from .runs import RunStore
 
 __all__ = ["build_parser", "main"]
@@ -66,6 +66,10 @@ def run_command(args: argparse.Namespace) -> int:
         )
 
     config = load_config(args.config if args.config is not None else default_config_path())
+    try:
+        check_arm_implemented(args.arm)
+    except ArmNotImplemented as error:
+        raise UsageError(str(error)) from error
     try:
         store = RunStore(args.runs_root, args.arm)
     except OSError as error:

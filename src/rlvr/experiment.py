@@ -32,8 +32,8 @@ from typing import Any, Mapping, Protocol, Sequence
 from . import repro
 from .config import Config
 from .reward import (
-    ARMS,
     all_tests_passed,
+    check_arm_implemented,
     code_score,
     compose_reward,
     uses_output_judge,
@@ -223,8 +223,12 @@ class Experiment:
         }
 
     def _check_arm(self) -> None:
-        if self.arm not in ARMS:
-            raise ValueError(f"unknown arm {self.arm!r}. valid arms: {', '.join(ARMS)}")
+        """Reject an unknown arm, and an arm that has no reward yet.
+
+        Called before `meta.json` is written, so a pending arm leaves no run
+        folder and touches no backend.
+        """
+        check_arm_implemented(self.arm)
 
     def _one_rollout(self, prompt: Prompt, step: int) -> RolloutRecord:
         generation = self.generator.generate(
