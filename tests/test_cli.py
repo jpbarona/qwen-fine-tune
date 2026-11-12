@@ -206,10 +206,11 @@ def test_unparseable_config_is_reported_on_stderr(tmp_path, capsys) -> None:
     assert "config" in captured.err
 
 
-def test_without_fake_the_command_explains_that_real_backends_are_missing(config_path, tmp_path, capsys) -> None:
+def test_without_fake_the_command_asks_for_the_train_extra(config_path, tmp_path, capsys) -> None:
     code = main(["run", "--arm", "code-score", "--config", str(config_path)])
     captured = capsys.readouterr()
     assert code != 0
+    assert "train extra" in captured.err
     assert "--fake" in captured.err
 
 
@@ -476,3 +477,121 @@ def test_a_bad_split_stops_before_the_run_folder(
     assert code != 0
     assert "MBPP split" in captured.err
     assert not (runs_root / "code-score").exists()
+
+
+RESUME_CONFIG = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "r"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 7
+
+[fake]
+steps = 3
+prompts_per_step = 1
+
+[run]
+checkpoint_every_steps = 2
+"""
+
+
+def test_resume_continues_from_the_last_checkpoint_without_duplicates(
+    tmp_path, capsys
+) -> None:
+    runs_root = tmp_path / "runs"
+    config_path = tmp_path / "resume.toml"
+    config_path.write_text(RESUME_CONFIG, encoding="utf-8")
+
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+    capsys.readouterr()
+
+    run_dir = next((runs_root / "code-score").iterdir())
+    before = [
+        line for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines() if line
+    ]
+    assert len(before) == 24
+
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--resume", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+    capsys.readouterr()
+
+    # Still one run folder, still 24 rollouts: step 3 was truncated then redone.
+    assert len(list((runs_root / "code-score").iterdir())) == 1
+    after = [
+        line for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines() if line
+    ]
+    assert len(after) == 24
+
+
+def test_resume_without_a_checkpoint_fails_cleanly(tmp_path, capsys) -> None:
+    runs_root = tmp_path / "runs"
+    (runs_root / "code-score").mkdir(parents=True)
+    (runs_root / "code-score" / "20261112T000000Z").mkdir()
+    (runs_root / "code-score" / "20261112T000000Z" / "meta.json").write_text(
+        '{"arm": "code-score"}\n', encoding="utf-8"
+    )
+
+    code = main(
+        ["run", "--arm", "code-score", "--fake", "--resume", "--runs-root", str(runs_root)]
+    )
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "no checkpoint" in captured.err
+
+
+EVAL_LIMIT_CONFIG = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "r"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 7
+
+[fake]
+steps = 1
+prompts_per_step = 1
+
+[run]
+eval_every_steps = 1
+eval_questions = 5
+eval_final_questions = 10
+"""
+
+
+def test_eval_final_questions_caps_the_final_eval_pool(tmp_path, capsys) -> None:
+    runs_root = tmp_path / "runs"
+    config_path = tmp_path / "limit.toml"
+    config_path.write_text(EVAL_LIMIT_CONFIG, encoding="utf-8")
+
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+    capsys.readouterr()
+
+    run_dir = next((runs_root / "code-score").iterdir())
+    payload = json.loads((run_dir / "eval.json").read_text(encoding="utf-8"))
+    assert payload["count"] == 10
+    assert payload["evaluations"][-1]["count"] == 10
+
+
+def test_build_test_runner_uses_fakes_or_docker(write_config) -> None:
+    from rlvr.cli import build_test_runner
+    from rlvr.docker_runner import DockerTestRunner
+    from rlvr.fake import FakeTestRunner
+
+    config = load_config(write_config())
+    assert isinstance(build_test_runner(config, fake=True), FakeTestRunner)
+    # The real runner is built from the merged train and test questions. No
+    # Docker binary is invoked at construction, so this is safe on CPU.
+    runner = build_test_runner(config, fake=False)
+    assert isinstance(runner, DockerTestRunner)
