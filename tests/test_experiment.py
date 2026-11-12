@@ -82,11 +82,28 @@ eval_questions = 100
 eval_subset_seed = 77
 """
 
+SIX_STEP_CONFIG_TEXT = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "r"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 1
+
+[fake]
+steps = 6
+prompts_per_step = 6
+"""
+
 
 class StubGenerator:
     def __init__(self, codes: dict[str, str] | None = None) -> None:
         self.codes = codes or {}
         self.calls: list[tuple[str, float]] = []
+        self.update_calls: list[tuple[str, tuple[float, ...]]] = []
 
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
         self.calls.append((prompt.prompt_id, temperature))
@@ -101,6 +118,20 @@ class StubGenerator:
             )
             for _ in range(n)
         ]
+
+    def update(
+        self,
+        prompt: Prompt,
+        generations: list[Generation],
+        rewards: list[float],
+    ) -> None:
+        self.update_calls.append((prompt.prompt_id, tuple(rewards)))
+
+    def save_checkpoint(self, directory) -> None:
+        pass
+
+    def load_checkpoint(self, directory) -> None:
+        pass
 
 
 class StubTestRunner:
@@ -216,6 +247,7 @@ class RecordingStore:
         self.meta: dict | None = None
         self.timestamp = "20261112T000000Z"
         self.run_dir = Path("runs/test/20261112T000000Z")
+        self.checkpoints_dir = self.run_dir / "checkpoints"
 
     def write_meta(self, meta: dict) -> None:
         self.meta = meta
@@ -285,8 +317,8 @@ def test_run_covers_the_injected_backends_and_returns_counts(tmp_path) -> None:
     store = RecordingStore()
     result = build("code-score", tmp_path, store=store).run()
     assert result.steps == 2
-    assert result.rollouts == 4
-    assert len(store.rollouts) == 4
+    assert result.rollouts == 16
+    assert len(store.rollouts) == 16
     assert len(store.metrics) == 2
     assert store.meta is not None and store.meta["arm"] == "code-score"
     assert store.eval is not None
@@ -335,16 +367,16 @@ def test_reward_is_partial_when_some_tests_fail(tmp_path) -> None:
     runner = StubTestRunner(total=4, passes=1)
     store = RecordingStore()
     build("code-score", tmp_path, runner=runner, store=store).run()
-    assert [r.tests_passed for r in store.rollouts] == [1, 1, 1, 1]
-    assert [r.tests_total for r in store.rollouts] == [4, 4, 4, 4]
-    assert [r.reward for r in store.rollouts] == pytest.approx([0.25] * 4)
+    assert [r.tests_passed for r in store.rollouts] == [1] * 16
+    assert [r.tests_total for r in store.rollouts] == [4] * 16
+    assert [r.reward for r in store.rollouts] == pytest.approx([0.25] * 16)
 
 
 def test_reward_is_one_when_every_test_passes(tmp_path) -> None:
     runner = StubTestRunner(total=3, passes=3)
     store = RecordingStore()
     build("code-score", tmp_path, runner=runner, store=store).run()
-    assert [r.reward for r in store.rollouts] == [1.0] * 4
+    assert [r.reward for r in store.rollouts] == [1.0] * 16
 
 
 def test_a_zero_test_rollout_fails_loudly(tmp_path) -> None:
@@ -363,15 +395,15 @@ def test_judge_arms_on_a_full_pass_use_the_judge_score(arm, expected, tmp_path) 
     judge = SpyJudge(score=0.5)
     store = RecordingStore()
     result = build(arm, tmp_path, judge=judge, store=store).run()
-    assert result.rollouts == 4
-    assert len(judge.output_calls) == 4
+    assert result.rollouts == 16
+    assert len(judge.output_calls) == 16
     assert judge.process_calls == []
     assert [record.reward for record in store.rollouts] == pytest.approx(
-        [expected] * 4
+        [expected] * 16
     )
-    assert [record.judge_score for record in store.rollouts] == [0.5] * 4
-    assert [record.process_score for record in store.rollouts] == [None] * 4
-    assert [record.code_score for record in store.rollouts] == [1.0] * 4
+    assert [record.judge_score for record in store.rollouts] == [0.5] * 16
+    assert [record.process_score for record in store.rollouts] == [None] * 16
+    assert [record.code_score for record in store.rollouts] == [1.0] * 16
 
 
 @pytest.mark.parametrize(
@@ -382,7 +414,7 @@ def test_a_judge_score_of_one_gives_the_top_reward(arm, expected, tmp_path) -> N
     judge = SpyJudge(score=1.0)
     store = RecordingStore()
     build(arm, tmp_path, judge=judge, store=store).run()
-    assert [record.reward for record in store.rollouts] == [expected] * 4
+    assert [record.reward for record in store.rollouts] == [expected] * 16
 
 
 @pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
@@ -447,7 +479,7 @@ def test_the_output_judge_sees_the_problem_and_code_only(tmp_path) -> None:
 
     # The judge is called once per training rollout with the prompt and the
     # generated code, and with nothing else. The eval pass does not judge.
-    assert judge.output_calls == [(prompts[0], "# code for mbpp-0000")] * 2
+    assert judge.output_calls == [(prompts[0], "# code for mbpp-0000")] * 16
     assert judge.process_calls == []
     assert secret not in repr(judge.output_calls)
     assert {field.name for field in fields(Prompt)} == {"prompt_id", "problem"}
@@ -458,7 +490,7 @@ def test_a_cached_judge_score_is_recorded(arm, tmp_path) -> None:
     judge = SpyJudge(score=0.5, cache_hit=True)
     store = RecordingStore()
     build(arm, tmp_path, judge=judge, store=store).run()
-    assert [record.cache_hit for record in store.rollouts] == [True] * 4
+    assert [record.cache_hit for record in store.rollouts] == [True] * 16
 
 
 @pytest.mark.parametrize("arm", ["hybrid", "gated-judge", "gated-process"])
@@ -474,13 +506,13 @@ def test_gated_process_on_a_full_pass_uses_both_judges(tmp_path) -> None:
     store = RecordingStore()
     result = build("gated-process", tmp_path, judge=judge, store=store).run()
 
-    assert result.rollouts == 4
-    assert len(judge.output_calls) == 4
-    assert len(judge.process_calls) == 4
-    assert [record.judge_score for record in store.rollouts] == [0.5] * 4
-    assert [record.process_score for record in store.rollouts] == [1.0] * 4
-    assert [record.code_score for record in store.rollouts] == [1.0] * 4
-    assert [record.reward for record in store.rollouts] == pytest.approx([0.75] * 4)
+    assert result.rollouts == 16
+    assert len(judge.output_calls) == 16
+    assert len(judge.process_calls) == 16
+    assert [record.judge_score for record in store.rollouts] == [0.5] * 16
+    assert [record.process_score for record in store.rollouts] == [1.0] * 16
+    assert [record.code_score for record in store.rollouts] == [1.0] * 16
+    assert [record.reward for record in store.rollouts] == pytest.approx([0.75] * 16)
 
 
 def test_the_process_judge_sees_the_problem_and_trace_only(tmp_path) -> None:
@@ -497,8 +529,8 @@ def test_the_process_judge_sees_the_problem_and_trace_only(tmp_path) -> None:
         prompts=prompts,
     ).run()
 
-    assert judge.process_calls == [(prompts[0], "trace for mbpp-0000")] * 2
-    assert judge.output_calls == [(prompts[0], "# code for mbpp-0000")] * 2
+    assert judge.process_calls == [(prompts[0], "trace for mbpp-0000")] * 16
+    assert judge.output_calls == [(prompts[0], "# code for mbpp-0000")] * 16
     assert secret not in repr(judge.process_calls)
     assert secret not in repr(judge.output_calls)
 
@@ -584,12 +616,11 @@ def test_an_empty_trace_is_a_valid_judge_input(tmp_path) -> None:
         store=store,
     ).run()
 
-    assert judge.process_calls == [
-        (prompt, "") for prompt in make_prompts()
-    ] * 2
-    assert [record.reasoning for record in store.rollouts] == [""] * 4
-    assert [record.process_score for record in store.rollouts] == [0.25] * 4
-    assert [record.reward for record in store.rollouts] == pytest.approx([0.375] * 4)
+    prompts = make_prompts()
+    assert judge.process_calls == [(prompts[0], "")] * 8 + [(prompts[1], "")] * 8
+    assert [record.reasoning for record in store.rollouts] == [""] * 16
+    assert [record.process_score for record in store.rollouts] == [0.25] * 16
+    assert [record.reward for record in store.rollouts] == pytest.approx([0.375] * 16)
 
 
 def test_a_fake_gated_process_run_populates_every_record_field(tmp_path) -> None:
@@ -605,6 +636,7 @@ def test_a_fake_gated_process_run_populates_every_record_field(tmp_path) -> None
         runner=FakeTestRunner(),
         store=store,
         prompts=prompts,
+        config_text=SIX_STEP_CONFIG_TEXT,
     ).run()
 
     passing = [
@@ -633,13 +665,13 @@ def test_a_fake_gated_process_run_populates_every_record_field(tmp_path) -> None
 
 def test_metrics_rows_summarize_the_step(tmp_path) -> None:
     store = RecordingStore()
-    generator = StubGenerator(codes={"mbpp-0000": "FAIL"})
-    build("code-score", tmp_path, generator=generator, store=store).run()
+    runner = StubTestRunner(total=4, passes=1)
+    build("code-score", tmp_path, runner=runner, store=store).run()
     row = store.metrics[0]
     assert row["step"] == 1
-    assert row["rollouts"] == 2
-    assert row["mean_reward"] == pytest.approx(0.5)
-    assert row["pass_rate"] == pytest.approx(0.5)
+    assert row["rollouts"] == 8
+    assert row["mean_reward"] == pytest.approx(0.25)
+    assert row["pass_rate"] == pytest.approx(0.0)
     assert row["mean_entropy"] == pytest.approx(0.5)
     assert row["mean_completion_tokens"] == pytest.approx(20.0)
 
@@ -649,7 +681,7 @@ def test_eval_runs_one_greedy_generation_per_prompt(tmp_path) -> None:
     build("code-score", tmp_path, generator=generator, store=RecordingStore()).run()
     greedy = [call for call in generator.calls if call[1] == 0.0]
     assert greedy == [("mbpp-0000", 0.0), ("mbpp-0001", 0.0)]
-    assert len([call for call in generator.calls if call[1] != 0.0]) == 4
+    assert len([call for call in generator.calls if call[1] != 0.0]) == 2
 
 
 def test_eval_pass_at_1_counts_prompts_that_pass_every_test(tmp_path) -> None:
@@ -671,6 +703,22 @@ def test_meta_carries_the_config_and_run_identity(tmp_path) -> None:
     assert store.meta["config"]["fake"]["steps"] == 2
 
 
+def test_meta_carries_the_trainer_settings_and_checkpoint_dir(tmp_path) -> None:
+    store = RecordingStore()
+    build("code-score", tmp_path, store=store).run()
+    trainer = store.meta["trainer"]
+    assert trainer["method"] == "grpo"
+    assert trainer["generations_per_prompt"] == 8
+    assert trainer["lora_rank"] == 32
+    assert trainer["lora_alpha"] == 64
+    assert trainer["learning_rate"] == 1e-5
+    assert trainer["clip_epsilon"] == 0.2
+    assert trainer["kl_beta"] == 0.0
+    assert trainer["batch_size"] == 1
+    assert trainer["gradient_accumulation"] == 1
+    assert store.meta["checkpoint_dir"].endswith("checkpoints")
+
+
 def test_unknown_arm_fails_before_any_backend_is_called(tmp_path) -> None:
     generator = StubGenerator()
     with pytest.raises(ValueError, match="arm"):
@@ -678,10 +726,10 @@ def test_unknown_arm_fails_before_any_backend_is_called(tmp_path) -> None:
     assert generator.calls == []
 
 
-def test_steps_and_prompt_count_come_from_the_config(tmp_path) -> None:
+def test_steps_and_generations_per_prompt_come_from_the_config(tmp_path) -> None:
     store = RecordingStore()
     build("code-score", tmp_path, prompts=make_prompts(3), store=store).run()
-    assert len(store.rollouts) == 6
+    assert len(store.rollouts) == 16
     assert len(store.metrics) == 2
 
 
@@ -690,14 +738,14 @@ def test_run_is_reusable_and_writes_only_new_records(tmp_path) -> None:
     experiment = build("code-score", tmp_path, store=store)
     experiment.run()
     experiment.run()
-    assert len(store.rollouts) == 8
+    assert len(store.rollouts) == 32
 
 
 def test_every_rollout_records_entropy_and_completion_length(tmp_path) -> None:
     store = RecordingStore()
     build("code-score", tmp_path, store=store).run()
-    assert [record.mean_entropy for record in store.rollouts] == [0.5] * 4
-    assert [record.completion_tokens for record in store.rollouts] == [20] * 4
+    assert [record.mean_entropy for record in store.rollouts] == [0.5] * 16
+    assert [record.completion_tokens for record in store.rollouts] == [20] * 16
 
 
 def test_a_checkpoint_eval_runs_every_configured_step_and_the_final_eval_covers_the_pool(

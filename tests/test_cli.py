@@ -452,7 +452,9 @@ def test_a_fake_run_evaluates_the_held_out_test_split(tmp_path, capsys) -> None:
         json.loads(line)
         for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert {record["prompt_id"] for record in records} == train_ids
+    # One step trains one prompt group (8 identical rollouts), so the rollout
+    # prompt ids are a subset of the train ids, never a test id.
+    assert {record["prompt_id"] for record in records} <= train_ids
     assert {record["prompt_id"] for record in records}.isdisjoint(test_ids)
 
 

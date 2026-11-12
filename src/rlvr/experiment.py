@@ -7,6 +7,9 @@ in the package talks to a model, an API, Docker, or the filesystem during a run.
 Interfaces, frozen for later tasks:
 
     Generator.generate(prompt, *, n, temperature) -> list[Generation]
+    Generator.update(prompt, generations, rewards) -> None
+    Generator.save_checkpoint(directory) -> None
+    Generator.load_checkpoint(directory) -> None
     TestRunner.run(prompt, code) -> Outcome
     Judge.score_output(prompt, code) -> JudgeResult
     Judge.score_process(prompt, reasoning) -> JudgeResult
@@ -14,13 +17,14 @@ Interfaces, frozen for later tasks:
     Store.append_rollout(record)
     Store.append_metric(row)
     Store.write_eval(payload)
-    Store.timestamp, Store.run_dir, Store.arm
+    Store.timestamp, Store.run_dir, Store.checkpoints_dir
 
 `temperature` is 0.0 for greedy evaluation and the sampling temperature during
 training. `n` is the number of generations requested for one prompt.
 
-The fake path uses n=1 per prompt. GRPO will pass 8. The signatures stay the
-same, so only the loop changes.
+Training samples one prompt group per step: 8 generations, all tested, judged
+only on a full pass per arm, then one `update` call with the group rewards.
+Evaluation stays greedy with n=1. Resume and budget guards wrap the same loop.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
 from . import repro
+from .checkpoint import checkpoint_dir_name, write_checkpoint_manifest
 from .config import Config
 from .evaluation import pass_at_1, select_eval_subset, subset_selector
 from .reward import (
@@ -57,11 +62,17 @@ __all__ = [
     "TestRunner",
 ]
 
-#: Sampling temperature for training generations. Task 4 reads it from config.
+#: Sampling temperature for training generations. The value is read from config
+#: now; this stays as the default for the fake generator's own signature.
 TRAINING_TEMPERATURE = 0.9
 
 #: Greedy decoding, used for evaluation.
 EVAL_TEMPERATURE = 0.0
+
+#: The batch size and gradient accumulation are fixed at 1, so one prompt group
+#: is one optimizer step.
+BATCH_SIZE = 1
+GRADIENT_ACCUMULATION = 1
 
 
 @dataclass(frozen=True)
@@ -136,6 +147,17 @@ class JudgeResult:
 class Generator(Protocol):
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]: ...
 
+    def update(
+        self,
+        prompt: Prompt,
+        generations: Sequence[Generation],
+        rewards: Sequence[float],
+    ) -> None: ...
+
+    def save_checkpoint(self, directory: Path) -> None: ...
+
+    def load_checkpoint(self, directory: Path) -> None: ...
+
 
 class TestRunner(Protocol):
     # The name starts with "Test", so tell pytest this is not a test class.
@@ -154,6 +176,7 @@ class Store(Protocol):
     arm: str
     timestamp: str
     run_dir: Path
+    checkpoints_dir: Path
 
     def write_meta(self, meta: Mapping[str, Any]) -> None: ...
 
@@ -174,6 +197,7 @@ class RunSummary:
     rollouts: int
     mean_reward: float
     pass_at_1: float
+    stop_reason: str = "completed"
 
 
 @dataclass
@@ -193,6 +217,8 @@ class Experiment:
     store: Store
     prompts: Sequence[Prompt]
     eval_prompts: Sequence[Prompt] = ()
+    resume_step: int = 0
+    prior_evaluations: Sequence[Mapping[str, Any]] = ()
 
     def run(self) -> RunSummary:
         """Run every training step, evaluate on schedule, and summarize.
@@ -201,9 +227,11 @@ class Experiment:
         run costs the same as a short one. `eval.json` is replaced after every
         evaluation, so a crash keeps the last checkpoint result.
 
-        Task 8 adds resume and budget guards around this loop. The loop is split
-        into `_training_step` and `_evaluate` so both can wrap it without
-        changing the record or eval contracts.
+        Budget guards wrap the loop. `max_steps` caps the step count below
+        `config.steps`. `max_judge_calls` stops the loop at the next step
+        boundary once the judge has been called that many times. A resume starts
+        at `resume_step + 1` and carries forward the evaluations already on
+        disk, so records are appended, never duplicated.
         """
         self._check_arm()
         if not self.prompts:
@@ -214,7 +242,9 @@ class Experiment:
                 "Pass the held-out test questions as eval_prompts."
             )
 
-        self.store.write_meta(self.build_meta())
+        resumed = self.resume_step > 0
+        if not resumed:
+            self.store.write_meta(self.build_meta())
 
         eval_pool = tuple(self.eval_prompts)
         checkpoint_prompts = select_eval_subset(
@@ -227,17 +257,25 @@ class Experiment:
             subset=checkpoint_prompts,
         )
 
+        effective_steps = self.config.steps
+        if self.config.max_steps is not None:
+            effective_steps = min(effective_steps, self.config.max_steps)
+
         rollouts = 0
         reward_sum = 0.0
-        last_step = 0
-        evaluations: list[dict[str, Any]] = []
-        for step in range(1, self.config.steps + 1):
+        judge_calls = 0
+        last_step = self.resume_step
+        stop_reason = "completed"
+        evaluations: list[dict[str, Any]] = [dict(e) for e in self.prior_evaluations]
+
+        for step in range(self.resume_step + 1, effective_steps + 1):
             step_records = self._training_step(step)
             last_step = step
             for record in step_records:
                 self.store.append_rollout(record)
                 rollouts += 1
                 reward_sum += record.reward
+                judge_calls += self._judge_calls_for(record)
             self.store.append_metric(self._metric_row(step, step_records))
 
             if step % self.config.eval_every_steps == 0:
@@ -249,32 +287,69 @@ class Experiment:
                         subset=checkpoint_subset,
                     )
                 )
-                self.store.write_eval(self._eval_payload(evaluations, checkpoint_subset))
+                self.store.write_eval(
+                    self._eval_payload(evaluations, checkpoint_subset, stop_reason)
+                )
+
+            if step % self.config.checkpoint_every_steps == 0:
+                self._save_checkpoint(step)
+
+            if (
+                self.config.max_judge_calls is not None
+                and judge_calls >= self.config.max_judge_calls
+            ):
+                stop_reason = "max_judge_calls"
+                break
+
+        if stop_reason == "completed" and self.config.max_steps is not None:
+            if last_step >= self.config.max_steps and self.config.max_steps < self.config.steps:
+                stop_reason = "max_steps"
 
         final = self._evaluate(last_step, eval_pool, kind="final", subset=None)
         evaluations.append(final)
-        self.store.write_eval(self._eval_payload(evaluations, checkpoint_subset))
+        self.store.write_eval(
+            self._eval_payload(evaluations, checkpoint_subset, stop_reason)
+        )
 
         return RunSummary(
             arm=self.arm,
             run_dir=self.store.run_dir,
-            steps=self.config.steps,
+            steps=last_step,
             rollouts=rollouts,
-            mean_reward=reward_sum / rollouts,
+            mean_reward=reward_sum / rollouts if rollouts else 0.0,
             pass_at_1=final["pass_at_1"],
+            stop_reason=stop_reason,
         )
 
     def build_meta(self) -> dict[str, Any]:
         """The reproducibility record. Written to meta.json."""
+        config = self.config
         return {
             "arm": self.arm,
             "timestamp": self.store.timestamp,
             "git_commit": repro.git_commit(),
             "versions": repro.package_versions(),
-            "model_revision": self.config.model_revision,
-            "judge_model": self.config.judge_model,
-            "split_seed": self.config.split_seed,
-            "config": self.config.raw,
+            "model_revision": config.model_revision,
+            "judge_model": config.judge_model,
+            "split_seed": config.split_seed,
+            "config": config.raw,
+            "trainer": {
+                "method": "grpo",
+                "model_name": config.model_name,
+                "generations_per_prompt": config.generations_per_prompt,
+                "epochs": config.epochs,
+                "temperature": config.temperature,
+                "learning_rate": config.learning_rate,
+                "lora_rank": config.lora_rank,
+                "lora_alpha": config.lora_alpha,
+                "max_prompt_tokens": config.max_prompt_tokens,
+                "max_completion_tokens": config.max_completion_tokens,
+                "clip_epsilon": config.clip_epsilon,
+                "kl_beta": config.kl_beta,
+                "batch_size": BATCH_SIZE,
+                "gradient_accumulation": GRADIENT_ACCUMULATION,
+            },
+            "checkpoint_dir": str(self.store.checkpoints_dir),
         }
 
     def _check_arm(self) -> None:
@@ -285,14 +360,34 @@ class Experiment:
         """
         check_arm_implemented(self.arm)
 
-    def _training_step(self, step: int) -> list[RolloutRecord]:
-        """Generate, run, judge, and record one rollout per training prompt."""
-        return [self._one_rollout(prompt, step) for prompt in self.prompts]
+    def _prompt_for_step(self, step: int) -> Prompt:
+        """The one prompt this step trains on. Batch size is 1, so one prompt
+        group per step, cycling through the training prompts."""
+        return self.prompts[(step - 1) % len(self.prompts)]
 
-    def _one_rollout(self, prompt: Prompt, step: int) -> RolloutRecord:
-        generation = self.generator.generate(
-            prompt, n=1, temperature=TRAINING_TEMPERATURE
-        )[0]
+    def _training_step(self, step: int) -> list[RolloutRecord]:
+        """Sample one prompt group, run and judge all of it, update once.
+
+        All 8 generations are tested. Each is judged only on a full test pass
+        for its arm, so a failed rollout still costs no judge call. The group's
+        rewards are passed to `update` once, then the 8 records are returned.
+        """
+        prompt = self._prompt_for_step(step)
+        generations = self.generator.generate(
+            prompt,
+            n=self.config.generations_per_prompt,
+            temperature=self.config.temperature,
+        )
+        records = [
+            self._one_rollout(prompt, generation, step) for generation in generations
+        ]
+        rewards = [record.reward for record in records]
+        self.generator.update(prompt, generations, rewards)
+        return records
+
+    def _one_rollout(
+        self, prompt: Prompt, generation: Generation, step: int
+    ) -> RolloutRecord:
         result = self.test_runner.run(prompt, generation.code)
         passed = all_tests_passed(result.tests_passed, result.tests_total)
 
@@ -347,6 +442,29 @@ class Experiment:
         )
 
     @staticmethod
+    def _judge_calls_for(record: RolloutRecord) -> int:
+        """The number of judge calls a record represents.
+
+        `judge_score` is set exactly when the output judge was called and
+        `process_score` exactly when the process judge was called, so the two
+        null checks count calls precisely.
+        """
+        calls = 0
+        if record.judge_score is not None:
+            calls += 1
+        if record.process_score is not None:
+            calls += 1
+        return calls
+
+    def _save_checkpoint(self, step: int) -> None:
+        """Ask the generator for its state, then write the checkpoint manifest."""
+        directory = self.store.checkpoints_dir / checkpoint_dir_name(step)
+        self.generator.save_checkpoint(directory)
+        write_checkpoint_manifest(
+            directory, step=step, arm=self.arm, timestamp=self.store.timestamp
+        )
+
+    @staticmethod
     def _metric_row(step: int, records: Sequence[RolloutRecord]) -> dict[str, Any]:
         count = len(records)
         passed = sum(
@@ -394,6 +512,7 @@ class Experiment:
         self,
         evaluations: Sequence[Mapping[str, Any]],
         checkpoint_subset: Mapping[str, Any],
+        stop_reason: str,
     ) -> dict[str, Any]:
         """The whole eval.json. The last evaluation is the final one."""
         final = evaluations[-1]
@@ -404,5 +523,6 @@ class Experiment:
             "pass_at_1": final["pass_at_1"],
             "count": final["count"],
             "subset": dict(checkpoint_subset),
+            "stop_reason": stop_reason,
             "evaluations": [dict(evaluation) for evaluation in evaluations],
         }

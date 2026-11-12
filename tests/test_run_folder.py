@@ -65,7 +65,10 @@ def test_meta_git_commit_is_null_when_git_is_unavailable(run_fake, monkeypatch) 
 
 def test_meta_json_never_contains_a_key_or_secret(run_fake) -> None:
     meta = json.dumps(read_json(run_fake("code-score")[0] / "meta.json"))
-    for banned in ("api_key", "apikey", "token", "secret", "oc_sk_"):
+    # The trainer metadata records "max_prompt_tokens" and "max_completion_tokens",
+    # so the bare substring "token" is no longer a useful secret probe. Check for
+    # the markers that would actually leak a key or a secret instead.
+    for banned in ("api_key", "apikey", "secret", "oc_sk_", "bearer", "authorization"):
         assert banned not in meta, banned
 
 
@@ -76,11 +79,11 @@ def test_versions_include_python_and_the_package(run_fake) -> None:
 
 
 def test_rollouts_jsonl_has_one_line_per_rollout(run_fake) -> None:
-    # 3 steps times 2 prompts per step.
+    # 3 steps times 8 generations per prompt group.
     run_dir, result = run_fake("code-score")
     lines = read_jsonl(run_dir / "rollouts.jsonl")
-    assert result.rollouts == 6
-    assert len(lines) == 6
+    assert result.rollouts == 24
+    assert len(lines) == 24
 
 
 def test_every_rollout_line_satisfies_the_schema(run_fake) -> None:
@@ -105,7 +108,7 @@ def test_metrics_jsonl_has_one_row_per_step(run_fake) -> None:
 def test_metrics_and_rollouts_are_appended_in_step_order(run_fake) -> None:
     run_dir = run_fake("code-score")[0]
     steps = [json.loads(line)["step"] for line in (run_dir / "rollouts.jsonl").read_text().splitlines()]
-    assert steps == [1, 1, 2, 2, 3, 3]
+    assert steps == [1] * 8 + [2] * 8 + [3] * 8
 
 
 def test_eval_json_reports_pass_at_1_for_the_final_eval(run_fake) -> None:
