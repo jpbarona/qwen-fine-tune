@@ -1,0 +1,6 @@
+runs/
+.superpowers/
+__pycache__/
+*.pyc
+.venv/
+judge-cache/
