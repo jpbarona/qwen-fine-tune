@@ -256,6 +256,14 @@ def run_command(args: argparse.Namespace) -> int:
     if config.eval_final_questions is not None:
         eval_prompts = eval_prompts[: config.eval_final_questions]
 
+    # Real runs sweep the train questions once per epoch, one prompt group per
+    # step, so the step budget is epochs times the train size. The fake path
+    # keeps the small `[fake] steps` count.
+    if not args.fake:
+        from dataclasses import replace
+
+        config = replace(config, steps=config.epochs * len(train_prompts))
+
     resume_step = 0
     prior_evaluations: list[dict] = []
     if args.resume:

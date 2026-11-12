@@ -1,0 +1,42 @@
+# Full training config for one arm. Five epochs over the 714 train questions,
+# one prompt group of 8 generations per step. The step budget is computed by
+# the CLI as [training] epochs times the train size, so no step count appears
+# here. Checkpoints every 50 steps, checkpoint evaluation every 100 steps.
+
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "c1899de289a04d12100db370d81485cdf75e47ca"
+
+[judge]
+model = "deepseek-v4.1-flash"
+temperature = 0.0
+concurrency = 32
+max_attempts = 4
+timeout_seconds = 60
+cache_dir = "judge-cache"
+
+[data]
+name = "mbpp"
+dataset = "data/mbpp_full.jsonl"
+split_seed = 1234
+train_size = 714
+test_size = 250
+
+[training]
+method = "grpo"
+generations_per_prompt = 8
+temperature = 0.9
+learning_rate = 1e-5
+epochs = 5
+lora_rank = 32
+lora_alpha = 64
+max_prompt_tokens = 512
+max_completion_tokens = 768
+clip_epsilon = 0.2
+kl_beta = 0.0
+
+[run]
+checkpoint_every_steps = 50
+eval_every_steps = 100
+eval_questions = 100
+eval_subset_seed = 2026
