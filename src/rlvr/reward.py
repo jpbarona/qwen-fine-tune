@@ -10,10 +10,8 @@ The table comes from SPEC.md and is frozen:
 | gated-process  | 0                        | 0.5 * process + 0.5 * judge |
 
 Each arm gets one small function, and `ARM_REWARDS` is the single dispatch
-point. Tasks 4 and 5 implement `code-score`, `hybrid`, and `gated-judge`. The
-`gated-process` name exists in `ARMS` but has no function yet, so a run stops
-before it starts. Adding an arm means adding one entry to `ARM_REWARDS`. The
-Experiment loop never changes.
+point. All four arms are implemented. Adding an arm means adding one entry to
+`ARM_REWARDS`. The Experiment loop never changes.
 
 "Tests fail" means any test failed, so a rollout that passes nothing and one
 that passes all but one both count as failures for the gated arms. A task with
@@ -41,6 +39,7 @@ __all__ = [
     "gates_on_tests",
     "reward_code_score",
     "reward_gated_judge",
+    "reward_gated_process",
     "reward_hybrid",
     "uses_output_judge",
     "uses_process_judge",
@@ -182,11 +181,28 @@ def reward_gated_judge(
     return _check_score("judge", judge_score)
 
 
-#: The one dispatch point. Task 6 adds the process arm function here.
+def reward_gated_process(
+    *,
+    tests_passed: int,
+    tests_total: int,
+    judge_score: float | None = None,
+    process_score: float | None = None,
+) -> float:
+    """Gated process arm: zero on any test failure, else half trace, half code."""
+    _check_counts(tests_passed, tests_total)
+    if not all_tests_passed(tests_passed, tests_total):
+        return 0.0
+    process = _check_score("process", process_score)
+    judge = _check_score("judge", judge_score)
+    return 0.5 * process + 0.5 * judge
+
+
+#: The one dispatch point.
 ARM_REWARDS: dict[str, RewardFn] = {
     "code-score": reward_code_score,
     "hybrid": reward_hybrid,
     "gated-judge": reward_gated_judge,
+    "gated-process": reward_gated_process,
 }
 
 #: Arms that are named but have no function yet. Derived from the table, so
