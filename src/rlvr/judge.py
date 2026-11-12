@@ -11,12 +11,16 @@ new cache generation.
 
 Endpoint, from the OpenCode Go docs:
 
-    POST https://opencode.ai/inference/openai/v1/chat/completions
+    POST https://opencode.ai/inference/go/openai/v1/chat/completions
     Authorization: Bearer <OPENCODE_GO_API_KEY>
 
-The request uses the OpenAI Chat Completions shape. The reasoning effort
-parameter is deliberately omitted. The docs do not define a "normal" value, so
-the provider default is used.
+The request uses the OpenAI Chat Completions shape. Reasoning effort is sent as
+`medium`, the value the gateway accepts for the normal default.
+
+Two headers are required in practice. The endpoint rejects the default Python
+urllib User-Agent with HTTP 403 and Cloudflare error 1010, and it expects a
+stable session identifier. `User-Agent` and `x-opencode-session` are set on
+every request.
 
 The key is read from the environment by `require_api_key`. It is only placed in
 the Authorization header. It is never written to the cache, a log, an exception
@@ -55,6 +59,9 @@ __all__ = [
     "KEY_ENV",
     "OUTPUT_RUBRIC_VERSION",
     "PROCESS_RUBRIC_VERSION",
+    "REASONING_EFFORT",
+    "SESSION_VALUE",
+    "USER_AGENT",
     "HTTPResponse",
     "JudgeCache",
     "JudgeCacheEntry",
@@ -77,7 +84,7 @@ __all__ = [
 ]
 
 #: The OpenAI-compatible endpoint from the OpenCode Go docs.
-DEFAULT_ENDPOINT = "https://opencode.ai/inference/openai/v1/chat/completions"
+DEFAULT_ENDPOINT = "https://opencode.ai/inference/go/openai/v1/chat/completions"
 
 #: The judge model fixed by SPEC.md.
 DEFAULT_MODEL = "deepseek-v4.1-flash"
@@ -104,6 +111,13 @@ DEFAULT_BACKOFF_MAX = 30.0
 #: Rubric versions. A change here invalidates cached scores.
 OUTPUT_RUBRIC_VERSION = "output-v1"
 PROCESS_RUBRIC_VERSION = "process-v1"
+
+#: The gateway needs a concrete User-Agent and a stable session header.
+USER_AGENT = "rlvr/0.1 (research judge)"
+SESSION_VALUE = "rlvr-judge"
+
+#: The gateway maps `medium` to the normal reasoning default.
+REASONING_EFFORT = "medium"
 
 #: Longest reason kept from a judge response.
 REASON_LIMIT = 300
@@ -649,6 +663,7 @@ class JudgeClient:
                     {"role": "user", "content": user},
                 ],
                 "temperature": self.temperature,
+                "reasoning_effort": REASONING_EFFORT,
                 "response_format": {"type": "json_object"},
             },
             ensure_ascii=False,
@@ -657,6 +672,8 @@ class JudgeClient:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+            "x-opencode-session": SESSION_VALUE,
         }
 
         last: JudgeError | None = None
