@@ -10,31 +10,38 @@ The table comes from SPEC.md and is frozen:
 | gated-process  | 0                        | 0.5 * process + 0.5 * judge |
 
 Each arm gets one small function, and `ARM_REWARDS` is the single dispatch
-point. Task 4 implements `code-score` only. The other three arm names exist in
-`ARMS`, but they have no function yet, so a run stops before it starts. Adding
-an arm means adding one entry to `ARM_REWARDS`. The Experiment loop never
-changes.
+point. Tasks 4 and 5 implement `code-score`, `hybrid`, and `gated-judge`. The
+`gated-process` name exists in `ARMS` but has no function yet, so a run stops
+before it starts. Adding an arm means adding one entry to `ARM_REWARDS`. The
+Experiment loop never changes.
 
 "Tests fail" means any test failed, so a rollout that passes nothing and one
 that passes all but one both count as failures for the gated arms. A task with
 zero tests is an error for the code score: nothing was proven, and returning
-0.0 would hide a broken test runner.
+0.0 would hide a broken test runner. The gated arms differ: a question with no
+tests cannot pass the gate, so it gets zero and the judge is not called. The
+Experiment records a code score of 0.0 for that case.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Callable
 
 __all__ = [
     "ARM_REWARDS",
     "ARMS",
     "ArmNotImplemented",
+    "PENDING_ARMS",
     "RewardError",
     "all_tests_passed",
     "check_arm_implemented",
     "code_score",
     "compose_reward",
+    "gates_on_tests",
     "reward_code_score",
+    "reward_gated_judge",
+    "reward_hybrid",
     "uses_output_judge",
     "uses_process_judge",
 ]
@@ -87,6 +94,30 @@ def uses_process_judge(arm: str) -> bool:
     return arm in PROCESS_JUDGE_ARMS
 
 
+def gates_on_tests(arm: str) -> bool:
+    """Whether the arm returns zero when any test fails.
+
+    Every arm that calls the output judge also gates on a full test pass. The
+    code-score arm has no gate: it returns the fraction of tests passed.
+    """
+    _check_arm(arm)
+    return arm in OUTPUT_JUDGE_ARMS
+
+
+def _check_score(name: str, score: float | None) -> float:
+    """The judge score, checked to be a real number in [0, 1]."""
+    if score is None:
+        raise RewardError(f"this arm needs a {name} score on a full test pass, got null")
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        raise RewardError(
+            f"{name} score must be a number, got {type(score).__name__}"
+        )
+    value = float(score)
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise RewardError(f"{name} score must be between 0 and 1, got {score!r}")
+    return value
+
+
 def all_tests_passed(tests_passed: int, tests_total: int) -> bool:
     """Whether the gate is open: every test passed and there was at least one test."""
     _check_counts(tests_passed, tests_total)
@@ -122,9 +153,40 @@ def reward_code_score(
     return code_score(tests_passed, tests_total)
 
 
-#: The one dispatch point. Tasks 5 and 6 add their arm functions here.
+def reward_hybrid(
+    *,
+    tests_passed: int,
+    tests_total: int,
+    judge_score: float | None = None,
+    process_score: float | None = None,
+) -> float:
+    """Hybrid arm: zero on any test failure, else `0.5 + 0.5 * judge`."""
+    _check_counts(tests_passed, tests_total)
+    if not all_tests_passed(tests_passed, tests_total):
+        return 0.0
+    judge = _check_score("judge", judge_score)
+    return 0.5 + 0.5 * judge
+
+
+def reward_gated_judge(
+    *,
+    tests_passed: int,
+    tests_total: int,
+    judge_score: float | None = None,
+    process_score: float | None = None,
+) -> float:
+    """Gated judge arm: zero on any test failure, else the judge score."""
+    _check_counts(tests_passed, tests_total)
+    if not all_tests_passed(tests_passed, tests_total):
+        return 0.0
+    return _check_score("judge", judge_score)
+
+
+#: The one dispatch point. Task 6 adds the process arm function here.
 ARM_REWARDS: dict[str, RewardFn] = {
     "code-score": reward_code_score,
+    "hybrid": reward_hybrid,
+    "gated-judge": reward_gated_judge,
 }
 
 #: Arms that are named but have no function yet. Derived from the table, so
@@ -137,8 +199,8 @@ def check_arm_implemented(arm: str) -> None:
     _check_arm(arm)
     if arm in PENDING_ARMS:
         raise ArmNotImplemented(
-            f"arm {arm!r} is not implemented yet, only 'code-score' is. "
-            "The other three arms land in Tasks 5 and 6."
+            f"arm {arm!r} is not implemented yet. "
+            f"implemented arms: {', '.join(ARM_REWARDS)}."
         )
 
 

@@ -85,7 +85,11 @@ class StubTestRunner:
             return Outcome(
                 tests_passed=self.passes,
                 tests_total=self.total,
-                error_class="pass" if self.passes == self.total else self.error_class,
+                error_class=(
+                    "pass"
+                    if self.total > 0 and self.passes == self.total
+                    else self.error_class
+                ),
             )
         if "FAIL" in code:
             return Outcome(tests_passed=0, tests_total=self.total, error_class=self.error_class)

@@ -36,6 +36,7 @@ from .reward import (
     check_arm_implemented,
     code_score,
     compose_reward,
+    gates_on_tests,
     uses_output_judge,
     uses_process_judge,
 )
@@ -260,6 +261,14 @@ class Experiment:
             process_score=process_score,
         )
 
+        # A question with no tests cannot open the gate. The gated arms record a
+        # code score of 0.0 and reward 0.0, with no judge call. The code-score
+        # arm still fails loudly: there, zero tests is a broken test runner.
+        if result.tests_total == 0 and gates_on_tests(self.arm):
+            record_code_score = 0.0
+        else:
+            record_code_score = code_score(result.tests_passed, result.tests_total)
+
         return RolloutRecord(
             arm=self.arm,
             step=step,
@@ -272,7 +281,7 @@ class Experiment:
             tests_passed=result.tests_passed,
             tests_total=result.tests_total,
             error_class=result.error_class,
-            code_score=code_score(result.tests_passed, result.tests_total),
+            code_score=record_code_score,
             judge_score=judge_score,
             process_score=process_score,
             reward=reward,
