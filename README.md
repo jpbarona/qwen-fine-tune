@@ -10,6 +10,18 @@ python3 -m venv .venv
 .venv/bin/pip install -e . && .venv/bin/pip install pytest
 ```
 
+The real training path needs the `train` extra, pinned for a CUDA 12, Python
+3.12 host:
+
+```bash
+.venv/bin/pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu124
+.venv/bin/pip install -e ".[train]"
+```
+
+The CUDA 12.4 index keeps the torch build compatible with a 3090 driver. The
+`train` extra pins `transformers==4.57.1`, `peft==0.17.1`,
+`accelerate==1.8.1`, and `safetensors==0.5.3`.
+
 ## Run the fake pipeline
 
 The fake path needs no GPU, no network, no Docker, and no model download. It is
@@ -28,8 +40,54 @@ the code separately, and only on a full test pass.
 Flags: `--config PATH` (default: the packaged config at
 `src/rlvr/resources/default_config.toml`) and `--runs-root PATH` (default
 `./runs`). Unknown arms, a missing config, and an invalid config print one
-message on stderr and exit 2. Without `--fake` the command says that real
-backends are not implemented yet.
+message on stderr and exit 2.
+
+## Real training
+
+One command per arm, no manual edits:
+
+```bash
+OPENCODE_GO_API_KEY=... ./run.sh code-score
+```
+
+`run.sh` reads the judge key from the environment, passes every extra argument
+to `rlvr run`, and defaults to `configs/real.toml`. The four arms are
+`code-score`, `hybrid`, `gated-judge`, `gated-process`. The real path uses the
+Qwen generator (`src/rlvr/qwen.py`), the Docker test runner, and the judge
+client, all behind the same `Experiment` seam.
+
+A smoke run validates a fresh 3090 in minutes:
+
+```bash
+OPENCODE_GO_API_KEY=... ./run.sh code-score --config configs/smoke.toml
+```
+
+The smoke profile runs 8 training steps (8 prompt groups of 8 generations, 64
+rollouts), two checkpoint evaluations on 4 questions, and a final evaluation on
+8 questions. Expected runtime on a 3090 is roughly 5 to 10 minutes, dominated
+by the Docker test runs. This estimate is unverified: there is no GPU in this
+environment.
+
+## Checkpoints and resume
+
+A checkpoint is saved every `[run] checkpoint_every_steps` steps (default 50).
+Each checkpoint directory holds the LoRA adapter, the optimizer state, the step
+number, and a `checkpoint.json` manifest. After a crash, resume from the last
+checkpoint:
+
+```bash
+OPENCODE_GO_API_KEY=... ./run.sh code-score --resume
+```
+
+Resume opens the latest run folder for the arm, restores the model, optimizer,
+and step, truncates any records past the checkpoint, and continues appending to
+the same folder. Records are never duplicated.
+
+## Budget guards
+
+`[budget] max_steps` and `[budget] max_judge_calls` cap the run. The loop stops
+cleanly at the cap, writes the final evaluation, and records the reason
+(`completed`, `max_steps`, or `max_judge_calls`) in `eval.json`.
 
 ## Tests
 
@@ -49,7 +107,8 @@ runs/<arm>/<timestamp>/
     metrics.jsonl    one row per step: mean reward, pass rate, entropy,
                      completion length, cache hits
     eval.json        final pass@1 plus every checkpoint evaluation
-    checkpoints/     empty in the fake path, task 8 writes adapters here
+    checkpoints/     one directory per saved step: LoRA adapter, optimizer
+                     state, and a checkpoint.json manifest
 ```
 
 `<timestamp>` is UTC as `YYYYMMDDTHHMMSSZ`.
@@ -180,16 +239,21 @@ or the filesystem during a run.
 
 ```python
 Generator.generate(prompt, *, n, temperature) -> list[Generation]
+Generator.update(prompt, generations, rewards) -> None
+Generator.save_checkpoint(directory) -> None
+Generator.load_checkpoint(directory) -> None
 TestRunner.run(prompt, code) -> Outcome
 Judge.score_output(prompt, code) -> JudgeResult
 Judge.score_process(prompt, reasoning) -> JudgeResult
 Store.write_meta(meta) / append_rollout(record) / append_metric(row) / write_eval(payload)
-Store.arm, Store.timestamp, Store.run_dir
+Store.arm, Store.timestamp, Store.run_dir, Store.checkpoints_dir
 ```
 
 `temperature` is `0.0` for greedy evaluation. `n` is the number of generations
-per prompt; the fake path uses 1, GRPO will use 8. The judge sees the problem
-and the code, or the problem and the trace. It never sees the tests.
+per prompt; training samples 8, evaluation samples 1. One training step samples
+one prompt group, runs and judges all 8, logs 8 records, then calls `update`
+once with the group rewards. The judge sees the problem and the code, or the
+problem and the trace. It never sees the tests.
 
 Fakes in `src/rlvr/fake.py`: output depends on prompt id and decoding mode, test
 outcome on prompt id and code, judge score on judge kind, prompt id, and text.
@@ -249,9 +313,13 @@ path uses the fake judge and needs no key.
 
 ## Status
 
-Tasks 1 to 7 are done: the fake end-to-end path, config, schema, run folders,
+Tasks 1 to 8 are done: the fake end-to-end path, config, schema, run folders,
 merged MBPP split, Docker test runner, the judge client, all four reward arms,
 entropy and length logging, the checkpoint and final evaluation schedule, the
 summary command, the static HTML report, and the Pages publish command. Task 8
-adds the pinned GPU environment, checkpoint resume, budget guards, and the real
-runs.
+adds the real Qwen generator and GRPO trainer, the pinned GPU environment, one
+command per arm, checkpoint resume, budget guards, and the smoke profile.
+
+The real generator, GRPO update, and the 15-minute smoke runtime are not
+verified here because this environment has no GPU. The Pages publish command
+exists but is not run live here: it needs a writable remote.
