@@ -7,9 +7,9 @@ and plug into the same Experiment seam without changing this parser. The judge
 backend is chosen before the run folder is made, so a judge arm with no key
 fails at startup.
 
-Exit codes: 0 success, 2 for a bad command line, unknown or pending arm, bad
-config, or a missing judge key. Messages for those cases go to stderr without a
-traceback.
+Exit codes: 0 success, 2 for a bad command line, unknown or unimplemented arm,
+bad config, or a missing judge key. Messages for those cases go to stderr
+without a traceback.
 """
 
 from __future__ import annotations

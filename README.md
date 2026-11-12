@@ -19,9 +19,9 @@ deterministic: the same command produces the same rollout records.
 .venv/bin/rlvr run --arm code-score --fake
 ```
 
-Arms: `code-score`, `hybrid`, `gated-judge`, `gated-process`. This build
-implements `code-score`, `hybrid`, and `gated-judge`. `gated-process` exits 2
-with a clear message until Task 6 adds it.
+Arms: `code-score`, `hybrid`, `gated-judge`, `gated-process`. All four are
+implemented on the fake path. The process arm judges the reasoning trace and
+the code separately, and only on a full test pass.
 Flags: `--config PATH` (default: the packaged config at
 `src/rlvr/resources/default_config.toml`) and `--runs-root PATH` (default
 `./runs`). Unknown arms, a missing config, and an invalid config print one
@@ -145,9 +145,10 @@ Any failed test closes the gate, so a gated arm makes no judge call. For the
 gated arms zero tests counts as a failure. For `code-score` zero tests is an
 error: a rollout with nothing to run must fail loudly, not score 0.
 
-`code-score`, `hybrid`, and `gated-judge` are implemented in this build.
-`gated-process` is accepted by the parser but stops before a run folder is
-made.
+`gated-process` calls the process judge with the problem and the reasoning
+trace, then the output judge with the problem and the code. Both scores are
+stored in the rollout record. An empty trace is sent to the judge like any
+other trace.
 
 For a real run, the judge client is built at startup only for arms that use the
 judge, so a missing `OPENCODE_GO_API_KEY` fails before any rollout. The fake
@@ -155,7 +156,7 @@ path uses the fake judge and needs no key.
 
 ## Status
 
-Tasks 1 to 5 are done: the fake end-to-end path, config, schema, run folders,
-merged MBPP split, Docker test runner, the judge client, and the code-score,
-hybrid, and gated-judge reward arms. Tasks 6 to 8 add the process arm, GPU
-training, evaluation and reporting, and Vast.ai packaging.
+Tasks 1 to 6 are done: the fake end-to-end path, config, schema, run folders,
+merged MBPP split, Docker test runner, the judge client, and all four reward
+arms. Tasks 7 and 8 add GPU training, evaluation and reporting, and Vast.ai
+packaging.
