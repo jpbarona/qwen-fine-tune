@@ -2,11 +2,14 @@
 
     rlvr run --arm <code-score|hybrid|gated-judge|gated-process> --fake
 
-Task 1 implements the fake path only. Real backends arrive in later tasks and
-plug into the same Experiment seam without changing this parser.
+This build implements the fake path only. Real backends arrive in later tasks
+and plug into the same Experiment seam without changing this parser. The judge
+backend is chosen before the run folder is made, so a judge arm with no key
+fails at startup.
 
-Exit codes: 0 success, 2 for a bad command line, unknown arm, or bad config.
-Messages for those cases go to stderr without a traceback.
+Exit codes: 0 success, 2 for a bad command line, unknown or pending arm, bad
+config, or a missing judge key. Messages for those cases go to stderr without a
+traceback.
 """
 
 from __future__ import annotations
@@ -16,19 +19,51 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .config import ConfigError, default_config_path, load_config
-from .experiment import Experiment
+from .config import Config, ConfigError, default_config_path, load_config
+from .experiment import Experiment, Judge, Prompt
 from .fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
-from .reward import ARMS, ArmNotImplemented, check_arm_implemented
+from .judge import JudgeClient, MissingAPIKeyError
+from .reward import (
+    ARMS,
+    ArmNotImplemented,
+    check_arm_implemented,
+    uses_output_judge,
+    uses_process_judge,
+)
 from .runs import RunStore
 
-__all__ = ["build_parser", "main"]
+__all__ = ["build_judge", "build_parser", "main"]
 
 USAGE_ERROR = 2
 
 
 class UsageError(ValueError):
     """A command line problem the user can fix."""
+
+
+class UnusedJudge:
+    """A judge for arms that never score with one. Calling it is a bug."""
+
+    def score_output(self, prompt: Prompt, code: str):
+        raise AssertionError("this arm must never call the output judge")
+
+    def score_process(self, prompt: Prompt, reasoning: str):
+        raise AssertionError("this arm must never call the process judge")
+
+
+def build_judge(arm: str, config: Config, *, fake: bool) -> Judge:
+    """Pick the judge backend for an arm, before the run folder is created.
+
+    The fake path stays offline and needs no key. A real run builds the judge
+    client only for arms that score with it, so a missing key fails at startup
+    instead of after the first rollout. The code-score arm gets a judge that
+    raises if it is ever called.
+    """
+    if fake:
+        return FakeJudge()
+    if uses_output_judge(arm) or uses_process_judge(arm):
+        return JudgeClient.from_config(config)
+    return UnusedJudge()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -60,16 +95,22 @@ def build_parser() -> argparse.ArgumentParser:
 def run_command(args: argparse.Namespace) -> int:
     if args.arm not in ARMS:
         raise UsageError(f"unknown arm {args.arm!r}. valid arms: {', '.join(ARMS)}")
-    if not args.fake:
-        raise UsageError(
-            f"real backends for arm {args.arm!r} are not implemented yet, add --fake"
-        )
 
     config = load_config(args.config if args.config is not None else default_config_path())
     try:
         check_arm_implemented(args.arm)
     except ArmNotImplemented as error:
         raise UsageError(str(error)) from error
+
+    # Build the judge before the run folder, so a missing key for a judge arm
+    # fails before any rollout and leaves no run folder behind.
+    judge = build_judge(args.arm, config, fake=args.fake)
+
+    if not args.fake:
+        raise UsageError(
+            f"real backends for arm {args.arm!r} are not implemented yet, add --fake"
+        )
+
     try:
         store = RunStore(args.runs_root, args.arm)
     except OSError as error:
@@ -79,7 +120,7 @@ def run_command(args: argparse.Namespace) -> int:
         arm=args.arm,
         config=config,
         generator=FakeGenerator(),
-        judge=FakeJudge(),
+        judge=judge,
         test_runner=FakeTestRunner(),
         store=store,
         prompts=fake_prompts(config.prompts_per_step),
@@ -101,7 +142,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "run":
             return run_command(args)
         raise UsageError(f"unknown command {args.command!r}")
-    except (UsageError, ConfigError) as error:
+    except (UsageError, ConfigError, MissingAPIKeyError) as error:
         print(f"rlvr: {error}", file=sys.stderr)
         return USAGE_ERROR
 
