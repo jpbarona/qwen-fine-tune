@@ -10,10 +10,10 @@ The table comes from SPEC.md and is frozen:
 | gated-process  | 0                        | 0.5 * process + 0.5 * judge |
 
 Each arm gets one small function, and `ARM_REWARDS` is the single dispatch
-point. Task 4 implements `code-score` only. The other three arms are named in
-`ARMS`, but they raise `ArmNotImplemented` before a run starts, until their
-tasks add a function to the table. Adding an arm means adding an entry here.
-The Experiment loop never changes.
+point. Task 4 implements `code-score` only. The other three arm names exist in
+`ARMS`, but they have no function yet, so a run stops before it starts. Adding
+an arm means adding one entry to `ARM_REWARDS`. The Experiment loop never
+changes.
 
 "Tests fail" means any test failed, so a rollout that passes nothing and one
 that passes all but one both count as failures for the gated arms. A task with
@@ -48,10 +48,6 @@ OUTPUT_JUDGE_ARMS = frozenset({"hybrid", "gated-judge", "gated-process"})
 #: Arms whose reward is composed from the process judge.
 PROCESS_JUDGE_ARMS = frozenset({"gated-process"})
 
-#: Arms that have no reward function yet. Remove a name here when its task
-#: adds the function to `ARM_REWARDS`.
-PENDING_ARMS = frozenset({"hybrid", "gated-judge", "gated-process"})
-
 RewardFn = Callable[..., float]
 
 
@@ -66,16 +62,6 @@ class ArmNotImplemented(NotImplementedError):
 def _check_arm(arm: str) -> None:
     if arm not in ARMS:
         raise RewardError(f"unknown arm {arm!r}. valid arms: {', '.join(ARMS)}")
-
-
-def check_arm_implemented(arm: str) -> None:
-    """Fail early when an arm has no reward function yet."""
-    _check_arm(arm)
-    if arm in PENDING_ARMS:
-        raise ArmNotImplemented(
-            f"arm {arm!r} is not implemented yet, only 'code-score' is. "
-            "The other three arms land in Tasks 5 and 6."
-        )
 
 
 def _check_counts(tests_passed: int, tests_total: int) -> None:
@@ -140,6 +126,20 @@ def reward_code_score(
 ARM_REWARDS: dict[str, RewardFn] = {
     "code-score": reward_code_score,
 }
+
+#: Arms that are named but have no function yet. Derived from the table, so
+#: there is one source of truth.
+PENDING_ARMS = frozenset(ARMS) - frozenset(ARM_REWARDS)
+
+
+def check_arm_implemented(arm: str) -> None:
+    """Reject an unknown arm, and an arm that has no reward function yet."""
+    _check_arm(arm)
+    if arm in PENDING_ARMS:
+        raise ArmNotImplemented(
+            f"arm {arm!r} is not implemented yet, only 'code-score' is. "
+            "The other three arms land in Tasks 5 and 6."
+        )
 
 
 def compose_reward(
