@@ -1,7 +1,7 @@
 """Tests for reward composition. The table is frozen in SPEC.md.
 
-Task 4 implements the code-score arm only. The other three arms are named and
-must fail clearly until their tasks land.
+Tasks 4 and 5 implement the code-score, hybrid, and gated-judge arms. The
+gated-process arm is named and must fail clearly until Task 6 lands.
 """
 
 from __future__ import annotations
@@ -11,13 +11,17 @@ import pytest
 from rlvr.reward import (
     ARM_REWARDS,
     ARMS,
+    PENDING_ARMS,
     ArmNotImplemented,
     RewardError,
     all_tests_passed,
     check_arm_implemented,
     code_score,
     compose_reward,
+    gates_on_tests,
     reward_code_score,
+    reward_gated_judge,
+    reward_hybrid,
     uses_output_judge,
     uses_process_judge,
 )
@@ -83,19 +87,89 @@ def test_counts_must_be_sane() -> None:
         code_score(-1, 2)
 
 
-def test_only_code_score_is_implemented() -> None:
-    assert set(ARM_REWARDS) == {"code-score"}
-    assert set(ARM_REWARDS) | {"hybrid", "gated-judge", "gated-process"} == set(ARMS)
-    check_arm_implemented("code-score")
-
-
-@pytest.mark.parametrize("arm", ["hybrid", "gated-judge", "gated-process"])
-def test_the_other_three_arms_fail_clearly(arm: str) -> None:
-    with pytest.raises(ArmNotImplemented, match=arm):
+def test_the_reward_table_is_the_single_arm_list() -> None:
+    assert set(ARM_REWARDS) == {"code-score", "hybrid", "gated-judge"}
+    assert set(ARM_REWARDS) | PENDING_ARMS == set(ARMS)
+    assert PENDING_ARMS == {"gated-process"}
+    for arm in ARM_REWARDS:
         check_arm_implemented(arm)
-    with pytest.raises(ArmNotImplemented, match=arm):
+
+
+def test_judge_arms_gate_on_the_tests() -> None:
+    assert gates_on_tests("code-score") is False
+    for arm in ("hybrid", "gated-judge", "gated-process"):
+        assert gates_on_tests(arm) is True
+
+
+@pytest.mark.parametrize("judge", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_hybrid_on_a_full_pass_is_half_plus_half_judge(judge: float) -> None:
+    expected = 0.5 + 0.5 * judge
+    assert reward_hybrid(
+        tests_passed=4, tests_total=4, judge_score=judge
+    ) == pytest.approx(expected)
+    assert compose_reward(
+        "hybrid", tests_passed=4, tests_total=4, judge_score=judge
+    ) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("judge", [0.0, 0.25, 0.5, 0.75, 1.0])
+def test_gated_judge_on_a_full_pass_is_the_judge_score(judge: float) -> None:
+    assert reward_gated_judge(
+        tests_passed=2, tests_total=2, judge_score=judge
+    ) == pytest.approx(judge)
+    assert compose_reward(
+        "gated-judge", tests_passed=2, tests_total=2, judge_score=judge
+    ) == pytest.approx(judge)
+
+
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+@pytest.mark.parametrize(
+    "passed,total",
+    [(0, 4), (1, 4), (3, 4), (0, 0)],
+)
+def test_gated_arms_score_zero_when_the_gate_is_closed(
+    arm: str, passed: int, total: int
+) -> None:
+    # No judge score is supplied, which proves the gate closes before the
+    # judge is consulted.
+    assert compose_reward(arm, tests_passed=passed, tests_total=total) == 0.0
+
+
+def test_a_pass_without_a_judge_score_fails_loudly() -> None:
+    for arm in ("hybrid", "gated-judge"):
+        with pytest.raises(RewardError, match="judge"):
+            compose_reward(arm, tests_passed=4, tests_total=4)
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.1, float("nan"), float("inf")])
+def test_a_judge_score_outside_the_unit_range_fails_loudly(bad: float) -> None:
+    for arm in ("hybrid", "gated-judge"):
+        with pytest.raises(RewardError, match="judge"):
+            compose_reward(
+                arm, tests_passed=4, tests_total=4, judge_score=bad
+            )
+
+
+def test_a_boolean_judge_score_is_not_a_number() -> None:
+    with pytest.raises(RewardError, match="judge"):
+        compose_reward("hybrid", tests_passed=4, tests_total=4, judge_score=True)
+
+
+def test_the_process_score_is_ignored_by_the_hybrid_arm() -> None:
+    assert reward_hybrid(
+        tests_passed=4,
+        tests_total=4,
+        judge_score=1.0,
+        process_score=0.0,
+    ) == pytest.approx(1.0)
+
+
+def test_the_process_arm_fails_clearly() -> None:
+    with pytest.raises(ArmNotImplemented, match="gated-process"):
+        check_arm_implemented("gated-process")
+    with pytest.raises(ArmNotImplemented, match="gated-process"):
         compose_reward(
-            arm,
+            "gated-process",
             tests_passed=4,
             tests_total=4,
             judge_score=1.0,

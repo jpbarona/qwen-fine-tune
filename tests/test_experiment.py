@@ -1,17 +1,26 @@
 """Tests for the Experiment seam: injected Generator, Judge, TestRunner, Store.
 
-Task 4 covers the code-score arm end to end. The other three arms must stop the
-run before any injected backend is called.
+Tasks 4 and 5 cover the code-score, hybrid, and gated-judge arms end to end.
+The gated-process arm must stop the run before any injected backend is called.
 """
 
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
 
 from rlvr.config import load_config
-from rlvr.experiment import Experiment, Generation, JudgeResult, Prompt, Outcome
+from rlvr.experiment import (
+    Experiment,
+    Generation,
+    JudgeResult,
+    Outcome,
+    Prompt,
+    TestResult,
+)
+from rlvr.judge import UnrecoverableJudgeError
 from rlvr.reward import ArmNotImplemented, RewardError
 from rlvr.schema import RolloutRecord
 
@@ -59,9 +68,15 @@ class StubTestRunner:
     be driven from a test.
     """
 
-    def __init__(self, total: int = 2, passes: int | None = None) -> None:
+    def __init__(
+        self,
+        total: int = 2,
+        passes: int | None = None,
+        error_class: str = "assertion",
+    ) -> None:
         self.total = total
         self.passes = passes
+        self.error_class = error_class
         self.calls: list[str] = []
 
     def run(self, prompt: Prompt, code: str) -> Outcome:
@@ -70,10 +85,10 @@ class StubTestRunner:
             return Outcome(
                 tests_passed=self.passes,
                 tests_total=self.total,
-                error_class="pass" if self.passes == self.total else "assertion",
+                error_class="pass" if self.passes == self.total else self.error_class,
             )
         if "FAIL" in code:
-            return Outcome(tests_passed=0, tests_total=self.total, error_class="assertion")
+            return Outcome(tests_passed=0, tests_total=self.total, error_class=self.error_class)
         return Outcome(tests_passed=self.total, tests_total=self.total, error_class="pass")
 
 
@@ -90,6 +105,53 @@ class ExplodingJudge:
     def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
         self.calls += 1
         raise AssertionError("code-score must never call the process judge")
+
+
+class SpyJudge:
+    """Records every argument it is given, so a test can inspect the call."""
+
+    def __init__(self, score: float = 0.5, cache_hit: bool = False) -> None:
+        self.score = score
+        self.cache_hit = cache_hit
+        self.output_calls: list[tuple[Prompt, str]] = []
+        self.process_calls: list[tuple[Prompt, str]] = []
+
+    def score_output(self, prompt: Prompt, code: str) -> JudgeResult:
+        self.output_calls.append((prompt, code))
+        return JudgeResult(score=self.score, cache_hit=self.cache_hit, reason="stub")
+
+    def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
+        self.process_calls.append((prompt, reasoning))
+        return JudgeResult(score=self.score, cache_hit=self.cache_hit, reason="stub")
+
+
+class FailingJudge:
+    """Every judge call raises, as an unrecoverable judge failure would."""
+
+    def score_output(self, prompt: Prompt, code: str) -> JudgeResult:
+        raise UnrecoverableJudgeError("judge rejected the request")
+
+    def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
+        raise UnrecoverableJudgeError("judge rejected the request")
+
+
+class LeakyRunner:
+    """Passes every test and puts a secret marker in the per-test detail."""
+
+    __test__ = False
+
+    def __init__(self, secret: str) -> None:
+        self.secret = secret
+
+    def run(self, prompt: Prompt, code: str) -> Outcome:
+        return Outcome(
+            tests_passed=1,
+            tests_total=1,
+            error_class="pass",
+            results=(
+                TestResult(index=0, passed=True, error_class="pass", detail=self.secret),
+            ),
+        )
 
 
 class RecordingStore:
@@ -211,7 +273,117 @@ def test_a_zero_test_rollout_fails_loudly(tmp_path) -> None:
     assert store.rollouts == []
 
 
-@pytest.mark.parametrize("arm", ["hybrid", "gated-judge", "gated-process"])
+@pytest.mark.parametrize(
+    "arm,expected",
+    [("hybrid", 0.75), ("gated-judge", 0.5)],
+)
+def test_judge_arms_on_a_full_pass_use_the_judge_score(arm, expected, tmp_path) -> None:
+    judge = SpyJudge(score=0.5)
+    store = RecordingStore()
+    result = build(arm, tmp_path, judge=judge, store=store).run()
+    assert result.rollouts == 4
+    assert len(judge.output_calls) == 4
+    assert judge.process_calls == []
+    assert [record.reward for record in store.rollouts] == pytest.approx(
+        [expected] * 4
+    )
+    assert [record.judge_score for record in store.rollouts] == [0.5] * 4
+    assert [record.process_score for record in store.rollouts] == [None] * 4
+    assert [record.code_score for record in store.rollouts] == [1.0] * 4
+
+
+@pytest.mark.parametrize(
+    "arm,expected",
+    [("hybrid", 1.0), ("gated-judge", 1.0)],
+)
+def test_a_judge_score_of_one_gives_the_top_reward(arm, expected, tmp_path) -> None:
+    judge = SpyJudge(score=1.0)
+    store = RecordingStore()
+    build(arm, tmp_path, judge=judge, store=store).run()
+    assert [record.reward for record in store.rollouts] == [expected] * 4
+
+
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+@pytest.mark.parametrize("passed,total", [(0, 2), (1, 2)])
+def test_gated_arms_score_zero_and_skip_the_judge_on_a_failed_test(
+    arm, passed, total, tmp_path
+) -> None:
+    judge = SpyJudge()
+    runner = StubTestRunner(total=total, passes=passed)
+    store = RecordingStore()
+    build(arm, tmp_path, judge=judge, runner=runner, store=store).run()
+    assert judge.output_calls == []
+    assert {record.reward for record in store.rollouts} == {0.0}
+    assert {record.judge_score for record in store.rollouts} == {None}
+    assert {record.code_score for record in store.rollouts} == {passed / total}
+
+
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+def test_gated_arms_score_zero_and_skip_the_judge_on_a_timeout(arm, tmp_path) -> None:
+    judge = SpyJudge()
+    runner = StubTestRunner(total=3, passes=0, error_class="timeout")
+    store = RecordingStore()
+    build(arm, tmp_path, judge=judge, runner=runner, store=store).run()
+    assert judge.output_calls == []
+    assert {record.error_class for record in store.rollouts} == {"timeout"}
+    assert {record.reward for record in store.rollouts} == {0.0}
+    assert {record.judge_score for record in store.rollouts} == {None}
+
+
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+def test_gated_arms_score_zero_and_skip_the_judge_when_there_are_no_tests(
+    arm, tmp_path
+) -> None:
+    judge = SpyJudge()
+    runner = StubTestRunner(total=0, passes=0, error_class="no_tests")
+    store = RecordingStore()
+    build(arm, tmp_path, judge=judge, runner=runner, store=store).run()
+    assert judge.output_calls == []
+    assert {record.error_class for record in store.rollouts} == {"no_tests"}
+    assert {record.reward for record in store.rollouts} == {0.0}
+    assert {record.code_score for record in store.rollouts} == {0.0}
+    assert {record.judge_score for record in store.rollouts} == {None}
+
+
+def test_the_output_judge_sees_the_problem_and_code_only(tmp_path) -> None:
+    secret = "SECRET_TEST_CODE_NEVER_PASS_THIS_TO_THE_JUDGE"
+    judge = SpyJudge(score=1.0)
+    prompts = make_prompts(1)
+    store = RecordingStore()
+    build(
+        "hybrid",
+        tmp_path,
+        judge=judge,
+        runner=LeakyRunner(secret),
+        store=store,
+        prompts=prompts,
+    ).run()
+
+    # The judge is called once per training rollout with the prompt and the
+    # generated code, and with nothing else. The eval pass does not judge.
+    assert judge.output_calls == [(prompts[0], "# code for mbpp-0000")] * 2
+    assert judge.process_calls == []
+    assert secret not in repr(judge.output_calls)
+    assert {field.name for field in fields(Prompt)} == {"prompt_id", "problem"}
+
+
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+def test_a_cached_judge_score_is_recorded(arm, tmp_path) -> None:
+    judge = SpyJudge(score=0.5, cache_hit=True)
+    store = RecordingStore()
+    build(arm, tmp_path, judge=judge, store=store).run()
+    assert [record.cache_hit for record in store.rollouts] == [True] * 4
+
+
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+def test_an_unrecoverable_judge_error_stops_the_run(arm, tmp_path) -> None:
+    store = RecordingStore()
+    with pytest.raises(UnrecoverableJudgeError, match="judge rejected"):
+        build(arm, tmp_path, judge=FailingJudge(), store=store).run()
+    assert store.rollouts == []
+
+
+@pytest.mark.parametrize("arm", ["gated-process"])
 def test_pending_arms_fail_before_any_backend_is_called(arm, tmp_path) -> None:
     generator = StubGenerator()
     runner = StubTestRunner()
