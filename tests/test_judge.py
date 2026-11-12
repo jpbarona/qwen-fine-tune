@@ -13,10 +13,14 @@ from rlvr.config import load_config, default_config_path
 from rlvr.experiment import JudgeResult, Prompt
 from rlvr.judge import (
     DEFAULT_CONCURRENCY,
+    DEFAULT_ENDPOINT,
     DEFAULT_MODEL,
     KEY_ENV,
     OUTPUT_RUBRIC_VERSION,
     PROCESS_RUBRIC_VERSION,
+    REASONING_EFFORT,
+    SESSION_VALUE,
+    USER_AGENT,
     HTTPResponse,
     JudgeCache,
     JudgeCacheEntry,
@@ -37,7 +41,7 @@ from rlvr.judge import (
 
 # A fake credential. The tests assert it never lands on disk or in an error.
 FAKE_KEY = "test-key-never-store-this"
-ENDPOINT = "https://opencode.ai/inference/openai/v1/chat/completions"
+ENDPOINT = "https://opencode.ai/inference/go/openai/v1/chat/completions"
 
 PROBLEM = "Return the sum of all integers from 0 up to n."
 CODE = "def solution(n):\n    return sum(range(n))\n"
@@ -118,7 +122,8 @@ def test_request_goes_to_the_opencode_go_endpoint_with_the_frozen_model(tmp_path
 
     assert result.score == 0.5
     request = transport.requests[0]
-    assert request["url"] == ENDPOINT
+    assert request["url"] == ENDPOINT == DEFAULT_ENDPOINT
+    assert "/inference/go/openai/v1/chat/completions" in request["url"]
     body = transport.body_json()
     assert body["model"] == DEFAULT_MODEL == "deepseek-v4.1-flash"
     assert body["temperature"] == 0.0
@@ -138,14 +143,25 @@ def test_auth_header_carries_the_key_and_nothing_else_exposes_it(tmp_path):
     assert FAKE_KEY not in transport.requests[0]["body"].decode("utf-8")
 
 
-def test_reasoning_effort_parameter_is_omitted(tmp_path):
+def test_cloudflare_headers_are_sent_on_every_request(tmp_path):
+    transport = FakeTransport()
+    client = make_client(transport, tmp_path)
+    client.score_output(prompt(), CODE)
+    client.score_process(prompt(), REASONING)
+
+    assert len(transport.requests) == 2
+    for request in transport.requests:
+        headers = request["headers"]
+        assert headers["User-Agent"] == USER_AGENT == "rlvr/0.1 (research judge)"
+        assert headers["x-opencode-session"] == SESSION_VALUE == "rlvr-judge"
+
+
+def test_reasoning_effort_is_sent_explicitly(tmp_path):
     transport = FakeTransport()
     make_client(transport, tmp_path).score_output(prompt(), CODE)
     body = transport.body_json()
 
-    assert "reasoning" not in body
-    assert "reasoning_effort" not in body
-    assert "effort" not in body
+    assert body["reasoning_effort"] == REASONING_EFFORT == "medium"
 
 
 # --- prompts -------------------------------------------------------------

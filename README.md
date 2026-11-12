@@ -107,9 +107,12 @@ machines. They carry no meaning.
 ## Judge client
 
 `JudgeClient` in `src/rlvr/judge.py` implements the `Judge` seam against the
-OpenCode Go OpenAI-compatible endpoint, model `deepseek-v4.1-flash`, temperature
-0, JSON output. It sends no reasoning effort parameter, so the provider default
-applies.
+OpenCode Go OpenAI-compatible endpoint
+`https://opencode.ai/inference/go/openai/v1/chat/completions`, model
+`deepseek-v4.1-flash`, temperature 0, JSON output, and `reasoning_effort`
+`medium`. Every request sends a concrete `User-Agent` and a stable
+`x-opencode-session` header, because the gateway rejects the default urllib
+User-Agent.
 
 The key comes from `OPENCODE_GO_API_KEY`. `JudgeClient.from_config` reads it and
 fails with `MissingAPIKeyError` before any request. The key is only used in the
