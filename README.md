@@ -104,6 +104,32 @@ outcome on prompt id and code, judge score on judge kind, prompt id, and text.
 Judge scores and test outcomes come from SHA-256, so they repeat across
 machines. They carry no meaning.
 
+## Judge client
+
+`JudgeClient` in `src/rlvr/judge.py` implements the `Judge` seam against the
+OpenCode Go OpenAI-compatible endpoint, model `deepseek-v4.1-flash`, temperature
+0, JSON output. It sends no reasoning effort parameter, so the provider default
+applies.
+
+The key comes from `OPENCODE_GO_API_KEY`. `JudgeClient.from_config` reads it and
+fails with `MissingAPIKeyError` before any request. The key is only used in the
+Authorization header. It is never written to the cache, an error message, or
+`meta.json`.
+
+The output judge sees the problem and code. The process judge sees the problem
+and reasoning trace. Neither prompt has a way to receive task tests.
+
+Calls retry on 408, 429, 5xx, timeouts, and connection errors with exponential
+backoff plus jitter. `[judge] max_attempts` caps the attempts. Other 4xx
+responses raise `UnrecoverableJudgeError` at once.
+
+Scores are cached in `[judge] cache_dir` (default `judge-cache/`). The key is
+SHA-256 over model, judge kind, full prompt text, and rubric version. Writes use
+`os.replace`. Identical requests return `cache_hit=true`.
+
+`score_batch` runs requests on a bounded pool of `[judge] concurrency` threads
+(default 32) and preserves input order.
+
 ## Reward table (frozen, from SPEC.md)
 
 | Arm | Tests fail | Tests pass |
@@ -118,6 +144,6 @@ counts as a failure.
 
 ## Status
 
-Task 1 is done: the fake end-to-end path, config, schema, and run folders. Tasks
-2 to 8 add real data, Docker, the judge client, the arms on GPU, evaluation and
-reporting, and Vast.ai packaging.
+Tasks 1 to 3 are done: the fake end-to-end path, config, schema, run folders,
+merged MBPP split, Docker test runner, and the judge client. Tasks 4 to 8 add
+the arms on GPU, evaluation and reporting, and Vast.ai packaging.
