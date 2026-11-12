@@ -1,0 +1,41 @@
+# Default config for the RLVR reward study.
+# Copy this file and pass --config to change anything for a run.
+# The whole file is recorded in meta.json of every run folder.
+# Never put a key or token in here. The judge key comes from the environment.
+
+[model]
+name = "Qwen/Qwen3-0.6B"
+# Revision is pinned by task 8. Until then this is what the run used.
+revision = "unpinned"
+
+[judge]
+model = "deepseek-v4.1-flash"
+temperature = 0.0
+concurrency = 32
+
+[data]
+name = "mbpp"
+split_seed = 1234
+train_size = 714
+test_size = 250
+
+[training]
+method = "grpo"
+generations_per_prompt = 8
+temperature = 0.9
+learning_rate = 1e-5
+epochs = 5
+lora_rank = 32
+lora_alpha = 64
+max_prompt_tokens = 512
+max_completion_tokens = 768
+
+[run]
+checkpoint_every_steps = 50
+eval_every_steps = 100
+eval_questions = 100
+
+# Backends used by `rlvr run --arm <arm> --fake`.
+[fake]
+steps = 4
+prompts_per_step = 8
