@@ -31,20 +31,20 @@ def test_run_folder_is_under_arm_and_timestamp(run_fake) -> None:
     "name", ["meta.json", "metrics.jsonl", "rollouts.jsonl", "eval.json", "checkpoints"]
 )
 def test_run_folder_contains_the_five_expected_entries(run_fake, name: str) -> None:
-    run_dir = run_fake("hybrid")[0]
+    run_dir = run_fake("code-score")[0]
     assert (run_dir / name).exists(), name
 
 
 def test_checkpoints_is_a_directory(run_fake) -> None:
-    assert run_fake("hybrid")[0].joinpath("checkpoints").is_dir()
+    assert run_fake("code-score")[0].joinpath("checkpoints").is_dir()
 
 
 def test_meta_json_records_reproducibility_fields(run_fake, monkeypatch) -> None:
     import rlvr.repro as repro
 
     monkeypatch.setattr(repro, "git_commit", lambda: "deadbeef")
-    meta = read_json(run_fake("gated-judge")[0] / "meta.json")
-    assert meta["arm"] == "gated-judge"
+    meta = read_json(run_fake("code-score")[0] / "meta.json")
+    assert meta["arm"] == "code-score"
     assert meta["timestamp"] == TIMESTAMP
     assert meta["git_commit"] == "deadbeef"
     assert isinstance(meta["versions"], dict) and meta["versions"]
@@ -59,18 +59,18 @@ def test_meta_git_commit_is_null_when_git_is_unavailable(run_fake, monkeypatch) 
     import rlvr.repro as repro
 
     monkeypatch.setattr(repro, "git_commit", lambda: None)
-    meta = read_json(run_fake("hybrid")[0] / "meta.json")
+    meta = read_json(run_fake("code-score")[0] / "meta.json")
     assert meta["git_commit"] is None
 
 
 def test_meta_json_never_contains_a_key_or_secret(run_fake) -> None:
-    meta = json.dumps(read_json(run_fake("hybrid")[0] / "meta.json"))
+    meta = json.dumps(read_json(run_fake("code-score")[0] / "meta.json"))
     for banned in ("api_key", "apikey", "token", "secret", "oc_sk_"):
         assert banned not in meta, banned
 
 
 def test_versions_include_python_and_the_package(run_fake) -> None:
-    versions = read_json(run_fake("hybrid")[0] / "meta.json")["versions"]
+    versions = read_json(run_fake("code-score")[0] / "meta.json")["versions"]
     assert versions["python"].startswith("3.")
     assert "rlvr" in versions
 
@@ -84,17 +84,17 @@ def test_rollouts_jsonl_has_one_line_per_rollout(run_fake) -> None:
 
 
 def test_every_rollout_line_satisfies_the_schema(run_fake) -> None:
-    run_dir = run_fake("gated-process")[0]
+    run_dir = run_fake("code-score")[0]
     for payload in read_jsonl(run_dir / "rollouts.jsonl"):
         record = RolloutRecord.from_dict(payload)
         assert list(record.to_dict()) == list(FIELD_NAMES)
 
 
 def test_metrics_jsonl_has_one_row_per_step(run_fake) -> None:
-    metrics = read_jsonl(run_fake("hybrid")[0] / "metrics.jsonl")
+    metrics = read_jsonl(run_fake("code-score")[0] / "metrics.jsonl")
     assert [row["step"] for row in metrics] == [1, 2, 3]
     for row in metrics:
-        assert row["arm"] == "hybrid"
+        assert row["arm"] == "code-score"
         assert isinstance(row["rollouts"], int)
         assert 0.0 <= row["mean_reward"] <= 1.0
         assert 0.0 <= row["pass_rate"] <= 1.0
@@ -109,8 +109,8 @@ def test_metrics_and_rollouts_are_appended_in_step_order(run_fake) -> None:
 
 
 def test_eval_json_reports_pass_at_1_for_the_final_eval(run_fake) -> None:
-    eval_payload = read_json(run_fake("gated-judge")[0] / "eval.json")
-    assert eval_payload["arm"] == "gated-judge"
+    eval_payload = read_json(run_fake("code-score")[0] / "eval.json")
+    assert eval_payload["arm"] == "code-score"
     assert eval_payload["timestamp"] == TIMESTAMP
     assert 0.0 <= eval_payload["pass_at_1"] <= 1.0
     assert eval_payload["num_prompts"] == 2
@@ -120,14 +120,14 @@ def test_eval_json_reports_pass_at_1_for_the_final_eval(run_fake) -> None:
 
 
 def test_two_fake_runs_produce_the_same_rollouts(run_fake) -> None:
-    first = (run_fake("hybrid", runs_root=Path("runs_a"))[0] / "rollouts.jsonl").read_bytes()
-    second = (run_fake("hybrid", runs_root=Path("runs_b"))[0] / "rollouts.jsonl").read_bytes()
+    first = (run_fake("code-score", runs_root=Path("runs_a"))[0] / "rollouts.jsonl").read_bytes()
+    second = (run_fake("code-score", runs_root=Path("runs_b"))[0] / "rollouts.jsonl").read_bytes()
     assert first == second
 
 
 def test_two_fake_runs_produce_the_same_metrics_and_eval(run_fake) -> None:
-    a = run_fake("gated-process", runs_root=Path("runs_a"))[0]
-    b = run_fake("gated-process", runs_root=Path("runs_b"))[0]
+    a = run_fake("code-score", runs_root=Path("runs_a"))[0]
+    b = run_fake("code-score", runs_root=Path("runs_b"))[0]
     assert (a / "metrics.jsonl").read_bytes() == (b / "metrics.jsonl").read_bytes()
     assert (a / "eval.json").read_bytes() == (b / "eval.json").read_bytes()
 

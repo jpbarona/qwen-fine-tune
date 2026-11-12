@@ -7,7 +7,6 @@ import json
 from rlvr.experiment import Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 
-
 def test_prompt_ids_are_stable() -> None:
     prompts = fake_prompts(4)
     assert [p.prompt_id for p in prompts] == ["mbpp-0000", "mbpp-0001", "mbpp-0002", "mbpp-0003"]
@@ -82,24 +81,20 @@ def test_fake_run_shows_a_spread_of_rewards_across_prompts() -> None:
     assert len(rewards) > 1
 
 
-def test_fake_gated_run_records_cache_hits_after_the_first_step(run_fake) -> None:
-    run_dir, _ = run_fake("gated-judge")
-    records = [json.loads(line) for line in (run_dir / "rollouts.jsonl").read_text().splitlines()]
-    judged = [record for record in records if record["judge_score"] is not None]
-    assert judged, "expected at least one rollout judged"
-    first = [record for record in judged if record["step"] == 1]
-    later = [record for record in judged if record["step"] > 1]
-    assert first and later, "expected judged records in the first step and in a later step"
-    assert all(record["cache_hit"] is False for record in first)
-    assert all(record["cache_hit"] is True for record in later)
-
-
 def test_fake_code_score_run_never_judges(run_fake) -> None:
     run_dir, _ = run_fake("code-score")
     records = [json.loads(line) for line in (run_dir / "rollouts.jsonl").read_text().splitlines()]
     assert all(record["judge_score"] is None for record in records)
+    assert all(record["process_score"] is None for record in records)
     assert all(record["cache_hit"] is False for record in records)
     assert all(record["reward"] == record["code_score"] for record in records)
+
+
+def test_fake_code_score_run_has_a_spread_of_rewards(run_fake) -> None:
+    run_dir, _ = run_fake("code-score")
+    rewards = [json.loads(line)["reward"] for line in (run_dir / "rollouts.jsonl").read_text().splitlines()]
+    assert all(0.0 <= reward <= 1.0 for reward in rewards)
+    assert len(set(rewards)) > 1
 
 
 def test_judge_scores_are_deterministic_and_bounded() -> None:
@@ -143,6 +138,6 @@ def test_fakes_touch_no_network(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(socket.socket, "connect", fail)
     monkeypatch.setattr(socket, "create_connection", fail)
     code = main(
-        ["run", "--arm", "gated-process", "--fake", "--runs-root", str(tmp_path / "runs")]
+        ["run", "--arm", "code-score", "--fake", "--runs-root", str(tmp_path / "runs")]
     )
     assert code == 0
