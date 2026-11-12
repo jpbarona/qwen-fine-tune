@@ -45,11 +45,62 @@ runs/<arm>/<timestamp>/
     rollouts.jsonl   one record per rollout, schema below
     metrics.jsonl    one row per step: mean reward, pass rate, entropy,
                      completion length, cache hits
-    eval.json        greedy pass@1 over the prompts used in the run
+    eval.json        final pass@1 plus every checkpoint evaluation
     checkpoints/     empty in the fake path, task 8 writes adapters here
 ```
 
 `<timestamp>` is UTC as `YYYYMMDDTHHMMSSZ`.
+
+## Evaluation
+
+Every `[run] eval_every_steps` steps (default 100) the run evaluates a fixed
+subset of the test pool with greedy decoding. The subset is
+`[run] eval_questions` questions (default 100), chosen once per run by
+`[run] eval_subset_seed` (default 2026). That seed is separate from the data
+split seed, and the subset is a seeded sample, not the first questions in file
+order. The subset keeps the pool order.
+
+The final evaluation always covers the whole test pool, which is the 250
+held-out questions for a real run. pass@1 is the only metric: the fraction of
+questions whose greedy generation passed every task test.
+
+`eval.json` has the final result at the top level and every evaluation in a
+list. It is replaced atomically after each evaluation, so a crash keeps the
+last checkpoint result.
+
+```json
+{
+  "arm": "hybrid",
+  "timestamp": "20261112T000000Z",
+  "step": 1000,
+  "pass_at_1": 0.42,
+  "count": 250,
+  "subset": {"method": "seeded_sample", "seed": 2026,
+             "requested": 100, "selected": 100, "pool_size": 250},
+  "evaluations": [
+    {"step": 100, "kind": "checkpoint", "pass_at_1": 0.31, "count": 100,
+     "prompt_ids": ["..."], "subset": {"...": "the same selector"}},
+    {"step": 1000, "kind": "final", "pass_at_1": 0.42, "count": 250,
+     "prompt_ids": ["..."], "subset": null}
+  ]
+}
+```
+
+The fake CLI path has no dataset prompts, so its evaluation falls back to the
+training prompts. The 100/250 schedule is exercised through `Experiment` with
+injected eval prompts.
+
+## The rollouts record: entropy and length
+
+`mean_entropy` is the mean Shannon entropy of the model's next-token
+distribution at each generated token position, in nats, averaged over the
+generated tokens only. Prompt tokens are excluded. The generator computes it
+from the logprobs it already receives, and the Experiment records it unchanged.
+It is logged, not rewarded, and it is not bounded by 1. The fake generator
+returns a deterministic synthetic value.
+
+`completion_tokens` is the completion length used for the length study. It is
+also logged, not rewarded.
 
 ## Rollout record schema (frozen)
 
@@ -66,7 +117,7 @@ and types are a contract.
 | `code` | str | generated code only |
 | `prompt_tokens` | int | |
 | `completion_tokens` | int | completion length for the length study |
-| `mean_entropy` | float | mean per-token entropy, logged not rewarded, can exceed 1 |
+| `mean_entropy` | float | mean per-token entropy in nats over generated tokens, logs only, can exceed 1 |
 | `tests_passed` | int | |
 | `tests_total` | int | |
 | `error_class` | str | `pass` when every test passed, otherwise the failure class set by task 2 |
@@ -78,6 +129,42 @@ and types are a contract.
 
 Timestamps and truncation flags are deliberately out of this record. Truncation
 rate is a step-level metric, added in a later task.
+
+## Summary and static report
+
+`summary` takes one or more run folders. A `runs/` root, or a single arm folder,
+also works and expands to every `<timestamp>` folder below it.
+
+```bash
+.venv/bin/rlvr summary runs
+.venv/bin/rlvr summary runs/code-score/20261112T000000Z runs/hybrid/20261113T000000Z
+.venv/bin/rlvr summary runs --html report.html
+.venv/bin/rlvr summary runs --no-html
+```
+
+It prints four plain tables, one per metric: reward, pass@1, entropy, and
+completion length. Steps are rows and arms are columns, so arms sit side by
+side. pass@1 shows only at steps where an evaluation ran.
+
+The HTML report is written to `report.html` in the current folder unless
+`--html` says otherwise. It is one static file: inline CSS, no script, no
+external font, stylesheet, or image. There is one section per arm with a
+per-step table, and a small comparison table at the top.
+
+## Publish to GitHub Pages
+
+`publish` copies the report into a throwaway git repository as `index.html`,
+adds `.nojekyll`, commits it, and force-pushes that commit to the Pages branch.
+The branch is replaced each time, which is intended for generated output.
+
+```bash
+.venv/bin/rlvr publish --report report.html \
+    --remote git@github.com:<user>/<repo>.git --branch gh-pages
+```
+
+Credentials come from the caller's git setup. This command does not read a
+token. Use a deploy key with write access to the repository. It is not run in
+the test suite, which pushes to a local bare repository instead.
 
 ## The seam
 
@@ -156,7 +243,9 @@ path uses the fake judge and needs no key.
 
 ## Status
 
-Tasks 1 to 6 are done: the fake end-to-end path, config, schema, run folders,
-merged MBPP split, Docker test runner, the judge client, and all four reward
-arms. Tasks 7 and 8 add GPU training, evaluation and reporting, and Vast.ai
-packaging.
+Tasks 1 to 7 are done: the fake end-to-end path, config, schema, run folders,
+merged MBPP split, Docker test runner, the judge client, all four reward arms,
+entropy and length logging, the checkpoint and final evaluation schedule, the
+summary command, the static HTML report, and the Pages publish command. Task 8
+adds the pinned GPU environment, checkpoint resume, budget guards, and the real
+runs.
