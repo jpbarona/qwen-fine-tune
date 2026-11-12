@@ -65,9 +65,11 @@ def test_judge_arms_run_fake_and_populate_judge_scores(arm, config_path, tmp_pat
     assert any(record["judge_score"] is not None for record in records)
 
 
-def test_pending_arm_exits_with_a_clear_message(config_path, tmp_path, capsys) -> None:
+def test_gated_process_runs_fake_and_populates_both_scores(
+    config_path, tmp_path
+) -> None:
     runs_root = tmp_path / "runs"
-    code = main(
+    assert main(
         [
             "run",
             "--arm",
@@ -78,13 +80,24 @@ def test_pending_arm_exits_with_a_clear_message(config_path, tmp_path, capsys) -
             "--runs-root",
             str(runs_root),
         ]
-    )
-    captured = capsys.readouterr()
-    assert code != 0
-    assert captured.out == ""
-    assert "gated-process" in captured.err
-    assert "not implemented" in captured.err
-    assert not (runs_root / "gated-process").exists()
+    ) == 0
+    run_dir = next((runs_root / "gated-process").iterdir())
+    records = [
+        json.loads(line)
+        for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    passing = [record for record in records if record["process_score"] is not None]
+    assert passing
+    for record in passing:
+        assert 0.0 <= record["process_score"] <= 1.0
+        assert 0.0 <= record["judge_score"] <= 1.0
+        assert record["reward"] == pytest.approx(
+            0.5 * record["process_score"] + 0.5 * record["judge_score"]
+        )
+    for record in records:
+        if record["process_score"] is None:
+            assert record["judge_score"] is None
+            assert record["reward"] == 0.0
 
 
 @pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
@@ -123,10 +136,11 @@ def test_build_judge_only_builds_a_client_for_arms_that_judge(
 
     build_judge("hybrid", config, fake=False)
     build_judge("gated-judge", config, fake=False)
-    assert built == [config, config]
+    build_judge("gated-process", config, fake=False)
+    assert built == [config, config, config]
 
     build_judge("hybrid", config, fake=True)
-    assert built == [config, config]
+    assert built == [config, config, config]
 
 
 def test_run_writes_the_four_files(config_path, tmp_path) -> None:

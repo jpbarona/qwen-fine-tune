@@ -1,7 +1,7 @@
 """Tests for the Experiment seam: injected Generator, Judge, TestRunner, Store.
 
-Tasks 4 and 5 cover the code-score, hybrid, and gated-judge arms end to end.
-The gated-process arm must stop the run before any injected backend is called.
+All four arms are covered end to end. The process arm gates on the tests, then
+scores the reasoning trace and the code with separate judge calls.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from rlvr.experiment import (
     TestResult,
 )
 from rlvr.judge import UnrecoverableJudgeError
-from rlvr.reward import ArmNotImplemented, RewardError
+from rlvr.reward import RewardError
 from rlvr.schema import RolloutRecord
 
 CONFIG_TEXT = """\
@@ -114,9 +114,15 @@ class ExplodingJudge:
 class SpyJudge:
     """Records every argument it is given, so a test can inspect the call."""
 
-    def __init__(self, score: float = 0.5, cache_hit: bool = False) -> None:
+    def __init__(
+        self,
+        score: float = 0.5,
+        cache_hit: bool = False,
+        process_score: float | None = None,
+    ) -> None:
         self.score = score
         self.cache_hit = cache_hit
+        self.process_score = score if process_score is None else process_score
         self.output_calls: list[tuple[Prompt, str]] = []
         self.process_calls: list[tuple[Prompt, str]] = []
 
@@ -126,7 +132,9 @@ class SpyJudge:
 
     def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
         self.process_calls.append((prompt, reasoning))
-        return JudgeResult(score=self.score, cache_hit=self.cache_hit, reason="stub")
+        return JudgeResult(
+            score=self.process_score, cache_hit=self.cache_hit, reason="stub"
+        )
 
 
 class FailingJudge:
@@ -375,7 +383,7 @@ def test_the_output_judge_sees_the_problem_and_code_only(tmp_path) -> None:
     assert {field.name for field in fields(Prompt)} == {"prompt_id", "problem"}
 
 
-@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge", "gated-process"])
 def test_a_cached_judge_score_is_recorded(arm, tmp_path) -> None:
     judge = SpyJudge(score=0.5, cache_hit=True)
     store = RecordingStore()
@@ -383,7 +391,7 @@ def test_a_cached_judge_score_is_recorded(arm, tmp_path) -> None:
     assert [record.cache_hit for record in store.rollouts] == [True] * 4
 
 
-@pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
+@pytest.mark.parametrize("arm", ["hybrid", "gated-judge", "gated-process"])
 def test_an_unrecoverable_judge_error_stops_the_run(arm, tmp_path) -> None:
     store = RecordingStore()
     with pytest.raises(UnrecoverableJudgeError, match="judge rejected"):
@@ -391,19 +399,166 @@ def test_an_unrecoverable_judge_error_stops_the_run(arm, tmp_path) -> None:
     assert store.rollouts == []
 
 
-@pytest.mark.parametrize("arm", ["gated-process"])
-def test_pending_arms_fail_before_any_backend_is_called(arm, tmp_path) -> None:
-    generator = StubGenerator()
-    runner = StubTestRunner()
-    judge = ExplodingJudge()
+def test_gated_process_on_a_full_pass_uses_both_judges(tmp_path) -> None:
+    judge = SpyJudge(score=0.5, process_score=1.0)
     store = RecordingStore()
-    with pytest.raises(ArmNotImplemented, match=arm):
-        build(arm, tmp_path, generator=generator, runner=runner, judge=judge, store=store).run()
-    assert generator.calls == []
-    assert runner.calls == []
-    assert judge.calls == 0
-    assert store.rollouts == []
-    assert store.meta is None
+    result = build("gated-process", tmp_path, judge=judge, store=store).run()
+
+    assert result.rollouts == 4
+    assert len(judge.output_calls) == 4
+    assert len(judge.process_calls) == 4
+    assert [record.judge_score for record in store.rollouts] == [0.5] * 4
+    assert [record.process_score for record in store.rollouts] == [1.0] * 4
+    assert [record.code_score for record in store.rollouts] == [1.0] * 4
+    assert [record.reward for record in store.rollouts] == pytest.approx([0.75] * 4)
+
+
+def test_the_process_judge_sees_the_problem_and_trace_only(tmp_path) -> None:
+    secret = "SECRET_TEST_CODE_NEVER_PASS_THIS_TO_THE_JUDGE"
+    judge = SpyJudge(score=1.0, process_score=1.0)
+    prompts = make_prompts(1)
+    store = RecordingStore()
+    build(
+        "gated-process",
+        tmp_path,
+        judge=judge,
+        runner=LeakyRunner(secret),
+        store=store,
+        prompts=prompts,
+    ).run()
+
+    assert judge.process_calls == [(prompts[0], "trace for mbpp-0000")] * 2
+    assert judge.output_calls == [(prompts[0], "# code for mbpp-0000")] * 2
+    assert secret not in repr(judge.process_calls)
+    assert secret not in repr(judge.output_calls)
+
+
+@pytest.mark.parametrize("passed,total", [(0, 2), (1, 2)])
+@pytest.mark.parametrize(
+    "error_class", ["wrong_answer", "syntax_error", "runtime_error", "runner_error"]
+)
+def test_gated_process_scores_zero_and_skips_both_judges_on_a_failed_test(
+    passed, total, error_class, tmp_path
+) -> None:
+    judge = SpyJudge()
+    runner = StubTestRunner(total=total, passes=passed, error_class=error_class)
+    store = RecordingStore()
+    build("gated-process", tmp_path, judge=judge, runner=runner, store=store).run()
+
+    assert judge.output_calls == []
+    assert judge.process_calls == []
+    assert {record.error_class for record in store.rollouts} == {error_class}
+    assert {record.reward for record in store.rollouts} == {0.0}
+    assert {record.judge_score for record in store.rollouts} == {None}
+    assert {record.process_score for record in store.rollouts} == {None}
+    assert {record.code_score for record in store.rollouts} == {passed / total}
+
+
+def test_gated_process_scores_zero_and_skips_both_judges_on_a_timeout(
+    tmp_path,
+) -> None:
+    judge = SpyJudge()
+    runner = StubTestRunner(total=3, passes=0, error_class="timeout")
+    store = RecordingStore()
+    build("gated-process", tmp_path, judge=judge, runner=runner, store=store).run()
+
+    assert judge.output_calls == []
+    assert judge.process_calls == []
+    assert {record.error_class for record in store.rollouts} == {"timeout"}
+    assert {record.reward for record in store.rollouts} == {0.0}
+    assert {record.judge_score for record in store.rollouts} == {None}
+    assert {record.process_score for record in store.rollouts} == {None}
+
+
+def test_gated_process_scores_zero_and_skips_both_judges_when_there_are_no_tests(
+    tmp_path,
+) -> None:
+    judge = SpyJudge()
+    runner = StubTestRunner(total=0, passes=0, error_class="no_tests")
+    store = RecordingStore()
+    build("gated-process", tmp_path, judge=judge, runner=runner, store=store).run()
+
+    assert judge.output_calls == []
+    assert judge.process_calls == []
+    assert {record.error_class for record in store.rollouts} == {"no_tests"}
+    assert {record.reward for record in store.rollouts} == {0.0}
+    assert {record.code_score for record in store.rollouts} == {0.0}
+    assert {record.judge_score for record in store.rollouts} == {None}
+    assert {record.process_score for record in store.rollouts} == {None}
+
+
+class EmptyTraceGenerator(StubGenerator):
+    """Returns code with an empty reasoning trace."""
+
+    def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
+        return [
+            Generation(
+                reasoning="",
+                code=f"# code for {prompt.prompt_id}",
+                prompt_tokens=10,
+                completion_tokens=20,
+                mean_entropy=0.5,
+            )
+            for _ in range(n)
+        ]
+
+
+def test_an_empty_trace_is_a_valid_judge_input(tmp_path) -> None:
+    judge = SpyJudge(score=0.5, process_score=0.25)
+    store = RecordingStore()
+    build(
+        "gated-process",
+        tmp_path,
+        generator=EmptyTraceGenerator(),
+        judge=judge,
+        store=store,
+    ).run()
+
+    assert judge.process_calls == [
+        (prompt, "") for prompt in make_prompts()
+    ] * 2
+    assert [record.reasoning for record in store.rollouts] == [""] * 4
+    assert [record.process_score for record in store.rollouts] == [0.25] * 4
+    assert [record.reward for record in store.rollouts] == pytest.approx([0.375] * 4)
+
+
+def test_a_fake_gated_process_run_populates_every_record_field(tmp_path) -> None:
+    from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
+
+    prompts = fake_prompts(6)
+    store = RecordingStore()
+    build(
+        "gated-process",
+        tmp_path,
+        generator=FakeGenerator(),
+        judge=FakeJudge(),
+        runner=FakeTestRunner(),
+        store=store,
+        prompts=prompts,
+    ).run()
+
+    passing = [
+        record
+        for record in store.rollouts
+        if record.tests_total > 0 and record.tests_passed == record.tests_total
+    ]
+    assert passing, "the fake run needs at least one full pass"
+    for record in store.rollouts:
+        assert record.arm == "gated-process"
+        assert record.reasoning
+        assert record.code
+        assert isinstance(record.mean_entropy, float)
+        assert record.tests_passed <= record.tests_total
+        if record.tests_passed == record.tests_total and record.tests_total > 0:
+            assert isinstance(record.process_score, float)
+            assert isinstance(record.judge_score, float)
+            assert record.reward == pytest.approx(
+                0.5 * record.process_score + 0.5 * record.judge_score
+            )
+        else:
+            assert record.process_score is None
+            assert record.judge_score is None
+            assert record.reward == 0.0
 
 
 def test_metrics_rows_summarize_the_step(tmp_path) -> None:
