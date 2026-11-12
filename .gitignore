@@ -6,3 +6,4 @@ __pycache__/
 judge-cache/
 *.egg-info/
 .pytest_cache/
+report.html
