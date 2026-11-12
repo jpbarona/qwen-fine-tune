@@ -20,8 +20,8 @@ deterministic: the same command produces the same rollout records.
 ```
 
 Arms: `code-score`, `hybrid`, `gated-judge`, `gated-process`. This build
-implements `code-score` only. The other three arms exit 2 with a clear message
-until Tasks 5 and 6 add them.
+implements `code-score`, `hybrid`, and `gated-judge`. `gated-process` exits 2
+with a clear message until Task 6 adds it.
 Flags: `--config PATH` (default: the packaged config at
 `src/rlvr/resources/default_config.toml`) and `--runs-root PATH` (default
 `./runs`). Unknown arms, a missing config, and an invalid config print one
@@ -145,12 +145,17 @@ Any failed test closes the gate, so a gated arm makes no judge call. For the
 gated arms zero tests counts as a failure. For `code-score` zero tests is an
 error: a rollout with nothing to run must fail loudly, not score 0.
 
-Only `code-score` is implemented in this build. The other three arm names are
-accepted by the parser but stop before a run folder is made.
+`code-score`, `hybrid`, and `gated-judge` are implemented in this build.
+`gated-process` is accepted by the parser but stops before a run folder is
+made.
+
+For a real run, the judge client is built at startup only for arms that use the
+judge, so a missing `OPENCODE_GO_API_KEY` fails before any rollout. The fake
+path uses the fake judge and needs no key.
 
 ## Status
 
-Tasks 1 to 4 are done: the fake end-to-end path, config, schema, run folders,
-merged MBPP split, Docker test runner, the judge client, and the code-score
-reward arm. Tasks 5 to 8 add the judge arms, GPU training, evaluation and
-reporting, and Vast.ai packaging.
+Tasks 1 to 5 are done: the fake end-to-end path, config, schema, run folders,
+merged MBPP split, Docker test runner, the judge client, and the code-score,
+hybrid, and gated-judge reward arms. Tasks 6 to 8 add the process arm, GPU
+training, evaluation and reporting, and Vast.ai packaging.
