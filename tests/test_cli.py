@@ -207,11 +207,16 @@ def test_unparseable_config_is_reported_on_stderr(tmp_path, capsys) -> None:
 
 
 def test_without_fake_the_command_asks_for_the_train_extra(config_path, tmp_path, capsys) -> None:
-    code = main(["run", "--arm", "code-score", "--config", str(config_path)])
+    runs_root = tmp_path / "runs"
+    code = main(
+        ["run", "--arm", "code-score", "--config", str(config_path), "--runs-root", str(runs_root)]
+    )
     captured = capsys.readouterr()
     assert code != 0
     assert "train extra" in captured.err
     assert "--fake" in captured.err
+    # The generator fails before the run folder is made, so nothing is left behind.
+    assert not (runs_root / "code-score").exists()
 
 
 def test_arm_is_required(tmp_path, capsys) -> None:

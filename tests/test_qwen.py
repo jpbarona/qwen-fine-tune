@@ -16,6 +16,7 @@ from rlvr.qwen import (
     group_advantages,
     k3_divergence,
     log_softmax,
+    mean_token_loss,
     seed_rngs,
     split_thinking_and_code,
     truncate_prompt,
@@ -197,3 +198,23 @@ def test_seed_rngs_seeds_the_python_rng() -> None:
     seed_rngs(1234)
     second = random.random()
     assert first == second
+
+
+def test_mean_token_loss_weights_tokens_not_sequences() -> None:
+    # A short completion (2 tokens, mean 1.0) and a long one (5 tokens, mean
+    # 2.0). Per-token weighting gives 12/7, not the 1.5 sequence mean.
+    short = [1.0, 1.0]
+    long = [2.0, 2.0, 2.0, 2.0, 2.0]
+    assert mean_token_loss([short, long]) == pytest.approx(12.0 / 7.0)
+
+
+def test_mean_token_loss_equal_means_gives_that_mean() -> None:
+    # Both completions have the same mean per-token loss, so the group mean is
+    # that value regardless of the length difference.
+    short = [1.0, 1.0]
+    long = [1.0, 1.0, 1.0, 1.0, 1.0]
+    assert mean_token_loss([short, long]) == pytest.approx(1.0)
+
+
+def test_mean_token_loss_is_zero_for_an_empty_group() -> None:
+    assert mean_token_loss([]) == 0.0

@@ -34,7 +34,6 @@ def test_load_reads_every_declared_value(write_config) -> None:
     assert config.judge_model == "deepseek-v4.1-flash"
     assert config.split_seed == 1234
     assert config.steps == 3
-    assert config.prompts_per_step == 2
 
 
 def test_load_keeps_the_raw_mapping_for_meta(tmp_path) -> None:
@@ -87,7 +86,6 @@ def test_missing_required_key_is_named(tmp_path, text: str, key: str) -> None:
         (GOOD.replace("split_seed = 1234", 'split_seed = "twelve"'), "data.split_seed"),
         (GOOD.replace("steps = 3", "steps = 3.5"), "fake.steps"),
         (GOOD.replace("steps = 3", "steps = 0"), "fake.steps"),
-        (GOOD.replace("prompts_per_step = 2", "prompts_per_step = -1"), "fake.prompts_per_step"),
     ],
 )
 def test_wrong_value_type_is_named(tmp_path, text: str, key: str) -> None:
@@ -253,7 +251,6 @@ def test_a_config_without_the_fake_table_loads(tmp_path) -> None:
     )
     config = load_config(path)
     assert config.steps == 1
-    assert config.prompts_per_step == 1
 
 
 @pytest.mark.parametrize(

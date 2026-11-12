@@ -62,10 +62,6 @@ __all__ = [
     "TestRunner",
 ]
 
-#: Sampling temperature for training generations. The value is read from config
-#: now; this stays as the default for the fake generator's own signature.
-TRAINING_TEMPERATURE = 0.9
-
 #: Greedy decoding, used for evaluation.
 EVAL_TEMPERATURE = 0.0
 
@@ -176,6 +172,14 @@ class Judge(Protocol):
     def score_output(self, prompt: Prompt, code: str) -> JudgeResult: ...
 
     def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult: ...
+
+    def score_outputs(
+        self, items: Sequence[tuple[Prompt, str]]
+    ) -> list[JudgeResult]: ...
+
+    def score_processes(
+        self, items: Sequence[tuple[Prompt, str]]
+    ) -> list[JudgeResult]: ...
 
 
 class Store(Protocol):
@@ -376,10 +380,11 @@ class Experiment:
     def _training_step(self, step: int) -> tuple[list[RolloutRecord], int, int]:
         """Sample one prompt group, run and judge all of it, update once.
 
-        All 8 generations are tested. Each is judged only on a full test pass
-        for its arm, so a failed rollout still costs no judge call. The group's
-        rewards are passed to `update` once. Returns the 8 records plus the
-        counts of truncated and prompt-truncated generations for the step metric.
+        All 8 generations are tested. The passing ones are judged in two batch
+        calls, one for output scores and one for process scores, so the 32-way
+        judge concurrency is used. A failed rollout still costs no judge call.
+        The group's rewards are passed to `update` once. Returns the 8 records
+        plus the counts of truncated and prompt-truncated generations.
         """
         prompt = self._prompt_for_step(step)
         generations = self.generator.generate(
@@ -387,9 +392,43 @@ class Experiment:
             n=self.config.generations_per_prompt,
             temperature=self.config.temperature,
         )
-        records = [
-            self._one_rollout(prompt, generation, step) for generation in generations
+        outcomes = [
+            self.test_runner.run(prompt, generation.code) for generation in generations
         ]
+        passing = [
+            index
+            for index, outcome in enumerate(outcomes)
+            if all_tests_passed(outcome.tests_passed, outcome.tests_total)
+        ]
+
+        judge_scores: list[float | None] = [None] * len(generations)
+        process_scores: list[float | None] = [None] * len(generations)
+        cache_hits = [False] * len(generations)
+
+        if passing and uses_output_judge(self.arm):
+            items = [(prompt, generations[index].code) for index in passing]
+            for index, result in zip(passing, self.judge.score_outputs(items)):
+                judge_scores[index] = result.score
+                cache_hits[index] = result.cache_hit
+        if passing and uses_process_judge(self.arm):
+            items = [(prompt, generations[index].reasoning) for index in passing]
+            for index, result in zip(passing, self.judge.score_processes(items)):
+                process_scores[index] = result.score
+                cache_hits[index] = cache_hits[index] or result.cache_hit
+
+        records = [
+            self._build_record(
+                prompt,
+                generation,
+                outcome,
+                step,
+                judge_score=judge_scores[index],
+                process_score=process_scores[index],
+                cache_hit=cache_hits[index],
+            )
+            for index, (generation, outcome) in enumerate(zip(generations, outcomes))
+        ]
+
         rewards = [record.reward for record in records]
         self.generator.update(prompt, generations, rewards)
         truncated = sum(1 for generation in generations if generation.truncated)
@@ -398,31 +437,21 @@ class Experiment:
         )
         return records, truncated, prompt_truncated
 
-    def _one_rollout(
-        self, prompt: Prompt, generation: Generation, step: int
+    def _build_record(
+        self,
+        prompt: Prompt,
+        generation: Generation,
+        outcome: Outcome,
+        step: int,
+        *,
+        judge_score: float | None,
+        process_score: float | None,
+        cache_hit: bool,
     ) -> RolloutRecord:
-        result = self.test_runner.run(prompt, generation.code)
-        passed = all_tests_passed(result.tests_passed, result.tests_total)
-
-        judge_score: float | None = None
-        process_score: float | None = None
-        cache_hit = False
-
-        # Gated arms only judge code that passed every test. A failed rollout
-        # costs no judge call.
-        if passed and uses_output_judge(self.arm):
-            judged = self.judge.score_output(prompt, generation.code)
-            judge_score = judged.score
-            cache_hit = cache_hit or judged.cache_hit
-        if passed and uses_process_judge(self.arm):
-            judged = self.judge.score_process(prompt, generation.reasoning)
-            process_score = judged.score
-            cache_hit = cache_hit or judged.cache_hit
-
         reward = compose_reward(
             self.arm,
-            tests_passed=result.tests_passed,
-            tests_total=result.tests_total,
+            tests_passed=outcome.tests_passed,
+            tests_total=outcome.tests_total,
             judge_score=judge_score,
             process_score=process_score,
         )
@@ -430,10 +459,10 @@ class Experiment:
         # A question with no tests cannot open the gate. The gated arms record a
         # code score of 0.0 and reward 0.0, with no judge call. The code-score
         # arm still fails loudly: there, zero tests is a broken test runner.
-        if result.tests_total == 0 and gates_on_tests(self.arm):
+        if outcome.tests_total == 0 and gates_on_tests(self.arm):
             record_code_score = 0.0
         else:
-            record_code_score = code_score(result.tests_passed, result.tests_total)
+            record_code_score = code_score(outcome.tests_passed, outcome.tests_total)
 
         return RolloutRecord(
             arm=self.arm,
@@ -444,9 +473,9 @@ class Experiment:
             prompt_tokens=generation.prompt_tokens,
             completion_tokens=generation.completion_tokens,
             mean_entropy=generation.mean_entropy,
-            tests_passed=result.tests_passed,
-            tests_total=result.tests_total,
-            error_class=result.error_class,
+            tests_passed=outcome.tests_passed,
+            tests_total=outcome.tests_total,
+            error_class=outcome.error_class,
             code_score=record_code_score,
             judge_score=judge_score,
             process_score=process_score,

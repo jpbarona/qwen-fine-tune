@@ -183,6 +183,14 @@ class ExplodingJudge:
         self.calls += 1
         raise AssertionError("code-score must never call the process judge")
 
+    def score_outputs(self, items) -> list[JudgeResult]:
+        self.calls += 1
+        raise AssertionError("code-score must never call the output judge")
+
+    def score_processes(self, items) -> list[JudgeResult]:
+        self.calls += 1
+        raise AssertionError("code-score must never call the process judge")
+
 
 class SpyJudge:
     """Records every argument it is given, so a test can inspect the call."""
@@ -209,6 +217,12 @@ class SpyJudge:
             score=self.process_score, cache_hit=self.cache_hit, reason="stub"
         )
 
+    def score_outputs(self, items) -> list[JudgeResult]:
+        return [self.score_output(prompt, text) for prompt, text in items]
+
+    def score_processes(self, items) -> list[JudgeResult]:
+        return [self.score_process(prompt, text) for prompt, text in items]
+
 
 class FailingJudge:
     """Every judge call raises, as an unrecoverable judge failure would."""
@@ -218,6 +232,43 @@ class FailingJudge:
 
     def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
         raise UnrecoverableJudgeError("judge rejected the request")
+
+    def score_outputs(self, items) -> list[JudgeResult]:
+        raise UnrecoverableJudgeError("judge rejected the request")
+
+    def score_processes(self, items) -> list[JudgeResult]:
+        raise UnrecoverableJudgeError("judge rejected the request")
+
+
+class BatchRecordingJudge:
+    """Counts batch calls per judge kind and returns a fixed score for every item."""
+
+    def __init__(self, score: float = 0.5, process_score: float = 0.5) -> None:
+        self.score = score
+        self.process_score = process_score
+        self.output_batches = 0
+        self.process_batches = 0
+        self.output_batch_sizes: list[int] = []
+        self.process_batch_sizes: list[int] = []
+
+    def score_outputs(self, items) -> list[JudgeResult]:
+        self.output_batches += 1
+        self.output_batch_sizes.append(len(items))
+        return [JudgeResult(score=self.score, cache_hit=False, reason="stub") for _ in items]
+
+    def score_processes(self, items) -> list[JudgeResult]:
+        self.process_batches += 1
+        self.process_batch_sizes.append(len(items))
+        return [
+            JudgeResult(score=self.process_score, cache_hit=False, reason="stub")
+            for _ in items
+        ]
+
+    def score_output(self, prompt: Prompt, code: str) -> JudgeResult:
+        return JudgeResult(score=self.score, cache_hit=False, reason="stub")
+
+    def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
+        return JudgeResult(score=self.process_score, cache_hit=False, reason="stub")
 
 
 class LeakyRunner:
@@ -1038,3 +1089,16 @@ def test_metric_row_carries_the_truncation_rates(tmp_path) -> None:
     assert row["rollouts"] == 8
     assert row["truncation_rate"] == pytest.approx(0.5)
     assert row["prompt_truncation_rate"] == pytest.approx(1.0)
+
+
+def test_a_step_batches_judge_calls_per_kind(tmp_path) -> None:
+    judge = BatchRecordingJudge()
+    store = RecordingStore()
+    build("gated-process", tmp_path, judge=judge, store=store).run()
+
+    # Two steps, each with 8 passing rollouts: one batch call per judge kind per
+    # step, not one call per rollout.
+    assert judge.output_batches == 2
+    assert judge.process_batches == 2
+    assert judge.output_batch_sizes == [8, 8]
+    assert judge.process_batch_sizes == [8, 8]

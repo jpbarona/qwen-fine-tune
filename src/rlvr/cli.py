@@ -68,6 +68,12 @@ class UnusedJudge:
     def score_process(self, prompt: Prompt, reasoning: str) -> JudgeResult:
         raise AssertionError("this arm must never call the process judge")
 
+    def score_outputs(self, items) -> list[JudgeResult]:
+        raise AssertionError("this arm must never call the output judge")
+
+    def score_processes(self, items) -> list[JudgeResult]:
+        raise AssertionError("this arm must never call the process judge")
+
 
 def build_judge(arm: str, config: Config, *, fake: bool) -> Judge:
     """Pick the judge backend for an arm, before the run folder is created.
@@ -267,6 +273,7 @@ def run_command(args: argparse.Namespace) -> int:
 
     resume_step = 0
     prior_evaluations: list[dict] = []
+    checkpoint = None
     if args.resume:
         store = RunStore.resume(args.runs_root, args.arm)
         checkpoint = find_latest_checkpoint(store.checkpoints_dir)
@@ -277,15 +284,18 @@ def run_command(args: argparse.Namespace) -> int:
         store.truncate_to_step(checkpoint.step)
         prior_evaluations = store.read_evaluations()
         resume_step = checkpoint.step
-    else:
+
+    # Build the generator before the run folder is created, so a failed model
+    # load leaves no empty folder behind. Resume loads the checkpoint afterwards.
+    generator = build_generator(config, fake=args.fake)
+    if args.resume:
+        generator.load_checkpoint(checkpoint.directory)
+
+    if not args.resume:
         try:
             store = RunStore(args.runs_root, args.arm)
         except OSError as error:
             raise UsageError(f"cannot create the run folder: {error}") from error
-
-    generator = build_generator(config, fake=args.fake)
-    if args.resume:
-        generator.load_checkpoint(checkpoint.directory)
 
     test_runner = build_test_runner(config, fake=args.fake)
 
