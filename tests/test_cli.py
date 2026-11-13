@@ -206,7 +206,15 @@ def test_unparseable_config_is_reported_on_stderr(tmp_path, capsys) -> None:
     assert "config" in captured.err
 
 
-def test_without_fake_the_command_asks_for_the_train_extra(config_path, tmp_path, capsys) -> None:
+def test_without_fake_the_command_asks_for_the_train_extra(
+    config_path, tmp_path, capsys, monkeypatch
+) -> None:
+    import rlvr.qwen
+
+    def missing(*args, **kwargs):
+        raise ImportError("simulated missing torch")
+
+    monkeypatch.setattr(rlvr.qwen, "QwenGenerator", missing)
     runs_root = tmp_path / "runs"
     code = main(
         ["run", "--arm", "code-score", "--config", str(config_path), "--runs-root", str(runs_root)]
