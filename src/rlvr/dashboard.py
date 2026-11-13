@@ -439,6 +439,19 @@ def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
     }
 
 
+def _gpu_number(value: str) -> float | None:
+    """An nvidia-smi CSV field as a number, or None when it is not one.
+
+    nvidia-smi prints text tokens such as N/A, [N/A], [Not Supported] and
+    [Unknown Error] for a field it cannot report, so anything that does not
+    parse as a finite number becomes None.
+    """
+    try:
+        return _number(float(value.strip()))
+    except ValueError:
+        return None
+
+
 def _gpu_read() -> dict[str, Any] | None:
     command = [
         "nvidia-smi",
@@ -458,10 +471,10 @@ def _gpu_read() -> dict[str, Any] | None:
     if len(parts) < 4:
         return None
     return {
-        "utilization": _number(parts[0]),
-        "memory_used": _number(parts[1]),
-        "memory_total": _number(parts[2]),
-        "temperature": _number(parts[3]),
+        "utilization": _gpu_number(parts[0]),
+        "memory_used": _gpu_number(parts[1]),
+        "memory_total": _gpu_number(parts[2]),
+        "temperature": _gpu_number(parts[3]),
     }
 
 
