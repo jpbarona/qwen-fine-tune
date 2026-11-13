@@ -1,5 +1,11 @@
 # Spec: small-model code RLVR reward study
 
+> Status note. The four-arm comparison is deferred. The first real run produced
+> no learning, so the current work is a single code-score arm with a curriculum,
+> a partial-credit reward and a larger output budget. See
+> `issues/09-spec-single-arm-curriculum.md`. The arm definitions below still
+> describe the deferred study.
+
 ## Problem Statement
 
 I want to know whether an LLM judge can train a small code model as well as unit

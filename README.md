@@ -2,6 +2,8 @@
 
 A study of whether an LLM judge can train a small code model as well as unit
 tests. See `SPEC.md` for the study design and `PLAN.md` for the task breakdown.
+`journal.md` holds the running problem and fix notes. `DECISIONS.md` records
+the current choices.
 
 ## Install
 

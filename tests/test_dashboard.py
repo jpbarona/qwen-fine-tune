@@ -254,6 +254,42 @@ def test_an_unparsable_started_value_is_shown_as_is(tmp_path) -> None:
     assert data["runs"][0]["started_utc"] == "not-a-time"
 
 
+def test_gpu_read_parses_the_csv_output(monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    def fake_run(command, **kwargs):
+        return dashboard_module.subprocess.CompletedProcess(
+            args=command, returncode=0, stdout="20, 19610, 49140, 41\n", stderr=""
+        )
+
+    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
+    sample = dashboard_module._gpu_read()
+
+    assert sample is not None
+    assert sample["utilization"] == 20
+    assert sample["memory_used"] == 19610
+    assert sample["memory_total"] == 49140
+    assert sample["temperature"] == 41
+
+
+def test_gpu_read_returns_none_for_unsupported_fields(monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    def fake_run(command, **kwargs):
+        return dashboard_module.subprocess.CompletedProcess(
+            args=command, returncode=0, stdout="[N/A], [N/A], 49140, 41\n", stderr=""
+        )
+
+    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
+    sample = dashboard_module._gpu_read()
+
+    assert sample is not None
+    assert sample["utilization"] is None
+    assert sample["memory_used"] is None
+    assert sample["memory_total"] == 49140
+    assert sample["temperature"] == 41
+
+
 def test_gpu_sample_is_reused_when_younger_than_two_seconds(monkeypatch) -> None:
     from rlvr import dashboard as dashboard_module
 
