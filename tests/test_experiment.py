@@ -21,6 +21,7 @@ from rlvr.experiment import (
     TestResult,
 )
 from rlvr.judge import UnrecoverableJudgeError
+from rlvr.memory import MemoryReport
 from rlvr.reward import RewardError
 from rlvr.schema import RolloutRecord
 
@@ -346,6 +347,7 @@ def build(
     config_text: str = CONFIG_TEXT,
     resume_step: int = 0,
     prior_evaluations=None,
+    memory=None,
 ):
     config = load_config(_write_config(tmp_path, config_text))
     training = prompts if prompts is not None else make_prompts()
@@ -363,6 +365,7 @@ def build(
         eval_prompts=training if eval_prompts is None else eval_prompts,
         resume_step=resume_step,
         prior_evaluations=prior_evaluations or (),
+        memory=memory,
     )
 
 
@@ -1182,6 +1185,44 @@ def test_metric_row_carries_the_truncation_rates(tmp_path) -> None:
     assert row["rollouts"] == 8
     assert row["truncation_rate"] == pytest.approx(0.5)
     assert row["prompt_truncation_rate"] == pytest.approx(1.0)
+
+
+def test_metric_rows_carry_the_allocator_memory_split(tmp_path) -> None:
+    reports = iter(
+        [
+            MemoryReport(
+                live_mib=100.0, cached_mib=20.0, fragmented_mib=5.0, total_mib=1000.0
+            ),
+            MemoryReport(
+                live_mib=200.0, cached_mib=40.0, fragmented_mib=10.0, total_mib=1000.0
+            ),
+        ]
+    )
+    store = RecordingStore()
+    build("code-score", tmp_path, store=store, memory=lambda: next(reports)).run()
+
+    first, second = store.metrics
+    assert first["gpu_live_mib"] == pytest.approx(100.0)
+    assert first["gpu_cached_mib"] == pytest.approx(20.0)
+    assert first["gpu_fragmented_mib"] == pytest.approx(5.0)
+    assert first["gpu_total_mib"] == pytest.approx(1000.0)
+    assert first["gpu_unaccounted_mib"] == pytest.approx(875.0)
+
+    # The reader is called once per step, after that step's update.
+    assert second["gpu_live_mib"] == pytest.approx(200.0)
+    assert second["gpu_unaccounted_mib"] == pytest.approx(750.0)
+
+
+def test_metric_rows_report_zero_memory_without_a_reader(tmp_path) -> None:
+    store = RecordingStore()
+    build("code-score", tmp_path, store=store).run()
+
+    for row in store.metrics:
+        assert row["gpu_live_mib"] == 0.0
+        assert row["gpu_cached_mib"] == 0.0
+        assert row["gpu_fragmented_mib"] == 0.0
+        assert row["gpu_total_mib"] == 0.0
+        assert row["gpu_unaccounted_mib"] == 0.0
 
 
 def test_a_step_batches_judge_calls_per_kind(tmp_path) -> None:

@@ -114,6 +114,58 @@ def test_collect_dashboard_ignores_a_truncated_final_metric_line(tmp_path) -> No
     assert run["series"]["steps"] == [1, 2]
 
 
+def test_collect_dashboard_separates_the_memory_figures(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "rollouts": 8,
+            "mean_reward": 0.5,
+            "pass_rate": 0.5,
+            "mean_completion_tokens": 80.0,
+            "cache_hits": 0,
+            "truncation_rate": 0.0,
+            "gpu_live_mib": 100.0,
+            "gpu_cached_mib": 20.0,
+            "gpu_fragmented_mib": 5.0,
+            "gpu_total_mib": 1000.0,
+            "gpu_unaccounted_mib": 875.0,
+        }
+    ]
+    run_dir = write_run(tmp_path / "runs", "code-score", rows=rows)
+    data = collect_dashboard([run_dir])
+    run = data["runs"][0]
+
+    assert run["latest"]["gpu_live_mib"] == pytest.approx(100.0)
+    assert run["latest"]["gpu_cached_mib"] == pytest.approx(20.0)
+    assert run["latest"]["gpu_fragmented_mib"] == pytest.approx(5.0)
+    assert run["latest"]["gpu_total_mib"] == pytest.approx(1000.0)
+    assert run["latest"]["gpu_unaccounted_mib"] == pytest.approx(875.0)
+    assert run["series"]["gpu_live_mib"] == [pytest.approx(100.0)]
+
+    html = render_html(data)
+    for label in (
+        "gpu live MiB",
+        "gpu cached MiB",
+        "gpu fragmented MiB",
+        "gpu unaccounted MiB",
+        "gpu total MiB",
+    ):
+        assert label in html
+
+
+def test_a_fake_run_without_a_gpu_shows_zero_memory(run_fake) -> None:
+    run_dir, _ = run_fake("code-score")
+    data = collect_dashboard([run_dir])
+    latest = data["runs"][0]["latest"]
+
+    assert latest["gpu_live_mib"] == 0.0
+    assert latest["gpu_cached_mib"] == 0.0
+    assert latest["gpu_fragmented_mib"] == 0.0
+    assert latest["gpu_total_mib"] == 0.0
+    assert "gpu memory per step (MiB)" in render_html(data)
+
+
 def test_collect_dashboard_ignores_a_truncated_rollout_line(tmp_path) -> None:
     run_dir = write_run(tmp_path / "runs", "code-score")
     path = run_dir / "rollouts.jsonl"

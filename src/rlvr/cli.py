@@ -38,8 +38,9 @@ from .data import (
     prompts_for_questions,
 )
 from .experiment import Experiment, Judge, JudgeResult, Prompt
-from .fake import FakeGenerator, FakeJudge, FakeTestRunner
+from .fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_memory
 from .judge import JudgeClient, MissingAPIKeyError
+from .memory import configure_expandable_segments, read_torch_memory
 from .publish import PublishError, publish_report
 from .reward import (
     ARMS,
@@ -270,6 +271,10 @@ def build_generator(config: Config, *, fake: bool):
 
 
 def run_command(args: argparse.Namespace) -> int:
+    # PyTorch reads PYTORCH_CUDA_ALLOC_CONF once, at allocator startup, so set
+    # it before anything can import torch. A value the user already set wins.
+    configure_expandable_segments()
+
     if args.arm not in ARMS:
         raise UsageError(f"unknown arm {args.arm!r}. valid arms: {', '.join(ARMS)}")
 
@@ -335,6 +340,7 @@ def run_command(args: argparse.Namespace) -> int:
         resume_step=resume_step,
         prior_evaluations=prior_evaluations,
         fake=args.fake,
+        memory=fake_memory if args.fake else read_torch_memory,
     )
     summary = experiment.run()
 

@@ -31,12 +31,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from . import repro
 from .checkpoint import checkpoint_dir_name, write_checkpoint_manifest
 from .config import Config
 from .evaluation import pass_at_1, select_eval_subset, subset_selector
+from .memory import MemoryReport
 from .reward import (
     SYNTAX_ERROR_CLASS,
     all_tests_passed,
@@ -216,6 +217,11 @@ class Experiment:
     `prompts` holds the training questions. `eval_prompts` holds the held-out
     test questions and must be non-empty. The two lists must not overlap. The
     CLI builds both from the fixed MBPP split.
+
+    `memory` is an optional callable that reads the allocator for the current
+    step. The CLI passes `read_torch_memory` on a real run and `fake_memory` on
+    the fake path. When it is None, every metric row carries zeros, so a unit
+    test can build an Experiment without a GPU.
     """
 
     arm: str
@@ -229,6 +235,7 @@ class Experiment:
     resume_step: int = 0
     prior_evaluations: Sequence[Mapping[str, Any]] = ()
     fake: bool = False
+    memory: Callable[[], MemoryReport] | None = None
 
     def run(self) -> RunSummary:
         """Run every training step, evaluate on schedule, and summarize.
@@ -287,7 +294,14 @@ class Experiment:
                 reward_sum += record.reward
                 judge_calls += self._judge_calls_for(record)
             self.store.append_metric(
-                self._metric_row(step, step_records, truncated, prompt_truncated, entropy)
+                self._metric_row(
+                    step,
+                    step_records,
+                    truncated,
+                    prompt_truncated,
+                    entropy,
+                    self._memory_report(),
+                )
             )
 
             if step % self.config.eval_every_steps == 0:
@@ -457,6 +471,18 @@ class Experiment:
         every = self.config.entropy_every
         return every > 0 and step % every == 0
 
+    def _memory_report(self) -> MemoryReport:
+        """The allocator figures for the step that just finished.
+
+        Read after the update, so the number covers the group that was trained
+        on. Zero when no reader was injected, which is the fake path and every
+        unit test that does not care about memory.
+        """
+        reader = self.memory
+        if reader is None:
+            return MemoryReport.zeros()
+        return reader()
+
     def _build_record(
         self,
         prompt: Prompt,
@@ -549,6 +575,7 @@ class Experiment:
         truncated: int = 0,
         prompt_truncated: int = 0,
         mean_entropy: float | None = None,
+        memory: MemoryReport | None = None,
     ) -> dict[str, Any]:
         """One metrics row. Entropy is present only on a measurement step."""
         count = len(records)
@@ -568,6 +595,7 @@ class Experiment:
             "truncation_rate": truncated / count,
             "prompt_truncation_rate": prompt_truncated / count,
         }
+        row.update((memory or MemoryReport.zeros()).as_metrics())
         if mean_entropy is not None:
             row["mean_entropy"] = mean_entropy
         return row

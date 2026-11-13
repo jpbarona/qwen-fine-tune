@@ -21,8 +21,15 @@ from __future__ import annotations
 import hashlib
 
 from .experiment import Generation, JudgeResult, Prompt, Outcome
+from .memory import MemoryReport
 
-__all__ = ["FakeGenerator", "FakeJudge", "FakeTestRunner", "fake_prompts"]
+__all__ = [
+    "FakeGenerator",
+    "FakeJudge",
+    "FakeTestRunner",
+    "fake_memory",
+    "fake_prompts",
+]
 
 #: Default sampling temperature used by the fake generator's signature. The real
 #: generator reads this from config. The fake keeps its own default.
@@ -63,6 +70,16 @@ def fake_prompts(count: int) -> list[Prompt]:
         )
         for index in range(count)
     ]
+
+
+def fake_memory() -> MemoryReport:
+    """Zeros for the fake path, so the metric row keeps the same shape.
+
+    A machine with no GPU would read the same values. The fake run must not
+    import torch, so it supplies the zeros directly rather than asking the
+    allocator.
+    """
+    return MemoryReport.zeros()
 
 
 class FakeGenerator:

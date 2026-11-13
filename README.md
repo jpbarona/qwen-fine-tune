@@ -120,7 +120,8 @@ runs/<arm>/<timestamp>/
                      judge model, split seed, the full config
     rollouts.jsonl   one record per rollout, schema below
     metrics.jsonl    one row per step: mean reward, pass rate, completion
-                     length, cache hits, and entropy on a measurement step
+                     length, cache hits, the GPU memory split, and entropy
+                     on a measurement step
     eval.json        final pass@1 plus every checkpoint evaluation
     checkpoints/     one directory per saved step: LoRA adapter, optimizer
                      state, and a checkpoint.json manifest
@@ -186,6 +187,20 @@ not bounded by 1.
 without a measurement omits the key. The summary and the dashboard treat the
 key as absent, never as zero. The fake generator returns one deterministic
 value per prompt on the same cadence.
+
+## GPU memory
+
+Each metric row carries the allocator split in MiB: `gpu_live_mib`,
+`gpu_cached_mib`, `gpu_fragmented_mib`, `gpu_total_mib`, and
+`gpu_unaccounted_mib`. The first three come from `torch.cuda.memory_stats()`
+inside the training process, read after the update. Live plus cached plus
+fragmented is the allocator's reserved total. Unaccounted is the device total
+minus that, which covers other processes, the CUDA context, and the driver.
+
+A run sets `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` at the entry
+point, before torch is imported, so segments grow instead of fragmenting on a
+new size. A value already set by the caller is left alone. The fake path writes
+zeros, so the dashboard memory panel renders on a machine with no GPU.
 
 ## Rollout record schema (frozen)
 

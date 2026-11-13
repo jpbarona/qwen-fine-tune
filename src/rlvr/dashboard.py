@@ -11,7 +11,9 @@ per section, and a grid of charts. Distributions come from the tail of
 `rollouts.jsonl`, so a long run does not re-read the whole file on every poll.
 GPU samples come from `nvidia-smi`, at most one every two seconds on the
 `/data.json` route, and the last 120 samples are kept in memory for the GPU
-chart.
+chart. The per step memory split (live, cached, fragmented, device total,
+unaccounted) comes from the metrics rows the trainer writes, so the memory
+panel works on a machine with no GPU.
 
 The server binds to 127.0.0.1 and stops on Ctrl+C. Nothing here reads secrets,
 environment variables, or the network beyond the two CDN scripts the page
@@ -30,6 +32,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 from urllib.parse import urlsplit
+
+from .memory import MEMORY_METRIC_FIELDS
 
 __all__ = ["collect_dashboard", "render_html", "sample_gpu", "serve_dashboard"]
 
@@ -61,7 +65,7 @@ SERIES_FIELDS: tuple[str, ...] = (
     "mean_completion_tokens",
     "truncation_rate",
     "cache_hits",
-)
+) + MEMORY_METRIC_FIELDS
 
 LATEST_FIELDS: tuple[str, ...] = SERIES_FIELDS + ("rollouts",)
 
@@ -557,6 +561,9 @@ _SCRIPT = """\
   "use strict";
   var ACCENT = "#fbbf24";
   var MUTED = "#a1a1aa";
+  var CACHED = "#60a5fa";
+  var FRAGMENTED = "#f87171";
+  var UNACCOUNTED = "#71717a";
   var DATA = JSON.parse(document.getElementById("initial-data").textContent);
   var charts = [];
   var timer = null;
@@ -695,6 +702,17 @@ _SCRIPT = """\
     html += kpi("cache hit rate", cacheRate);
     html += '</div>';
 
+    // The allocator split is separate from the nvidia-smi device sample above.
+    // Live, cache and fragmentation are the process view. The total is the
+    // device, and unaccounted is whatever the allocator does not hold.
+    html += '<div class="grid grid-cols-2 sm:grid-cols-5 gap-px bg-zinc-800 border border-zinc-800 mb-3">';
+    html += kpi("gpu live MiB", fmt(latest.gpu_live_mib, 1));
+    html += kpi("gpu cached MiB", fmt(latest.gpu_cached_mib, 1));
+    html += kpi("gpu fragmented MiB", fmt(latest.gpu_fragmented_mib, 1));
+    html += kpi("gpu unaccounted MiB", fmt(latest.gpu_unaccounted_mib, 1));
+    html += kpi("gpu total MiB", fmt(latest.gpu_total_mib, 1));
+    html += '</div>';
+
     html += '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">';
     html += chartCard(p + "-reward", "reward per step");
     html += chartCard(p + "-pass", "pass rate per step");
@@ -702,6 +720,7 @@ _SCRIPT = """\
     html += chartCard(p + "-entropy", "entropy per step");
     html += chartCard(p + "-length", "completion tokens per step");
     html += chartCard(p + "-trunc", "truncation rate per step");
+    html += chartCard(p + "-mem", "gpu memory per step (MiB)");
     html += chartCard(p + "-rewardhist", "reward distribution");
     html += chartCard(p + "-testshist", "tests passed distribution");
     html += '</div>';
@@ -803,6 +822,26 @@ _SCRIPT = """\
     });
     mount(p + "-length", { type: "line", data: { datasets: [d(ACCENT, s.mean_completion_tokens)] }, options: lineOpts() });
     mount(p + "-trunc", { type: "line", data: { datasets: [d(ACCENT, s.truncation_rate)] }, options: lineOpts() });
+
+    var memSeries = function (label, color, values) {
+      return {
+        label: label,
+        data: xyPresent(steps, values || []),
+        borderColor: color, backgroundColor: color, borderWidth: 1.5,
+        pointRadius: 0, tension: 0, spanGaps: false
+      };
+    };
+    mount(p + "-mem", {
+      type: "line",
+      data: { datasets: [
+        memSeries("live", ACCENT, s.gpu_live_mib),
+        memSeries("cached", CACHED, s.gpu_cached_mib),
+        memSeries("fragmented", FRAGMENTED, s.gpu_fragmented_mib),
+        memSeries("unaccounted", UNACCOUNTED, s.gpu_unaccounted_mib),
+        memSeries("device total", MUTED, s.gpu_total_mib)
+      ] },
+      options: Object.assign(lineOpts(), { plugins: { legend: { display: true, labels: { color: "#a1a1aa", boxWidth: 10, boxHeight: 10 } } } })
+    });
 
     var pa = run.pass_at_1 || {};
     var cp = pa.checkpoint || { steps: [], values: [] };
