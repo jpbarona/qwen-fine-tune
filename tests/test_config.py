@@ -202,6 +202,9 @@ def test_training_settings_default_and_are_read(tmp_path) -> None:
     assert config.max_completion_tokens == 768
     assert config.clip_epsilon == pytest.approx(0.2)
     assert config.kl_beta == pytest.approx(0.0)
+    assert config.length_soft_limit == 900
+    assert config.length_penalty_per_token == pytest.approx(0.001)
+    assert config.length_penalty_floor == pytest.approx(0.2)
 
 
 def test_training_settings_are_read_from_the_table(tmp_path) -> None:
@@ -225,6 +228,38 @@ def test_training_settings_are_read_from_the_table(tmp_path) -> None:
     assert config.max_completion_tokens == 384
     assert config.clip_epsilon == pytest.approx(0.1)
     assert config.kl_beta == pytest.approx(0.05)
+
+
+def test_length_settings_are_read_from_the_training_table(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        GOOD
+        + "\n[training]\nlength_soft_limit = 700\n"
+        "length_penalty_per_token = 0.002\nlength_penalty_floor = 0.5\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    assert config.length_soft_limit == 700
+    assert config.length_penalty_per_token == pytest.approx(0.002)
+    assert config.length_penalty_floor == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    "line, key",
+    [
+        ("length_soft_limit = -1", "training.length_soft_limit"),
+        ("length_soft_limit = 1.5", "training.length_soft_limit"),
+        ("length_penalty_per_token = -0.001", "training.length_penalty_per_token"),
+        ("length_penalty_per_token = true", "training.length_penalty_per_token"),
+        ("length_penalty_floor = -0.1", "training.length_penalty_floor"),
+        ("length_penalty_floor = 1.1", "training.length_penalty_floor"),
+    ],
+)
+def test_a_bad_length_setting_is_named(tmp_path, line: str, key: str) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(GOOD + f"\n[training]\n{line}\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match=key):
+        load_config(path)
 
 
 def test_checkpoint_and_budget_defaults(write_config) -> None:

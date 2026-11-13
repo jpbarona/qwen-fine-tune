@@ -434,6 +434,43 @@ def test_reward_is_one_when_every_test_passes(tmp_path) -> None:
     assert [r.reward for r in store.rollouts] == [1.0] * 16
 
 
+def test_the_code_arm_uses_the_length_settings_from_config(tmp_path) -> None:
+    runner = StubTestRunner(total=2, passes=2)
+    store = RecordingStore()
+    config_text = CONFIG_TEXT + "\n[training]\nlength_soft_limit = 10\n"
+    build("code-score", tmp_path, runner=runner, store=store, config_text=config_text).run()
+    # Every stub generation is 20 tokens, so 10 tokens over the limit at 0.001.
+    assert [r.reward for r in store.rollouts] == pytest.approx([0.99] * 16)
+
+
+def test_a_syntax_error_scores_minus_half(tmp_path) -> None:
+    runner = StubTestRunner(total=0, passes=0, error_class="syntax_error")
+    store = RecordingStore()
+    build("code-score", tmp_path, runner=runner, store=store).run()
+    assert {r.reward for r in store.rollouts} == {-0.5}
+    assert {r.code_score for r in store.rollouts} == {0.0}
+
+
+def test_a_truncated_generation_scores_minus_six_tenths(tmp_path) -> None:
+    class TruncatedGenerator(StubGenerator):
+        def generate(self, prompt: Prompt, *, n: int, temperature: float):
+            return [
+                Generation(
+                    reasoning="trace",
+                    code="# code",
+                    prompt_tokens=10,
+                    completion_tokens=20,
+                    mean_entropy=0.5,
+                    truncated=True,
+                )
+                for _ in range(n)
+            ]
+
+    store = RecordingStore()
+    build("code-score", tmp_path, generator=TruncatedGenerator(), store=store).run()
+    assert {r.reward for r in store.rollouts} == {-0.6}
+
+
 def test_a_zero_test_rollout_fails_loudly(tmp_path) -> None:
     runner = StubTestRunner(total=0, passes=0)
     store = RecordingStore()

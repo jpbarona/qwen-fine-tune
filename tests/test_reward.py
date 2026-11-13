@@ -70,6 +70,128 @@ def test_code_score_reward_never_uses_a_judge() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "kwargs, expected",
+    [
+        # The plain test fraction.
+        ({"tests_passed": 4, "tests_total": 4}, 1.0),
+        ({"tests_passed": 3, "tests_total": 4}, 0.75),
+        ({"tests_passed": 1, "tests_total": 4}, 0.25),
+        ({"tests_passed": 0, "tests_total": 4}, 0.0),
+        # Fixed penalties for truncation and code that does not compile.
+        ({"tests_passed": 0, "tests_total": 4, "truncated": True}, -0.6),
+        (
+            {"tests_passed": 0, "tests_total": 4, "error_class": "syntax_error"},
+            -0.5,
+        ),
+        (
+            {"tests_passed": 0, "tests_total": 0, "error_class": "syntax_error"},
+            -0.5,
+        ),
+        # The length term starts above 900 tokens and is capped at 0.2.
+        ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 900}, 1.0),
+        ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 1000}, 0.9),
+        ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 1100}, 0.8),
+        ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 4096}, 0.8),
+        # The term applies to the whole output, whatever the base score.
+        ({"tests_passed": 2, "tests_total": 4, "completion_tokens": 1100}, 0.3),
+        ({"tests_passed": 0, "tests_total": 4, "completion_tokens": 1100}, -0.2),
+        (
+            {
+                "tests_passed": 0,
+                "tests_total": 4,
+                "truncated": True,
+                "completion_tokens": 1100,
+            },
+            -0.8,
+        ),
+        (
+            {
+                "tests_passed": 0,
+                "tests_total": 4,
+                "error_class": "syntax_error",
+                "completion_tokens": 1100,
+            },
+            -0.7,
+        ),
+    ],
+)
+def test_the_code_arm_scores_each_case(kwargs: dict, expected: float) -> None:
+    assert compose_reward("code-score", **kwargs) == pytest.approx(expected)
+    assert reward_code_score(**kwargs) == pytest.approx(expected)
+
+
+def test_the_code_arm_reward_is_clipped_to_the_range() -> None:
+    assert compose_reward(
+        "code-score",
+        tests_passed=0,
+        tests_total=4,
+        truncated=True,
+        completion_tokens=4096,
+        length_penalty_floor=1.0,
+    ) == -1.0
+    assert compose_reward(
+        "code-score",
+        tests_passed=4,
+        tests_total=4,
+        completion_tokens=4096,
+    ) == pytest.approx(0.8)
+
+
+def test_the_length_term_uses_the_given_settings() -> None:
+    assert compose_reward(
+        "code-score",
+        tests_passed=4,
+        tests_total=4,
+        completion_tokens=50,
+        length_soft_limit=40,
+        length_penalty_per_token=0.01,
+        length_penalty_floor=0.05,
+    ) == pytest.approx(0.95)
+
+
+def test_any_correct_answer_beats_any_wrong_answer_at_every_length() -> None:
+    correct = [
+        compose_reward(
+            "code-score", tests_passed=4, tests_total=4, completion_tokens=length
+        )
+        for length in range(0, 4097)
+    ]
+    wrong = [
+        compose_reward(
+            "code-score", tests_passed=0, tests_total=4, completion_tokens=length
+        )
+        for length in range(0, 4097)
+    ]
+    assert min(correct) == pytest.approx(0.8)
+    assert max(wrong) == pytest.approx(0.0)
+    assert min(correct) > max(wrong)
+
+
+@pytest.mark.parametrize(
+    "arm, scores",
+    [
+        ("hybrid", {"judge_score": 0.5}),
+        ("gated-judge", {"judge_score": 0.5}),
+        ("gated-process", {"judge_score": 0.5, "process_score": 0.5}),
+    ],
+)
+def test_the_other_arms_ignore_the_rollout_context(
+    arm: str, scores: dict[str, float]
+) -> None:
+    plain = compose_reward(arm, tests_passed=4, tests_total=4, **scores)
+    contextual = compose_reward(
+        arm,
+        tests_passed=4,
+        tests_total=4,
+        truncated=True,
+        error_class="syntax_error",
+        completion_tokens=4096,
+        **scores,
+    )
+    assert contextual == plain
+
+
 def test_a_rollout_with_zero_tests_fails_loudly() -> None:
     with pytest.raises(RewardError, match="zero tests"):
         code_score(0, 0)
