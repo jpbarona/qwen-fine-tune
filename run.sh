@@ -4,8 +4,10 @@
 # Usage:
 #   ./run.sh <code-score|hybrid|gated-judge|gated-process> [-- extra args]
 #
-# The judge key is read from the OPENCODE_GO_API_KEY environment variable by the
-# judge client. It is never written to this file, a config, or a run folder.
+# The judge key is read from the OPENROUTER_API_KEY environment variable by the
+# judge client, because the judge uses OpenRouter by default. The opencode
+# provider reads OPENCODE_GO_API_KEY instead. The key is never written to this
+# file, a config, or a run folder.
 # Extra arguments are passed through to `rlvr run`, so a smoke run is:
 #
 #   ./run.sh code-score --config configs/smoke.toml

@@ -47,7 +47,7 @@ message on stderr and exit 2.
 One command per arm, no manual edits:
 
 ```bash
-OPENCODE_GO_API_KEY=... ./run.sh code-score
+OPENROUTER_API_KEY=... ./run.sh code-score
 ```
 
 `run.sh` reads the judge key from the environment, passes every extra argument
@@ -59,7 +59,7 @@ client, all behind the same `Experiment` seam.
 A smoke run validates a fresh GPU in minutes:
 
 ```bash
-OPENCODE_GO_API_KEY=... ./run.sh code-score --config configs/smoke.toml
+OPENROUTER_API_KEY=... ./run.sh code-score --config configs/smoke.toml
 ```
 
 The smoke profile runs 8 training steps (8 prompt groups of 8 generations, 64
@@ -70,15 +70,15 @@ test runs. This estimate is unverified: there is no GPU in this environment.
 ## Deploy on Massed Compute
 
 Rent one RTX A6000: 48GB VRAM, 96GB system RAM, 300GB disk, $0.57 per hour. Use the
-Ubuntu Server 24.04 image and set `OPENCODE_GO_API_KEY` at deploy time.
+Ubuntu Server 24.04 image and set `OPENROUTER_API_KEY` at deploy time.
 
 After the instance boots, install Docker, then run the install, smoke, and full
 arm commands from the sections above:
 
 ```bash
 sudo apt install -y docker.io
-OPENCODE_GO_API_KEY=... ./run.sh code-score --config configs/smoke.toml
-OPENCODE_GO_API_KEY=... ./run.sh code-score
+OPENROUTER_API_KEY=... ./run.sh code-score --config configs/smoke.toml
+OPENROUTER_API_KEY=... ./run.sh code-score
 ```
 
 ## Checkpoints and resume
@@ -89,7 +89,7 @@ number, and a `checkpoint.json` manifest. After a crash, resume from the last
 checkpoint:
 
 ```bash
-OPENCODE_GO_API_KEY=... ./run.sh code-score --resume
+OPENROUTER_API_KEY=... ./run.sh code-score --resume
 ```
 
 Resume opens the latest run folder for the arm, restores the model, optimizer,
@@ -275,16 +275,39 @@ machines. They carry no meaning.
 
 ## Judge client
 
-`JudgeClient` in `src/rlvr/judge.py` implements the `Judge` seam against the
-OpenCode Go OpenAI-compatible endpoint
-`https://opencode.ai/inference/go/openai/v1/chat/completions`, model
-`deepseek-v4.1-flash`, temperature 0, JSON output, and `reasoning_effort`
-`medium`. Every request sends a concrete `User-Agent` and a stable
-`x-opencode-session` header, because the gateway rejects the default urllib
-User-Agent.
+`JudgeClient` in `src/rlvr/judge.py` implements the `Judge` seam. It uses
+OpenRouter by default: endpoint `https://openrouter.ai/api/v1/chat/completions`,
+model `deepseek/deepseek-v4.1-flash-1017`, temperature 0, JSON output, and
+`reasoning_effort` `medium`. The model id is the one listed by
+`https://openrouter.ai/api/v1/models`, and `reasoning_effort` is one of that
+model's supported parameters. OpenRouter requests send `Authorization`,
+`Content-Type`, `User-Agent: rlvr/0.1 (research judge)`, and `X-Title: rlvr`.
+`HTTP-Referer` is not sent: the docs mark it optional and describe it as app
+attribution for the public rankings page.
 
-The key comes from `OPENCODE_GO_API_KEY`. `JudgeClient.from_config` reads it and
-fails with `MissingAPIKeyError` before any request. The key is only used in the
+The `[judge]` table picks the backend:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `provider` | `openrouter` | `openrouter` or `opencode` |
+| `base_url` | the provider endpoint | full chat completions URL |
+| `api_key_env` | the provider variable | name of the env var that holds the key |
+| `model` | (required) | model id, must match the provider |
+
+With `provider = "opencode"` the client uses
+`https://opencode.ai/inference/go/openai/v1/chat/completions`, model
+`deepseek-v4.1-flash`, and the same four headers plus `Accept` and a stable
+`x-opencode-session` header. That gateway rejects the default urllib User-Agent.
+The OpenCode-only session header is never sent to OpenRouter.
+
+So the two run configurations are: `openrouter` with
+`model = "deepseek/deepseek-v4.1-flash-1017"` and `OPENROUTER_API_KEY`, or
+`opencode` with `model = "deepseek-v4.1-flash"` and `OPENCODE_GO_API_KEY`.
+Provider, base URL, and model must be changed together.
+
+The key comes from the variable named by `[judge] api_key_env`, which defaults
+to `OPENROUTER_API_KEY`. `JudgeClient.from_config` reads it and fails with
+`MissingAPIKeyError` before any request. The key is only used in the
 Authorization header. It is never written to the cache, an error message, or
 `meta.json`.
 
@@ -296,8 +319,10 @@ backoff plus jitter. `[judge] max_attempts` caps the attempts. Other 4xx
 responses raise `UnrecoverableJudgeError` at once.
 
 Scores are cached in `[judge] cache_dir` (default `judge-cache/`). The key is
-SHA-256 over model, judge kind, full prompt text, and rubric version. Writes use
-`os.replace`. Identical requests return `cache_hit=true`.
+SHA-256 over provider, base URL, model, judge kind, full prompt text, and rubric
+version. Writes use `os.replace`. Identical requests return `cache_hit=true`.
+Changing the provider or the base URL starts a separate cache generation, so a
+switched provider cannot reuse the other one's scores.
 
 `score_batch` runs requests on a bounded pool of `[judge] concurrency` threads
 (default 32) and preserves input order.
@@ -321,7 +346,7 @@ stored in the rollout record. An empty trace is sent to the judge like any
 other trace.
 
 For a real run, the judge client is built at startup only for arms that use the
-judge, so a missing `OPENCODE_GO_API_KEY` fails before any rollout. The fake
+judge, so a missing `OPENROUTER_API_KEY` fails before any rollout. The fake
 path uses the fake judge and needs no key.
 
 ## Status
