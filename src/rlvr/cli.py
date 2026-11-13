@@ -334,6 +334,7 @@ def run_command(args: argparse.Namespace) -> int:
         eval_prompts=eval_prompts,
         resume_step=resume_step,
         prior_evaluations=prior_evaluations,
+        fake=args.fake,
     )
     summary = experiment.run()
 
