@@ -11,8 +11,8 @@ and length later without retraining.
 
 A Python package that trains `Qwen/Qwen3-0.6B` with GRPO on MBPP for four reward
 arms. Every arm uses the same model, data split, and judge. The only difference is
-the reward. Every rollout is logged. The package runs on a fresh Vast.ai 3090 with
-one command per arm.
+the reward. Every rollout is logged. The package runs on a fresh Massed Compute
+RTX A6000 with one command per arm.
 
 ## User Stories
 
@@ -77,6 +77,8 @@ accepted as low-value. It expires 7 days after issue.
 ```
 ${OPENCODE_GO_API_KEY}
 ```
+
+The value is supplied through that environment variable and is never committed.
 
 **Execution.** Each candidate runs in a Docker container with no network, a
 non-root user, a read-only mount, a 5 second timeout, and no secrets in its
