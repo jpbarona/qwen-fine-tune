@@ -52,7 +52,7 @@ max_prompt_tokens = 512
 max_completion_tokens = 768
 # Code-arm length term. 0.001 per completion token above 900, capped at 0.2,
 # so a perfect answer keeps at least 0.8. All three must be non-negative and
-# the floor must be at most 1.
+# the floor must be less than 1.
 length_soft_limit = 900
 length_penalty_per_token = 0.001
 length_penalty_floor = 0.2

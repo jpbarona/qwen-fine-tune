@@ -228,13 +228,13 @@ def _optional_float(raw: dict[str, Any], dotted: str, default: float, *, positiv
 
 
 def _optional_unit_float(raw: dict[str, Any], dotted: str, default: float) -> float:
-    """A non-negative float from `dotted` that is at most 1, or `default`."""
+    """A non-negative float from `dotted` that is below 1, or `default`."""
     value = _optional(raw, dotted, None)
     if value is None:
         return default
     number = _optional_float(raw, dotted, default, positive=False)
-    if number > 1.0:
-        raise ConfigError(f"config: '{dotted}' must be at most 1, got {value!r}")
+    if number >= 1.0:
+        raise ConfigError(f"config: '{dotted}' must be less than 1, got {value!r}")
     return number
 
 
