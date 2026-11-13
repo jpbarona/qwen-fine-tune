@@ -11,6 +11,27 @@ from rlvr.schema import FIELD_NAMES, RolloutRecord
 
 TIMESTAMP = "20261112T000000Z"
 
+#: The conftest fake config plus a two-update entropy cadence. Kept here so the
+#: test does not depend on the shared fixture's private text.
+CADENCE_CONFIG = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "fake-revision"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 1234
+
+[fake]
+steps = 3
+prompts_per_step = 2
+
+[training]
+entropy_every = 2
+"""
+
 
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -101,8 +122,20 @@ def test_metrics_jsonl_has_one_row_per_step(run_fake) -> None:
         assert isinstance(row["rollouts"], int)
         assert -1.0 <= row["mean_reward"] <= 1.0
         assert 0.0 <= row["pass_rate"] <= 1.0
-        assert row["mean_entropy"] >= 0.0
         assert row["mean_completion_tokens"] >= 0.0
+        # The default cadence is 500 updates, so a three step fake run never
+        # measures entropy and the row must omit the key rather than write 0.
+        assert "mean_entropy" not in row
+
+
+def test_metrics_carry_entropy_only_on_a_measurement_step(run_fake) -> None:
+    config_text = CADENCE_CONFIG
+    run_dir, _ = run_fake("code-score", config_text=config_text)
+    metrics = read_jsonl(run_dir / "metrics.jsonl")
+
+    assert "mean_entropy" not in metrics[0]
+    assert isinstance(metrics[1]["mean_entropy"], float)
+    assert "mean_entropy" not in metrics[2]
 
 
 def test_metrics_and_rollouts_are_appended_in_step_order(run_fake) -> None:

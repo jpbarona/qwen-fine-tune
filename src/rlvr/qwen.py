@@ -7,15 +7,17 @@ rollouts.
 
 Torch, transformers, and peft are imported lazily inside methods. The CPU test
 suite runs without any of them. The pure helpers at the top (code extraction,
-thinking split, group-normalized advantage, the clipped surrogate, and the
-entropy formula) have no such dependency and are unit tested.
+thinking split, group-normalized advantage, the clipped surrogate, the entropy
+formula, and the entropy position picker) have no such dependency and are unit
+tested.
 
-The entropy value on every generation is the mean Shannon entropy in nats of the
-model's per-token output distribution over the generated tokens only. It is
-computed from the per-step logits `generate` already asks for. Those logits are
-temperature-scaled by the sampler, so the entropy is the entropy of the sampling
-distribution at the training temperature (0.9), not the raw model distribution
-at temperature 1.0. Entropy is logged, not rewarded.
+Generation does not ask for per-step scores and keeps no logits. Entropy is
+measured on the update pass, from the same forward logits the policy loss uses,
+and only on the steps the caller marks. The value is the mean Shannon entropy in
+nats over the generated tokens, estimated from at most `ENTROPY_MAX_TOKENS`
+evenly spaced token positions when a completion is long. It is the entropy of
+the policy distribution at temperature 1.0, which is the distribution the loss
+sees. Entropy is logged, not rewarded, and the update pass stores nothing for it.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ __all__ = [
     "clipped_surrogate",
     "completion_logprobs",
     "completion_truncated",
+    "entropy_positions",
     "extract_code_from_answer",
     "group_advantages",
     "k3_divergence",
@@ -57,6 +60,14 @@ OPTIMIZER_STATE_NAME = "optimizer.pt"
 
 #: A fenced Python block, with or without a language tag.
 _FENCE = re.compile(r"```[ \t]*(?:python|py)?[ \t]*\r?\n(.*?)\r?\n?```", re.DOTALL)
+
+#: At most this many generated token positions feed one entropy measurement.
+#: Entropy is a diagnostic, so a bounded sample keeps the update pass cheap.
+ENTROPY_MAX_TOKENS = 64
+
+#: Row count per entropy slice. Bounds the float copy at about 10 MB a slice for
+#: a 151k vocabulary.
+ENTROPY_ROW_CHUNK = 16
 
 
 def extract_code_from_answer(text: str) -> str:
@@ -101,6 +112,30 @@ def categorical_entropy(logits: Sequence[float]) -> float:
     total = sum(exps)
     probs = [exponent / total for exponent in exps]
     return -sum(prob * math.log(prob) for prob in probs if prob > 0.0)
+
+
+def entropy_positions(
+    token_count: int, max_tokens: int = ENTROPY_MAX_TOKENS
+) -> list[int]:
+    """The generated token offsets used for one entropy measurement.
+
+    Returns every offset when the completion is short enough. Otherwise it
+    returns `max_tokens` evenly spaced offsets, including the first and the
+    last. The mean over these offsets estimates the mean over the completion
+    without reading every logit row.
+    """
+    if token_count < 0:
+        raise ValueError(f"token_count must not be negative, got {token_count}")
+    if max_tokens < 1:
+        raise ValueError(f"max_tokens must be at least 1, got {max_tokens}")
+    if token_count == 0:
+        return []
+    if token_count <= max_tokens:
+        return list(range(token_count))
+    if max_tokens == 1:
+        return [0]
+    span = token_count - 1
+    return [round(index * span / (max_tokens - 1)) for index in range(max_tokens)]
 
 
 def group_advantages(rewards: Sequence[float]) -> list[float]:
@@ -263,8 +298,9 @@ class QwenGenerator:
     """The real generator and trainer behind the `Generator` seam.
 
     The class loads the model, tokenizer, LoRA adapter, and optimizer on
-    construction. `generate` samples a group and caches the per-token logits it
-    needs for the update. `update` runs one GRPO step over the last group.
+    construction. `generate` samples a group and caches the token ids and old
+    logprobs the update needs, never the logits. `update` runs one GRPO step
+    over the last group and can measure entropy on the forward it already does.
     `save_checkpoint` and `load_checkpoint` write and restore the adapter
     weights, the optimizer state, and the step number.
     """
@@ -373,7 +409,6 @@ class QwenGenerator:
             num_return_sequences=n,
             pad_token_id=self.tokenizer.pad_token_id,
             return_dict_in_generate=True,
-            output_scores=True,
         )
         with torch.no_grad():
             outputs = self.model.generate(**inputs, **generate_kwargs)
@@ -397,18 +432,12 @@ class QwenGenerator:
             ).strip()
             code = extract_code_from_answer(answer)
 
-            scores = outputs.scores
-            generated_length = min(len(generated_ids), len(scores))
-            logits = torch.stack([scores[t][index] for t in range(generated_length)])
-            mean_entropy = self._mean_entropy(logits).item()
-
             generations.append(
                 Generation(
                     reasoning=reasoning,
                     code=code,
                     prompt_tokens=prompt_length,
-                    completion_tokens=generated_length,
-                    mean_entropy=mean_entropy,
+                    completion_tokens=len(generated_ids),
                     truncated=truncated,
                     prompt_truncated=prompt_truncated,
                 )
@@ -417,15 +446,15 @@ class QwenGenerator:
             if do_sample:
                 with torch.no_grad():
                     sequence = torch.tensor(
-                        [prompt_ids + generated_ids[:generated_length]], device=self._device
+                        [prompt_ids + generated_ids], device=self._device
                     )
                     old_logprobs = self._completion_logprobs(sequence, prompt_length).tolist()
                 reference_logprobs = self._reference_logprobs(
-                    prompt_ids, generated_ids[:generated_length]
+                    prompt_ids, generated_ids
                 )
                 group.append(
                     _GroupEntry(
-                        input_ids=prompt_ids + generated_ids[:generated_length],
+                        input_ids=prompt_ids + generated_ids,
                         prompt_length=prompt_length,
                         old_logprobs=old_logprobs,
                         reference_logprobs=reference_logprobs,
@@ -443,42 +472,60 @@ class QwenGenerator:
                 return index + 1
         return 0
 
-    @staticmethod
-    def _mean_entropy(logits: Any) -> Any:
-        """Mean per-token entropy in nats over a batch of logits.
-
-        The logits come from the sampler and are temperature-scaled, so this is
-        the entropy of the sampling distribution at the training temperature,
-        not the raw model distribution at temperature 1.0.
-        """
-        import torch  # lazy
-
-        logits = logits.float()
-        log_probs = torch.log_softmax(logits, dim=-1)
-        probs = log_probs.exp()
-        terms = torch.where(probs > 0, probs * log_probs, torch.zeros_like(probs))
-        entropy = -terms.sum(dim=-1)
-        mean = entropy.mean()
-        if not torch.isfinite(mean):
-            raise RuntimeError("mean token entropy is not finite")
-        return mean
-
     def _completion_logprobs(self, sequence: Any, prompt_length: int) -> Any:
         """Per-token logprobs of the completion under the policy at temperature 1.0.
 
         This is the only path used for both the old and the new logprobs, so the
-        ratio is 1.0 on the first update when the policy has not changed. The
-        generation scores are not used here: they are temperature-scaled.
+        ratio is 1.0 on the first update when the policy has not changed.
         """
-        torch = self._torch
         logits = self.model(sequence).logits[0]
-        log_probs = torch.log_softmax(logits[:-1], dim=-1)
         token_ids = sequence[0][prompt_length:].tolist()
-        token_ids_t = torch.tensor(token_ids, device=logits.device)
+        return self._completion_logprobs_from_logits(logits, prompt_length, token_ids)
+
+    def _completion_logprobs_from_logits(
+        self, logits: Any, prompt_length: int, token_ids: Sequence[int]
+    ) -> Any:
+        """Completion logprobs from logits the update pass already computed."""
+        torch = self._torch
+        log_probs = torch.log_softmax(logits[:-1], dim=-1)
+        ids = torch.tensor(list(token_ids), device=logits.device)
         positions = torch.arange(
             prompt_length - 1, prompt_length - 1 + len(token_ids), device=logits.device
         )
-        return log_probs[positions, token_ids_t]
+        return log_probs[positions, ids]
+
+    def _sampled_entropy(
+        self, logits: Any, prompt_length: int, token_count: int
+    ) -> tuple[float, int]:
+        """Summed entropy in nats over a bounded sample of generated positions.
+
+        Runs under `no_grad` on the logits the loss already holds, so nothing is
+        stored and no gradient flows. Returns the sum and the position count,
+        so the group mean can be taken over the sampled positions in `update`.
+        """
+        torch = self._torch
+        offsets = entropy_positions(token_count)
+        if not offsets:
+            return 0.0, 0
+        total = 0.0
+        count = 0
+        with torch.no_grad():
+            for start in range(0, len(offsets), ENTROPY_ROW_CHUNK):
+                chunk = offsets[start : start + ENTROPY_ROW_CHUNK]
+                rows = torch.tensor(
+                    [prompt_length - 1 + offset for offset in chunk],
+                    device=logits.device,
+                )
+                log_probs = torch.log_softmax(logits[rows].float(), dim=-1)
+                probs = log_probs.exp()
+                terms = torch.where(
+                    probs > 0, probs * log_probs, torch.zeros_like(probs)
+                )
+                total += float((-terms.sum(dim=-1)).sum().item())
+                count += len(chunk)
+        if not math.isfinite(total):
+            raise RuntimeError("mean token entropy is not finite")
+        return total, count
 
     def _reference_logprobs(
         self, prompt_ids: list[int], token_ids: list[int]
@@ -507,7 +554,9 @@ class QwenGenerator:
         prompt: Prompt,
         generations: Sequence[Generation],
         rewards: Sequence[float],
-    ) -> None:
+        *,
+        measure_entropy: bool = False,
+    ) -> float | None:
         """One GRPO step over the last sampled group.
 
         The advantage is group-normalized. The per-token clipped surrogate and
@@ -516,6 +565,11 @@ class QwenGenerator:
         as a token in a long one. The prompt and generations are accepted for
         interface symmetry with the seam; the token data comes from the group
         cached by `generate`.
+
+        When `measure_entropy` is true, the forward pass that computes the new
+        logprobs also yields a bounded per-token entropy sample. The group mean
+        is returned and the caller writes it to the step metric. When false,
+        nothing is measured and None is returned.
         """
         del prompt, generations
         if self._last_group is None:
@@ -535,14 +589,21 @@ class QwenGenerator:
         surrogate_total = None
         kl_total = None
         token_count = 0
+        entropy_total = 0.0
+        entropy_tokens = 0
         for entry, advantage in zip(self._last_group, advantages_tensor):
-            surrogate_sum, kl_sum, count = self._group_terms(entry, advantage)
+            surrogate_sum, kl_sum, count, entropy_sum, measured = self._group_terms(
+                entry, advantage, measure_entropy
+            )
             token_count += count
             surrogate_total = (
                 surrogate_sum if surrogate_total is None else surrogate_total + surrogate_sum
             )
             if kl_sum is not None:
                 kl_total = kl_sum if kl_total is None else kl_total + kl_sum
+            if entropy_sum is not None:
+                entropy_total += entropy_sum
+                entropy_tokens += measured
 
         loss = -surrogate_total / token_count
         if kl_total is not None:
@@ -552,13 +613,25 @@ class QwenGenerator:
         self.step += 1
         self._last_group = None
 
+        if measure_entropy and entropy_tokens:
+            return entropy_total / entropy_tokens
+        return None
+
     def _group_terms(
-        self, entry: _GroupEntry, advantage: Any
-    ) -> tuple[Any, Any | None, int]:
-        """The summed per-token surrogate and KL for one generation, plus its count."""
+        self, entry: _GroupEntry, advantage: Any, measure_entropy: bool
+    ) -> tuple[Any, Any | None, int, float | None, int]:
+        """Summed per-token surrogate and KL for one generation, plus its count.
+
+        Also returns the summed sampled entropy and its position count when the
+        caller asked for a measurement, both None and zero otherwise.
+        """
         torch = self._torch
         inputs = torch.tensor([entry.input_ids], device=self._device)
-        new_logprobs = self._completion_logprobs(inputs, entry.prompt_length)
+        logits = self.model(inputs).logits[0]
+        token_ids = entry.input_ids[entry.prompt_length :]
+        new_logprobs = self._completion_logprobs_from_logits(
+            logits, entry.prompt_length, token_ids
+        )
         old_logprobs = torch.tensor(entry.old_logprobs, device=new_logprobs.device)
 
         ratio = torch.exp(new_logprobs - old_logprobs)
@@ -572,7 +645,14 @@ class QwenGenerator:
             divergence = reference - new_logprobs
             kl_sum = (torch.exp(divergence) - divergence - 1.0).sum()
 
-        return surrogate_sum, kl_sum, new_logprobs.numel()
+        entropy_sum: float | None = None
+        entropy_count = 0
+        if measure_entropy:
+            entropy_sum, entropy_count = self._sampled_entropy(
+                logits, entry.prompt_length, len(token_ids)
+            )
+
+        return surrogate_sum, kl_sum, new_logprobs.numel(), entropy_sum, entropy_count
 
     # --- checkpoint save and load ----------------------------------------
 

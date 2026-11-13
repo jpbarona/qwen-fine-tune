@@ -32,11 +32,31 @@ def test_generator_separates_reasoning_from_code() -> None:
     assert generation.reasoning != generation.code
 
 
-def test_generator_token_counts_and_entropy_are_in_range() -> None:
+def test_generator_token_counts_are_in_range() -> None:
     generation = FakeGenerator().generate(Prompt("mbpp-0003", "p"), n=1, temperature=0.9)[0]
     assert generation.prompt_tokens > 0
     assert generation.completion_tokens > 0
-    assert 0.0 <= generation.mean_entropy < 2.0
+
+
+def test_generator_carries_no_entropy() -> None:
+    # Entropy is measured on the update pass, not at generation time.
+    generation = FakeGenerator().generate(Prompt("mbpp-0003", "p"), n=1, temperature=0.9)[0]
+    assert not hasattr(generation, "mean_entropy")
+
+
+def test_update_returns_a_deterministic_entropy_only_on_a_measurement_step() -> None:
+    prompt = Prompt("mbpp-0003", "p")
+    generation = FakeGenerator().generate(prompt, n=1, temperature=0.9)
+
+    plain = FakeGenerator()
+    assert plain.update(prompt, generation, [0.0]) is None
+    assert plain.update(prompt, generation, [0.0], measure_entropy=False) is None
+
+    measured = FakeGenerator()
+    first = measured.update(prompt, generation, [0.0], measure_entropy=True)
+    assert first is not None
+    assert 0.0 <= first < 2.0
+    assert FakeGenerator().update(prompt, generation, [0.0], measure_entropy=True) == first
 
 
 def test_generator_asks_for_n_candidates() -> None:

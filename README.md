@@ -119,8 +119,8 @@ runs/<arm>/<timestamp>/
     meta.json        arm, timestamp, git commit, versions, model revision,
                      judge model, split seed, the full config
     rollouts.jsonl   one record per rollout, schema below
-    metrics.jsonl    one row per step: mean reward, pass rate, entropy,
-                     completion length, cache hits
+    metrics.jsonl    one row per step: mean reward, pass rate, completion
+                     length, cache hits, and entropy on a measurement step
     eval.json        final pass@1 plus every checkpoint evaluation
     checkpoints/     one directory per saved step: LoRA adapter, optimizer
                      state, and a checkpoint.json manifest
@@ -170,17 +170,22 @@ never evaluates a training question. The `Experiment` itself has no fallback.
 It refuses to run when `eval_prompts` is empty. A wrong or empty split stops the
 command before a run folder is made.
 
-## The rollouts record: entropy and length
-
-`mean_entropy` is the mean Shannon entropy of the model's next-token
-distribution at each generated token position, in nats, averaged over the
-generated tokens only. Prompt tokens are excluded. The generator computes it
-from the logprobs it already receives, and the Experiment records it unchanged.
-It is logged, not rewarded, and it is not bounded by 1. The fake generator
-returns a deterministic synthetic value.
+## Completion length and sampled entropy
 
 `completion_tokens` is the completion length used for the length study. It is
-also logged, not rewarded.
+logged, not rewarded.
+
+Entropy is not a rollout field. It is measured on the update pass, on the same
+forward logits the policy loss uses, every `[training] entropy_every` updates
+(default 500). Zero disables it. The value is the mean Shannon entropy in nats
+over the generated tokens, estimated from at most 64 evenly spaced positions
+when a completion is longer than that. It is logged, not rewarded, and it is
+not bounded by 1.
+
+`metrics.jsonl` carries `mean_entropy` only on a step that measured it. A step
+without a measurement omits the key. The summary and the dashboard treat the
+key as absent, never as zero. The fake generator returns one deterministic
+value per prompt on the same cadence.
 
 ## Rollout record schema (frozen)
 
@@ -197,7 +202,6 @@ and types are a contract.
 | `code` | str | generated code only |
 | `prompt_tokens` | int | |
 | `completion_tokens` | int | completion length for the length study |
-| `mean_entropy` | float | mean per-token entropy in nats over generated tokens, logs only, can exceed 1 |
 | `tests_passed` | int | |
 | `tests_total` | int | |
 | `error_class` | str | `pass` when every test passed, otherwise the failure class set by task 2 |
@@ -224,7 +228,8 @@ also works and expands to every `<timestamp>` folder below it.
 
 It prints four plain tables, one per metric: reward, pass@1, entropy, and
 completion length. Steps are rows and arms are columns, so arms sit side by
-side. pass@1 shows only at steps where an evaluation ran.
+side. pass@1 shows only at steps where an evaluation ran. The entropy column
+shows a value only on a step that measured it, and a dash elsewhere.
 
 The HTML report is written to `report.html` in the current folder unless
 `--html` says otherwise. It is one static file: inline CSS, no script, no
@@ -254,7 +259,7 @@ or the filesystem during a run.
 
 ```python
 Generator.generate(prompt, *, n, temperature) -> list[Generation]
-Generator.update(prompt, generations, rewards) -> None
+Generator.update(prompt, generations, rewards, *, measure_entropy) -> float | None
 Generator.save_checkpoint(directory) -> None
 Generator.load_checkpoint(directory) -> None
 TestRunner.run(prompt, code) -> Outcome

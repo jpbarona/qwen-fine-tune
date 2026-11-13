@@ -7,7 +7,7 @@ in the package talks to a model, an API, Docker, or the filesystem during a run.
 Interfaces, frozen for later tasks:
 
     Generator.generate(prompt, *, n, temperature) -> list[Generation]
-    Generator.update(prompt, generations, rewards) -> None
+    Generator.update(prompt, generations, rewards, *, measure_entropy) -> float | None
     Generator.save_checkpoint(directory) -> None
     Generator.load_checkpoint(directory) -> None
     TestRunner.run(prompt, code) -> Outcome
@@ -84,12 +84,9 @@ class Prompt:
 class Generation:
     """One model output, with reasoning kept apart from code.
 
-    `mean_entropy` is the mean Shannon entropy of the model's next-token
-    distribution at each generated token position, in nats, averaged over the
-    generated tokens only. Prompt tokens are excluded. The value comes from the
-    logprobs the generator already receives, so the generator computes it and
-    the Experiment only records it. It is logged, not rewarded, and it is not
-    bounded by 1. The fake generator returns a deterministic synthetic value.
+    Entropy is not part of a generation. The update pass measures it at the
+    configured cadence, on the logits it already computes, and the Experiment
+    records it on the step metric row. It is logged, not rewarded.
 
     `truncated` is true when the completion hit the max length without an end
     token. `prompt_truncated` is true when the prompt was cut at max prompt
@@ -100,7 +97,6 @@ class Generation:
     code: str
     prompt_tokens: int
     completion_tokens: int
-    mean_entropy: float
     truncated: bool = False
     prompt_truncated: bool = False
 
@@ -155,7 +151,9 @@ class Generator(Protocol):
         prompt: Prompt,
         generations: Sequence[Generation],
         rewards: Sequence[float],
-    ) -> None: ...
+        *,
+        measure_entropy: bool = False,
+    ) -> float | None: ...
 
     def save_checkpoint(self, directory: Path) -> None: ...
 
@@ -281,7 +279,7 @@ class Experiment:
         evaluations: list[dict[str, Any]] = [dict(e) for e in self.prior_evaluations]
 
         for step in range(self.resume_step + 1, effective_steps + 1):
-            step_records, truncated, prompt_truncated = self._training_step(step)
+            step_records, truncated, prompt_truncated, entropy = self._training_step(step)
             last_step = step
             for record in step_records:
                 self.store.append_rollout(record)
@@ -289,7 +287,7 @@ class Experiment:
                 reward_sum += record.reward
                 judge_calls += self._judge_calls_for(record)
             self.store.append_metric(
-                self._metric_row(step, step_records, truncated, prompt_truncated)
+                self._metric_row(step, step_records, truncated, prompt_truncated, entropy)
             )
 
             if step % self.config.eval_every_steps == 0:
@@ -359,6 +357,7 @@ class Experiment:
                 "lora_alpha": config.lora_alpha,
                 "max_prompt_tokens": config.max_prompt_tokens,
                 "max_completion_tokens": config.max_completion_tokens,
+                "entropy_every": config.entropy_every,
                 "clip_epsilon": config.clip_epsilon,
                 "kl_beta": config.kl_beta,
                 "batch_size": BATCH_SIZE,
@@ -380,14 +379,18 @@ class Experiment:
         group per step, cycling through the training prompts."""
         return self.prompts[(step - 1) % len(self.prompts)]
 
-    def _training_step(self, step: int) -> tuple[list[RolloutRecord], int, int]:
+    def _training_step(
+        self, step: int
+    ) -> tuple[list[RolloutRecord], int, int, float | None]:
         """Sample one prompt group, run and judge all of it, update once.
 
         All 8 generations are tested. The passing ones are judged in two batch
         calls, one for output scores and one for process scores, so the 32-way
         judge concurrency is used. A failed rollout still costs no judge call.
-        The group's rewards are passed to `update` once. Returns the 8 records
-        plus the counts of truncated and prompt-truncated generations.
+        The group's rewards are passed to `update` once, with the entropy
+        measurement flag set on the configured cadence. Returns the 8 records,
+        the counts of truncated and prompt-truncated generations, and the mean
+        entropy when this step measured it.
         """
         prompt = self._prompt_for_step(step)
         generations = self.generator.generate(
@@ -433,12 +436,26 @@ class Experiment:
         ]
 
         rewards = [record.reward for record in records]
-        self.generator.update(prompt, generations, rewards)
+        entropy = self.generator.update(
+            prompt,
+            generations,
+            rewards,
+            measure_entropy=self._measures_entropy(step),
+        )
         truncated = sum(1 for generation in generations if generation.truncated)
         prompt_truncated = sum(
             1 for generation in generations if generation.prompt_truncated
         )
-        return records, truncated, prompt_truncated
+        return records, truncated, prompt_truncated, entropy
+
+    def _measures_entropy(self, step: int) -> bool:
+        """Whether this step is an entropy measurement step.
+
+        `entropy_every` counts updates, so step N is measured when N is a
+        multiple of the setting. Zero disables the measurement.
+        """
+        every = self.config.entropy_every
+        return every > 0 and step % every == 0
 
     def _build_record(
         self,
@@ -492,7 +509,6 @@ class Experiment:
             code=generation.code,
             prompt_tokens=generation.prompt_tokens,
             completion_tokens=generation.completion_tokens,
-            mean_entropy=generation.mean_entropy,
             tests_passed=outcome.tests_passed,
             tests_total=outcome.tests_total,
             error_class=outcome.error_class,
@@ -532,25 +548,29 @@ class Experiment:
         records: Sequence[RolloutRecord],
         truncated: int = 0,
         prompt_truncated: int = 0,
+        mean_entropy: float | None = None,
     ) -> dict[str, Any]:
+        """One metrics row. Entropy is present only on a measurement step."""
         count = len(records)
         passed = sum(
             1
             for record in records
             if all_tests_passed(record.tests_passed, record.tests_total)
         )
-        return {
+        row: dict[str, Any] = {
             "step": step,
             "arm": records[0].arm if records else None,
             "rollouts": count,
             "mean_reward": sum(record.reward for record in records) / count,
             "pass_rate": passed / count,
-            "mean_entropy": sum(record.mean_entropy for record in records) / count,
             "mean_completion_tokens": sum(record.completion_tokens for record in records) / count,
             "cache_hits": sum(1 for record in records if record.cache_hit),
             "truncation_rate": truncated / count,
             "prompt_truncation_rate": prompt_truncated / count,
         }
+        if mean_entropy is not None:
+            row["mean_entropy"] = mean_entropy
+        return row
 
     def _evaluate(
         self,

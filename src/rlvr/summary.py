@@ -39,11 +39,11 @@ METRICS_NAME = "metrics.jsonl"
 EVAL_NAME = "eval.json"
 META_NAME = "meta.json"
 
-#: Step fields read from metrics.jsonl, in validation order.
+#: Step fields read from metrics.jsonl, in validation order. Entropy is read
+#: separately because it is present only on a step that measured it.
 _STEP_FIELDS: tuple[tuple[str, str], ...] = (
     ("mean_reward", "mean reward"),
     ("pass_rate", "pass rate"),
-    ("mean_entropy", "mean entropy"),
     ("mean_completion_tokens", "mean completion tokens"),
 )
 
@@ -67,7 +67,7 @@ class StepMetric:
     step: int
     mean_reward: float
     pass_rate: float
-    mean_entropy: float
+    mean_entropy: float | None
     mean_completion_tokens: float
     rollouts: int
     pass_at_1: float | None
@@ -90,8 +90,17 @@ class RunReport:
         return sum(step.rollouts for step in self.steps)
 
     def mean(self, field: str) -> float | None:
-        """The mean of a step field over all recorded steps."""
-        values = [getattr(step, field) for step in self.steps]
+        """The mean of a step field over the steps that carry a value.
+
+        Entropy is measured only every `entropy_every` steps, so a step without
+        a value is skipped rather than counted as zero. With no measured step
+        the result is None.
+        """
+        values = []
+        for step in self.steps:
+            value = getattr(step, field)
+            if value is not None:
+                values.append(value)
         if not values:
             return None
         return sum(values) / len(values)
@@ -138,6 +147,17 @@ def _number(row: Mapping[str, Any], key: str, source: str) -> float:
     if not math.isfinite(number):
         raise SummaryError(f"{source}: field {key!r} must be finite, got {value!r}")
     return number
+
+
+def _optional_number(row: Mapping[str, Any], key: str, source: str) -> float | None:
+    """A number from `row`, or None when the key is absent or null.
+
+    Entropy is written only on a measurement step. A missing key means the step
+    did not measure it, which is not an error.
+    """
+    if key not in row or row[key] is None:
+        return None
+    return _number(row, key, source)
 
 
 def _step_number(row: Mapping[str, Any], source: str) -> int:
@@ -222,7 +242,7 @@ def load_report(run_dir: str | Path) -> RunReport:
                 step=step,
                 mean_reward=values["mean_reward"],
                 pass_rate=values["pass_rate"],
-                mean_entropy=values["mean_entropy"],
+                mean_entropy=_optional_number(row, "mean_entropy", source),
                 mean_completion_tokens=values["mean_completion_tokens"],
                 rollouts=rollouts_value,
                 pass_at_1=checkpoint.get(step),
@@ -478,7 +498,7 @@ def render_html(
                 f"<td>{step.step}</td>"
                 f"<td>{step.mean_reward:.4f}</td>"
                 f"<td>{_value(step, 'pass_at_1')}</td>"
-                f"<td>{step.mean_entropy:.4f}</td>"
+                f"<td>{_value(step, 'mean_entropy')}</td>"
                 f"<td>{step.mean_completion_tokens:.1f}</td>"
                 "</tr>"
             )

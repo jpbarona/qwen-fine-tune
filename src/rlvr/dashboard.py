@@ -283,6 +283,20 @@ def _steps_done(rows: list[dict[str, Any]]) -> int:
     return step if step is not None and step > 0 else len(rows)
 
 
+def _last_number(rows: list[dict[str, Any]], name: str) -> float | None:
+    """The last present numeric value of a field, or None.
+
+    Entropy is measured only every `entropy_every` steps, so the newest row
+    often has no value. The KPI shows the last measured value instead of
+    flickering back to a dash.
+    """
+    for row in reversed(rows):
+        value = _number(row.get(name))
+        if value is not None:
+            return value
+    return None
+
+
 def _latest(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if not rows:
         return {name: None for name in LATEST_FIELDS}
@@ -290,6 +304,7 @@ def _latest(rows: list[dict[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for name in SERIES_FIELDS:
         result[name] = _integer(last.get(name)) if name == "cache_hits" else _number(last.get(name))
+    result["mean_entropy"] = _last_number(rows, "mean_entropy")
     result["rollouts"] = _integer(last.get("rollouts"))
     return result
 
@@ -580,6 +595,16 @@ _SCRIPT = """\
     }
     return out;
   }
+  function xyPresent(steps, values) {
+    var out = [];
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i] === null || steps[i] === undefined) { continue; }
+      var y = values[i];
+      if (y === null || y === undefined) { continue; }
+      out.push({ x: steps[i], y: y });
+    }
+    return out;
+  }
   function pill(status) {
     var map = {
       running: "text-amber-300 border-amber-500/40",
@@ -767,7 +792,15 @@ _SCRIPT = """\
     var d = function (color, values) { return lineDs(color, xy(steps, values || [])); };
     mount(p + "-reward", { type: "line", data: { datasets: [d(ACCENT, s.mean_reward)] }, options: lineOpts() });
     mount(p + "-pass", { type: "line", data: { datasets: [d(ACCENT, s.pass_rate)] }, options: lineOpts() });
-    mount(p + "-entropy", { type: "line", data: { datasets: [d(ACCENT, s.mean_entropy)] }, options: lineOpts() });
+    mount(p + "-entropy", {
+      type: "line",
+      data: { datasets: [{
+        data: xyPresent(steps, s.mean_entropy || []),
+        borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5,
+        pointRadius: 2, pointBackgroundColor: ACCENT, tension: 0, spanGaps: false
+      }] },
+      options: lineOpts()
+    });
     mount(p + "-length", { type: "line", data: { datasets: [d(ACCENT, s.mean_completion_tokens)] }, options: lineOpts() });
     mount(p + "-trunc", { type: "line", data: { datasets: [d(ACCENT, s.truncation_rate)] }, options: lineOpts() });
 

@@ -18,6 +18,9 @@ Notes on the contract:
 * `reward` may be negative. The code arm clips it to [-1, 1], so the schema
   checks that range rather than [0, 1]. The three score fields stay in [0, 1].
 * Timestamps and truncation flags are deliberately not part of this record.
+* Entropy is not a rollout field. It is measured on the update pass, at the
+  `entropy_every` cadence, so it belongs to the step metric row and may be
+  absent there on a step without a measurement.
 """
 
 from __future__ import annotations
@@ -49,7 +52,6 @@ FIELD_NAMES: tuple[str, ...] = (
     "code",
     "prompt_tokens",
     "completion_tokens",
-    "mean_entropy",
     "tests_passed",
     "tests_total",
     "error_class",
@@ -69,7 +71,6 @@ FIELD_TYPES: dict[str, tuple[str, ...]] = {
     "code": (STR,),
     "prompt_tokens": (INT,),
     "completion_tokens": (INT,),
-    "mean_entropy": (FLOAT,),
     "tests_passed": (INT,),
     "tests_total": (INT,),
     "error_class": (STR,),
@@ -176,7 +177,6 @@ class RolloutRecord:
     code: str
     prompt_tokens: int
     completion_tokens: int
-    mean_entropy: float
     tests_passed: int
     tests_total: int
     error_class: str
