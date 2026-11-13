@@ -105,14 +105,14 @@ def test_gated_process_runs_fake_and_populates_both_scores(
 def test_a_judge_arm_fails_before_the_run_folder_when_the_key_is_missing(
     arm, config_path, tmp_path, monkeypatch, capsys
 ) -> None:
-    monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     runs_root = tmp_path / "runs"
     code = main(
         ["run", "--arm", arm, "--config", str(config_path), "--runs-root", str(runs_root)]
     )
     captured = capsys.readouterr()
     assert code != 0
-    assert "OPENCODE_GO_API_KEY" in captured.err
+    assert "OPENROUTER_API_KEY" in captured.err
     assert not (runs_root / arm).exists()
 
 

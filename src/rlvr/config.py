@@ -35,6 +35,10 @@ Optional keys, with the defaults shown:
     [budget] max_steps = (unset: run all of fake.steps)
     [budget] max_judge_calls = (unset: no judge call cap)
 
+    [judge] provider = "openrouter"
+    [judge] base_url = (unset: the provider default endpoint)
+    [judge] api_key_env = (unset: the provider default variable)
+
 `eval_subset_seed` chooses the fixed checkpoint subset from the test pool. It is
 deliberately separate from `data.split_seed`, so the eval subset is not tied to
 the train/test cut.
@@ -42,8 +46,10 @@ the train/test cut.
 Extra keys and tables are kept and ignored here. Later tasks add the training,
 data, and judge settings they need without changing this loader's contract.
 
-The judge API key is never part of the config. It comes from the environment in
-the task that calls the judge.
+The judge API key is never part of the config. It comes from the environment
+named by `[judge] api_key_env`, which defaults per provider. The loader keeps
+`[judge] provider` and the endpoint keys raw and leaves validation to the judge
+client, so the default config and a run config use the same shape.
 """
 
 from __future__ import annotations

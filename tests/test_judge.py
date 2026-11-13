@@ -1,4 +1,4 @@
-"""Tests for the OpenCode Go judge client. No network, no real key."""
+"""Tests for the judge client. No network, no real key."""
 
 from __future__ import annotations
 
@@ -9,17 +9,28 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.config import load_config, default_config_path
+from rlvr.config import ConfigError, default_config_path, load_config
 from rlvr.experiment import JudgeResult, Prompt
 from rlvr.judge import (
     DEFAULT_CONCURRENCY,
     DEFAULT_ENDPOINT,
+    DEFAULT_KEY_ENV,
     DEFAULT_MODEL,
+    DEFAULT_PROVIDER,
     KEY_ENV,
+    OPENCODE_ENDPOINT,
+    OPENCODE_KEY_ENV,
+    OPENCODE_MODEL,
+    OPENROUTER_ENDPOINT,
+    OPENROUTER_KEY_ENV,
+    OPENROUTER_MODEL,
     OUTPUT_RUBRIC_VERSION,
     PROCESS_RUBRIC_VERSION,
+    PROVIDER_OPENCODE,
+    PROVIDER_OPENROUTER,
     REASONING_EFFORT,
     SESSION_VALUE,
+    TITLE,
     USER_AGENT,
     HTTPResponse,
     JudgeCache,
@@ -36,17 +47,35 @@ from rlvr.judge import (
     output_messages,
     parse_score_payload,
     process_messages,
+    provider_defaults,
     require_api_key,
 )
 
 # A fake credential. The tests assert it never lands on disk or in an error.
 FAKE_KEY = "test-key-never-store-this"
-ENDPOINT = "https://opencode.ai/inference/go/openai/v1/chat/completions"
+ENDPOINT = OPENROUTER_ENDPOINT
 
 PROBLEM = "Return the sum of all integers from 0 up to n."
 CODE = "def solution(n):\n    return sum(range(n))\n"
 REASONING = "I will loop from zero to n. I check the empty case."
 TEST_SENTINEL = "assert solution(3) == 3  # hidden test code"
+
+PROVIDER_CASES = [
+    pytest.param(
+        PROVIDER_OPENROUTER,
+        OPENROUTER_ENDPOINT,
+        OPENROUTER_KEY_ENV,
+        OPENROUTER_MODEL,
+        id="openrouter",
+    ),
+    pytest.param(
+        PROVIDER_OPENCODE,
+        OPENCODE_ENDPOINT,
+        OPENCODE_KEY_ENV,
+        OPENCODE_MODEL,
+        id="opencode",
+    ),
+]
 
 
 def prompt() -> Prompt:
@@ -115,21 +144,72 @@ def make_client(transport, tmp_path, **kwargs) -> JudgeClient:
 # --- request shape -------------------------------------------------------
 
 
-def test_request_goes_to_the_opencode_go_endpoint_with_the_frozen_model(tmp_path):
+@pytest.mark.parametrize(
+    "provider, endpoint, key_env, model", PROVIDER_CASES
+)
+def test_request_goes_to_the_provider_endpoint_with_its_model(
+    tmp_path, provider, endpoint, key_env, model
+):
     transport = FakeTransport()
-    client = make_client(transport, tmp_path)
+    client = make_client(
+        transport, tmp_path, provider=provider, key_env=key_env, model=model
+    )
     result = client.score_output(prompt(), CODE)
 
     assert result.score == 0.5
     request = transport.requests[0]
-    assert request["url"] == ENDPOINT == DEFAULT_ENDPOINT
-    assert "/inference/go/openai/v1/chat/completions" in request["url"]
+    assert request["url"] == endpoint
     body = transport.body_json()
-    assert body["model"] == DEFAULT_MODEL == "deepseek-v4.1-flash"
+    assert body["model"] == model
     assert body["temperature"] == 0.0
     assert body["response_format"] == {"type": "json_object"}
     assert body["messages"][0]["role"] == "system"
     assert body["messages"][1]["role"] == "user"
+
+
+def test_the_default_endpoint_and_model_are_openrouter():
+    assert DEFAULT_PROVIDER == PROVIDER_OPENROUTER == "openrouter"
+    assert DEFAULT_ENDPOINT == OPENROUTER_ENDPOINT
+    assert DEFAULT_KEY_ENV == OPENROUTER_KEY_ENV == "OPENROUTER_API_KEY"
+    assert DEFAULT_MODEL == OPENROUTER_MODEL == "deepseek/deepseek-v4.1-flash-1017"
+    assert KEY_ENV == DEFAULT_KEY_ENV
+    assert OPENCODE_MODEL == "deepseek-v4.1-flash"
+
+
+def test_provider_defaults_name_both_providers():
+    assert provider_defaults(PROVIDER_OPENROUTER) == (
+        OPENROUTER_ENDPOINT,
+        OPENROUTER_KEY_ENV,
+        OPENROUTER_MODEL,
+    )
+    assert provider_defaults(PROVIDER_OPENCODE) == (
+        OPENCODE_ENDPOINT,
+        OPENCODE_KEY_ENV,
+        OPENCODE_MODEL,
+    )
+    with pytest.raises(ValueError):
+        provider_defaults("nope")
+
+
+def test_the_constructor_fills_in_the_provider_defaults(tmp_path):
+    transport = FakeTransport()
+    client = JudgeClient(
+        api_key=FAKE_KEY,
+        provider=PROVIDER_OPENCODE,
+        transport=transport,
+        cache=JudgeCache(tmp_path / "cache"),
+        sleep=lambda delay: None,
+    )
+    client.score_output(prompt(), CODE)
+
+    assert client.endpoint == OPENCODE_ENDPOINT
+    assert client.model == OPENCODE_MODEL
+    assert client.key_env == OPENCODE_KEY_ENV
+    assert transport.requests[0]["url"] == OPENCODE_ENDPOINT
+    assert transport.body_json()["model"] == OPENCODE_MODEL
+
+    with pytest.raises(ValueError):
+        JudgeClient(api_key=FAKE_KEY, provider="nope")
 
 
 def test_auth_header_carries_the_key_and_nothing_else_exposes_it(tmp_path):
@@ -143,9 +223,29 @@ def test_auth_header_carries_the_key_and_nothing_else_exposes_it(tmp_path):
     assert FAKE_KEY not in transport.requests[0]["body"].decode("utf-8")
 
 
-def test_cloudflare_headers_are_sent_on_every_request(tmp_path):
+def test_openrouter_headers_carry_the_title_and_no_session_header(tmp_path):
     transport = FakeTransport()
-    client = make_client(transport, tmp_path)
+    make_client(transport, tmp_path, provider=PROVIDER_OPENROUTER).score_output(
+        prompt(), CODE
+    )
+
+    headers = transport.requests[0]["headers"]
+    assert headers["User-Agent"] == USER_AGENT == "rlvr/0.1 (research judge)"
+    assert headers["X-Title"] == TITLE == "rlvr"
+    assert "x-opencode-session" not in headers
+    assert "HTTP-Referer" not in headers
+    assert set(headers) == {"Authorization", "Content-Type", "User-Agent", "X-Title"}
+
+
+def test_opencode_headers_keep_the_session_header(tmp_path):
+    transport = FakeTransport()
+    client = make_client(
+        transport,
+        tmp_path,
+        provider=PROVIDER_OPENCODE,
+        key_env=OPENCODE_KEY_ENV,
+        model=OPENCODE_MODEL,
+    )
     client.score_output(prompt(), CODE)
     client.score_process(prompt(), REASONING)
 
@@ -154,14 +254,21 @@ def test_cloudflare_headers_are_sent_on_every_request(tmp_path):
         headers = request["headers"]
         assert headers["User-Agent"] == USER_AGENT == "rlvr/0.1 (research judge)"
         assert headers["x-opencode-session"] == SESSION_VALUE == "rlvr-judge"
+        assert headers["Accept"] == "application/json"
+        assert "X-Title" not in headers
+        assert "HTTP-Referer" not in headers
 
 
-def test_reasoning_effort_is_sent_explicitly(tmp_path):
+@pytest.mark.parametrize("provider, endpoint, key_env, model", PROVIDER_CASES)
+def test_reasoning_effort_is_sent_explicitly(
+    tmp_path, provider, endpoint, key_env, model
+):
     transport = FakeTransport()
-    make_client(transport, tmp_path).score_output(prompt(), CODE)
-    body = transport.body_json()
+    make_client(
+        transport, tmp_path, provider=provider, key_env=key_env, model=model
+    ).score_output(prompt(), CODE)
 
-    assert body["reasoning_effort"] == REASONING_EFFORT == "medium"
+    assert transport.body_json()["reasoning_effort"] == REASONING_EFFORT == "medium"
 
 
 # --- prompts -------------------------------------------------------------
@@ -255,11 +362,20 @@ def test_a_malformed_completion_body_is_an_error(tmp_path):
 def test_require_api_key_raises_when_the_variable_is_absent():
     with pytest.raises(MissingAPIKeyError) as caught:
         require_api_key({})
+    assert KEY_ENV == OPENROUTER_KEY_ENV
     assert KEY_ENV in str(caught.value)
+
+
+def test_require_api_key_names_the_selected_variable():
+    with pytest.raises(MissingAPIKeyError) as caught:
+        require_api_key({}, key_env=OPENCODE_KEY_ENV)
+    assert OPENCODE_KEY_ENV in str(caught.value)
+    assert OPENROUTER_KEY_ENV not in str(caught.value)
 
 
 def test_require_api_key_returns_the_value_without_printing_it():
     assert require_api_key({KEY_ENV: FAKE_KEY}) == FAKE_KEY
+    assert require_api_key({OPENCODE_KEY_ENV: FAKE_KEY}, key_env=OPENCODE_KEY_ENV) == FAKE_KEY
 
 
 def test_client_construction_fails_fast_without_a_key(tmp_path):
@@ -272,7 +388,7 @@ def test_from_config_fails_before_any_request_when_the_key_is_missing(
 ):
     transport = FakeTransport()
     config = load_config(write_config())
-    with pytest.raises(MissingAPIKeyError):
+    with pytest.raises(MissingAPIKeyError) as caught:
         JudgeClient.from_config(
             config,
             environ={},
@@ -280,12 +396,43 @@ def test_from_config_fails_before_any_request_when_the_key_is_missing(
             cache=JudgeCache(tmp_path / "cache"),
         )
     assert transport.requests == []
+    assert OPENROUTER_KEY_ENV in str(caught.value)
+
+
+@pytest.mark.parametrize("provider, endpoint, key_env, model", PROVIDER_CASES)
+def test_missing_key_uses_the_selected_provider_variable(
+    tmp_path, write_config, provider, endpoint, key_env, model
+):
+    text = (
+        "[model]\n"
+        'name = "Qwen/Qwen3-0.6B"\n'
+        'revision = "base"\n'
+        "\n[judge]\n"
+        f'provider = "{provider}"\n'
+        f'model = "{model}"\n'
+        "\n[data]\n"
+        "split_seed = 1\n"
+    )
+    config = load_config(write_config(text))
+    transport = FakeTransport()
+    with pytest.raises(MissingAPIKeyError) as caught:
+        JudgeClient.from_config(
+            config,
+            environ={},
+            transport=transport,
+            cache=JudgeCache(tmp_path / "cache"),
+        )
+    assert transport.requests == []
+    assert key_env in str(caught.value)
+    other = OPENCODE_KEY_ENV if key_env == OPENROUTER_KEY_ENV else OPENROUTER_KEY_ENV
+    assert other not in str(caught.value)
 
 
 def test_missing_key_error_does_not_contain_a_key():
     with pytest.raises(MissingAPIKeyError) as caught:
         require_api_key({})
     assert "oc_sk_" not in str(caught.value)
+    assert "sk-or-" not in str(caught.value)
 
 
 def test_from_config_reads_the_key_from_the_environment(
@@ -303,14 +450,92 @@ def test_from_config_reads_the_key_from_the_environment(
 # --- cache ---------------------------------------------------------------
 
 
-def test_cache_key_changes_with_every_input():
-    base = cache_key("model-a", "output", "prompt text", "rubric-v1")
-    assert base == cache_key("model-a", "output", "prompt text", "rubric-v1")
-    assert base != cache_key("model-b", "output", "prompt text", "rubric-v1")
-    assert base != cache_key("model-a", "process", "prompt text", "rubric-v1")
-    assert base != cache_key("model-a", "output", "other text", "rubric-v1")
-    assert base != cache_key("model-a", "output", "prompt text", "rubric-v2")
+def test_the_same_inputs_give_the_same_cache_key():
+    base = cache_key(
+        PROVIDER_OPENROUTER,
+        OPENROUTER_ENDPOINT,
+        "model-a",
+        "output",
+        "prompt text",
+        "rubric-v1",
+    )
+    assert base == cache_key(
+        PROVIDER_OPENROUTER,
+        OPENROUTER_ENDPOINT,
+        "model-a",
+        "output",
+        "prompt text",
+        "rubric-v1",
+    )
     assert len(base) == 64
+
+
+@pytest.mark.parametrize(
+    "provider, base_url, model, kind, text, rubric",
+    [
+        (PROVIDER_OPENCODE, OPENROUTER_ENDPOINT, "model-a", "output", "prompt text", "rubric-v1"),
+        (
+            PROVIDER_OPENROUTER,
+            "https://example.test/v1/chat/completions",
+            "model-a",
+            "output",
+            "prompt text",
+            "rubric-v1",
+        ),
+        (PROVIDER_OPENROUTER, OPENROUTER_ENDPOINT, "model-b", "output", "prompt text", "rubric-v1"),
+        (PROVIDER_OPENROUTER, OPENROUTER_ENDPOINT, "model-a", "process", "prompt text", "rubric-v1"),
+        (PROVIDER_OPENROUTER, OPENROUTER_ENDPOINT, "model-a", "output", "other text", "rubric-v1"),
+        (PROVIDER_OPENROUTER, OPENROUTER_ENDPOINT, "model-a", "output", "prompt text", "rubric-v2"),
+    ],
+)
+def test_cache_key_changes_with_every_input(
+    provider, base_url, model, kind, text, rubric
+):
+    base = cache_key(
+        PROVIDER_OPENROUTER,
+        OPENROUTER_ENDPOINT,
+        "model-a",
+        "output",
+        "prompt text",
+        "rubric-v1",
+    )
+    assert base != cache_key(provider, base_url, model, kind, text, rubric)
+
+
+def test_switching_provider_does_not_reuse_a_cached_score(tmp_path):
+    cache = JudgeCache(tmp_path / "cache")
+    transport = FakeTransport()
+    openrouter = make_client(
+        transport, tmp_path, cache=cache, provider=PROVIDER_OPENROUTER
+    )
+    opencode = make_client(
+        transport,
+        tmp_path,
+        cache=cache,
+        provider=PROVIDER_OPENCODE,
+        key_env=OPENCODE_KEY_ENV,
+    )
+
+    first = openrouter.score_output(prompt(), CODE)
+    second = opencode.score_output(prompt(), CODE)
+
+    assert first.cache_hit is False
+    assert second.cache_hit is False
+    assert len(transport.requests) == 2
+    assert len(list(cache.root.glob("*.json"))) == 2
+
+
+def test_changing_the_base_url_does_not_reuse_a_cached_score(tmp_path):
+    cache = JudgeCache(tmp_path / "cache")
+    transport = FakeTransport()
+    one = make_client(transport, tmp_path, cache=cache)
+    two = make_client(
+        transport, tmp_path, cache=cache, endpoint="https://example.test/v1/chat/completions"
+    )
+
+    assert one.score_output(prompt(), CODE).cache_hit is False
+    assert two.score_output(prompt(), CODE).cache_hit is False
+    assert len(transport.requests) == 2
 
 
 def test_identical_requests_hit_the_cache(tmp_path):
@@ -363,7 +588,14 @@ def test_cached_reason_is_returned_and_the_key_is_not_on_disk(tmp_path):
 
 def test_a_corrupt_cache_file_is_a_miss(tmp_path):
     cache = JudgeCache(tmp_path / "cache")
-    key = cache_key(DEFAULT_MODEL, "output", "x", OUTPUT_RUBRIC_VERSION)
+    key = cache_key(
+        PROVIDER_OPENROUTER,
+        OPENROUTER_ENDPOINT,
+        DEFAULT_MODEL,
+        "output",
+        "x",
+        OUTPUT_RUBRIC_VERSION,
+    )
     cache.root.mkdir(parents=True, exist_ok=True)
     cache.path_for(key).write_text("{not json", encoding="utf-8")
 
@@ -575,7 +807,9 @@ name = "Qwen/Qwen3-0.6B"
 revision = "base"
 
 [judge]
+provider = "opencode"
 model = "deepseek-v4.1-flash"
+api_key_env = "OPENCODE_GO_API_KEY"
 temperature = 0.0
 concurrency = 5
 max_attempts = 2
@@ -598,6 +832,8 @@ prompts_per_step = 1
         sleep=lambda delay: None,
     )
 
+    assert client.provider == PROVIDER_OPENCODE
+    assert client.key_env == OPENCODE_KEY_ENV
     assert client.model == "deepseek-v4.1-flash"
     assert client.max_workers == 5
     assert client.max_attempts == 2
@@ -606,6 +842,104 @@ prompts_per_step = 1
     # config file, so the packaged default config does not write inside the
     # package.
     assert client.cache.root == Path("some-cache")
+
+
+def test_from_config_uses_the_provider_defaults_and_allows_overrides(
+    tmp_path, write_config
+):
+    text = (
+        "[model]\n"
+        'name = "Qwen/Qwen3-0.6B"\n'
+        'revision = "base"\n'
+        "\n[judge]\n"
+        'model = "deepseek/deepseek-v4.1-flash-1017"\n'
+        "{extra}"
+        "\n[data]\n"
+        "split_seed = 1\n"
+    )
+
+    default = load_config(write_config(text.format(extra="")))
+    client = JudgeClient.from_config(
+        default,
+        api_key=FAKE_KEY,
+        cache=JudgeCache(tmp_path / "cache"),
+        transport=FakeTransport(),
+    )
+    assert client.provider == PROVIDER_OPENROUTER
+    assert client.endpoint == OPENROUTER_ENDPOINT
+    assert client.key_env == OPENROUTER_KEY_ENV
+
+    overrides = load_config(
+        write_config(
+            text.format(
+                extra=(
+                    'provider = "openrouter"\n'
+                    'base_url = "https://example.test/v1/chat/completions"\n'
+                    'api_key_env = "MY_JUDGE_KEY"\n'
+                )
+            ),
+            name="overrides.toml",
+        )
+    )
+    client = JudgeClient.from_config(
+        overrides,
+        api_key=FAKE_KEY,
+        cache=JudgeCache(tmp_path / "cache"),
+        transport=FakeTransport(),
+    )
+    assert client.endpoint == "https://example.test/v1/chat/completions"
+    assert client.key_env == "MY_JUDGE_KEY"
+
+
+@pytest.mark.parametrize(
+    "extra, name",
+    [
+        ('provider = "nope"\n', "judge.provider"),
+        ('provider = 3\n', "judge.provider"),
+        ('base_url = ""\n', "judge.base_url"),
+        ('api_key_env = ""\n', "judge.api_key_env"),
+    ],
+)
+def test_a_bad_provider_setting_is_named(tmp_path, write_config, extra, name):
+    text = (
+        "[model]\n"
+        'name = "Qwen/Qwen3-0.6B"\n'
+        'revision = "base"\n'
+        "\n[judge]\n"
+        'model = "deepseek/deepseek-v4.1-flash-1017"\n'
+        f"{extra}"
+        "\n[data]\n"
+        "split_seed = 1\n"
+    )
+    config = load_config(write_config(text))
+    with pytest.raises(ConfigError, match=name):
+        JudgeClient.from_config(
+            config,
+            api_key=FAKE_KEY,
+            cache=JudgeCache(tmp_path / "cache"),
+            transport=FakeTransport(),
+        )
+
+
+def test_the_packaged_config_defaults_to_openrouter():
+    config = load_config(default_config_path())
+    judge = config.raw["judge"]
+
+    assert judge["provider"] == DEFAULT_PROVIDER == "openrouter"
+    assert judge["base_url"] == OPENROUTER_ENDPOINT
+    assert judge["api_key_env"] == OPENROUTER_KEY_ENV
+    assert config.judge_model == OPENROUTER_MODEL
+
+
+def test_both_run_configs_default_to_openrouter():
+    root = Path(__file__).resolve().parents[1] / "configs"
+    for name in ("real.toml", "smoke.toml"):
+        config = load_config(root / name)
+        judge = config.raw["judge"]
+        assert judge["provider"] == "openrouter"
+        assert judge["base_url"] == OPENROUTER_ENDPOINT
+        assert judge["api_key_env"] == OPENROUTER_KEY_ENV
+        assert config.judge_model == OPENROUTER_MODEL
 
 
 def test_the_packaged_config_has_the_concurrency_and_retry_caps():
