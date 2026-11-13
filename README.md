@@ -14,7 +14,7 @@ The real training path needs the `train` extra, pinned for a CUDA 12, Python
 3.12 host:
 
 ```bash
-.venv/bin/pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu124
+.venv/bin/pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu126
 .venv/bin/pip install -e ".[train]"
 ```
 

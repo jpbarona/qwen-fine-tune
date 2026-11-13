@@ -12,7 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 # The real training path. Pinned exact versions for a CUDA 12, Python 3.12
-# host. Install torch from the cu124 index first, then this extra. Versions
+# host. Install torch from the cu126 index first, then this extra. Versions
 # chosen to satisfy Qwen3 (transformers >= 4.51) and PEFT on a 3090.
 train = [
     "torch==2.7.1",
