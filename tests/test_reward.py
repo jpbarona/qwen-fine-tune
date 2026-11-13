@@ -122,13 +122,15 @@ def test_the_code_arm_scores_each_case(kwargs: dict, expected: float) -> None:
 
 
 def test_the_code_arm_reward_is_clipped_to_the_range() -> None:
+    # 0.999 is the largest configured floor that keeps a perfect answer at or
+    # above 0.001 and still lets a truncated answer reach the lower clip.
     assert compose_reward(
         "code-score",
         tests_passed=0,
         tests_total=4,
         truncated=True,
         completion_tokens=4096,
-        length_penalty_floor=1.0,
+        length_penalty_floor=0.999,
     ) == -1.0
     assert compose_reward(
         "code-score",

@@ -451,6 +451,24 @@ def test_a_syntax_error_scores_minus_half(tmp_path) -> None:
     assert {r.code_score for r in store.rollouts} == {0.0}
 
 
+@pytest.mark.parametrize("code", ["", "  \n\t"])
+def test_no_code_scores_minus_half(tmp_path, code: str) -> None:
+    # The runner reports an empty candidate as a runtime error, not a syntax
+    # error. The reward still treats no code as the syntax case.
+    generator = StubGenerator(codes={"mbpp-0000": code})
+    runner = StubTestRunner(total=2, passes=0, error_class="runtime_error")
+    store = RecordingStore()
+    build(
+        "code-score",
+        tmp_path,
+        generator=generator,
+        runner=runner,
+        store=store,
+        prompts=make_prompts(1),
+    ).run()
+    assert {r.reward for r in store.rollouts} == {-0.5}
+
+
 def test_a_truncated_generation_scores_minus_six_tenths(tmp_path) -> None:
     class TruncatedGenerator(StubGenerator):
         def generate(self, prompt: Prompt, *, n: int, temperature: float):

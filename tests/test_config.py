@@ -252,6 +252,7 @@ def test_length_settings_are_read_from_the_training_table(tmp_path) -> None:
         ("length_penalty_per_token = -0.001", "training.length_penalty_per_token"),
         ("length_penalty_per_token = true", "training.length_penalty_per_token"),
         ("length_penalty_floor = -0.1", "training.length_penalty_floor"),
+        ("length_penalty_floor = 1.0", "training.length_penalty_floor"),
         ("length_penalty_floor = 1.1", "training.length_penalty_floor"),
     ],
 )

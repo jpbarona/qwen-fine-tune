@@ -451,6 +451,13 @@ class Experiment:
         process_score: float | None,
         cache_hit: bool,
     ) -> RolloutRecord:
+        # An empty or whitespace-only code field is the no-code case. The Docker
+        # runner reports it as a runtime error, but the reward treats it like a
+        # syntax error because no code was produced.
+        code_error_class = (
+            SYNTAX_ERROR_CLASS if not generation.code.strip() else outcome.error_class
+        )
+
         reward = compose_reward(
             self.arm,
             tests_passed=outcome.tests_passed,
@@ -458,7 +465,7 @@ class Experiment:
             judge_score=judge_score,
             process_score=process_score,
             truncated=generation.truncated,
-            error_class=outcome.error_class,
+            error_class=code_error_class,
             completion_tokens=generation.completion_tokens,
             length_soft_limit=self.config.length_soft_limit,
             length_penalty_per_token=self.config.length_penalty_per_token,
@@ -472,7 +479,7 @@ class Experiment:
         # counts to divide, and the code arm records 0.0 alongside its -0.5.
         if outcome.tests_total == 0 and gates_on_tests(self.arm):
             record_code_score = 0.0
-        elif outcome.tests_total == 0 and outcome.error_class == SYNTAX_ERROR_CLASS:
+        elif outcome.tests_total == 0 and code_error_class == SYNTAX_ERROR_CLASS:
             record_code_score = 0.0
         else:
             record_code_score = code_score(outcome.tests_passed, outcome.tests_total)
