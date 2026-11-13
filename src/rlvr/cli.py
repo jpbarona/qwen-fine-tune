@@ -2,6 +2,7 @@
 
     rlvr run --arm <code-score|hybrid|gated-judge|gated-process> --fake
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
+    rlvr dashboard [<run-dir> ...] [--runs-root <runs-root>] [--port 8081]
     rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
 
 This build runs both the fake path and, on a GPU host with the `train` extra
@@ -139,6 +140,29 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-html",
         action="store_true",
         help="print the tables and skip the HTML report",
+    )
+
+    dashboard = subparsers.add_parser(
+        "dashboard", help="serve a live progress dashboard in the browser"
+    )
+    dashboard.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        metavar="RUN",
+        help="run folders or arm folders to watch",
+    )
+    dashboard.add_argument(
+        "--runs-root",
+        type=Path,
+        default=None,
+        help="runs root that expands to each arm's latest run",
+    )
+    dashboard.add_argument(
+        "--port",
+        type=int,
+        default=8081,
+        help="port to serve on (default: 8081)",
     )
 
     publish = subparsers.add_parser(
@@ -339,6 +363,25 @@ def summary_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def dashboard_command(args: argparse.Namespace) -> int:
+    """Serve the live dashboard until Ctrl+C."""
+    paths = [str(path) for path in args.paths]
+    if args.runs_root is not None:
+        paths.append(str(args.runs_root))
+    if not paths:
+        raise UsageError("dashboard needs a run folder, an arm folder, or --runs-root")
+    if not 0 < args.port <= 65535:
+        raise UsageError(f"invalid port {args.port}")
+
+    from .dashboard import serve_dashboard
+
+    try:
+        serve_dashboard(paths, host="127.0.0.1", port=args.port)
+    except OSError as error:
+        raise UsageError(f"cannot start the dashboard server: {error}") from error
+    return 0
+
+
 def publish_command(args: argparse.Namespace) -> int:
     """Push an existing report to the Pages branch."""
     try:
@@ -365,6 +408,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_command(args)
         if args.command == "summary":
             return summary_command(args)
+        if args.command == "dashboard":
+            return dashboard_command(args)
         if args.command == "publish":
             return publish_command(args)
         raise UsageError(f"unknown command {args.command!r}")
