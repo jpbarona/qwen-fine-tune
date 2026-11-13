@@ -151,10 +151,67 @@ def test_target_steps_derived_for_a_real_run(tmp_path) -> None:
     run_dir = write_run(
         tmp_path / "runs",
         "code-score",
+        meta_extra={
+            "mode": "real",
+            "config": {"training": {"epochs": 5}, "data": {"train_size": 714}},
+        },
+    )
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["target_steps"] == 3570
+
+
+def test_target_steps_fall_back_to_the_real_formula_without_mode(tmp_path) -> None:
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
         meta_extra={"config": {"training": {"epochs": 5}, "data": {"train_size": 714}}},
     )
     data = collect_dashboard([run_dir])
     assert data["runs"][0]["target_steps"] == 3570
+
+
+def test_target_steps_for_a_fake_run_uses_the_fake_step_count(tmp_path) -> None:
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        meta_extra={
+            "mode": "fake",
+            "config": {
+                "training": {"epochs": 5},
+                "data": {"train_size": 714},
+                "fake": {"steps": 4},
+            },
+        },
+    )
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["target_steps"] == 4
+
+
+def test_target_steps_for_a_fake_run_is_capped_by_the_budget(tmp_path) -> None:
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        meta_extra={
+            "mode": "fake",
+            "config": {"fake": {"steps": 4}, "budget": {"max_steps": 2}},
+        },
+    )
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["target_steps"] == 2
+
+
+def test_target_steps_reads_epochs_from_the_trainer_table(tmp_path) -> None:
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        meta_extra={
+            "mode": "real",
+            "trainer": {"epochs": 3},
+            "config": {"data": {"train_size": 714}},
+        },
+    )
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["target_steps"] == 2142
 
 
 def test_target_steps_capped_by_budget_max_steps(tmp_path) -> None:
@@ -162,11 +219,12 @@ def test_target_steps_capped_by_budget_max_steps(tmp_path) -> None:
         tmp_path / "runs",
         "code-score",
         meta_extra={
+            "mode": "real",
             "config": {
                 "training": {"epochs": 5},
                 "data": {"train_size": 714},
                 "budget": {"max_steps": 100},
-            }
+            },
         },
     )
     data = collect_dashboard([run_dir])
@@ -177,6 +235,89 @@ def test_target_steps_absent_when_unknown(tmp_path) -> None:
     run_dir = write_run(tmp_path / "runs", "code-score")
     data = collect_dashboard([run_dir])
     assert data["runs"][0]["target_steps"] is None
+
+
+def test_started_is_shown_as_a_readable_utc_timestamp(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs", "code-score", timestamp="20261112T013045Z")
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["started"] == "20261112T013045Z"
+    assert data["runs"][0]["started_utc"] == "2026-11-12 01:30:45Z"
+
+    html = render_html(data)
+    assert "2026-11-12 01:30:45Z" in html
+    assert "started " in html
+
+
+def test_an_unparsable_started_value_is_shown_as_is(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs", "code-score", timestamp="not-a-time")
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["started_utc"] == "not-a-time"
+
+
+def test_gpu_sample_is_reused_when_younger_than_two_seconds(monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    dashboard_module._gpu_history.clear()
+    calls: list[int] = []
+
+    def fake_read() -> dict:
+        calls.append(1)
+        return {
+            "utilization": 10.0,
+            "memory_used": 20.0,
+            "memory_total": 30.0,
+            "temperature": 40.0,
+        }
+
+    monkeypatch.setattr(dashboard_module, "_gpu_read", fake_read)
+    try:
+        dashboard_module.sample_gpu(now=100.0)
+        dashboard_module.sample_gpu(now=101.9)
+        assert len(calls) == 1
+
+        dashboard_module.sample_gpu(now=102.0)
+        assert len(calls) == 2
+        assert len(dashboard_module._gpu_history) == 2
+    finally:
+        dashboard_module._gpu_history.clear()
+
+
+def test_the_404_route_does_not_sample_the_gpu(monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    handler = dashboard_module._DashboardHandler.__new__(
+        dashboard_module._DashboardHandler
+    )
+    handler.path = "/missing"
+    sent: list[tuple] = []
+    monkeypatch.setattr(handler, "_send", lambda *args: sent.append(args))
+
+    def refuse() -> None:
+        raise AssertionError("the 404 route must not sample the GPU")
+
+    monkeypatch.setattr(dashboard_module, "sample_gpu", refuse)
+    handler._route()
+
+    assert sent and sent[0][0] == 404
+
+
+def test_the_data_route_samples_the_gpu(monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    handler = dashboard_module._DashboardHandler.__new__(
+        dashboard_module._DashboardHandler
+    )
+    handler.path = "/data.json"
+    handler.paths = []
+    sent: list[tuple] = []
+    monkeypatch.setattr(handler, "_send", lambda *args: sent.append(args))
+    calls: list[int] = []
+    monkeypatch.setattr(dashboard_module, "sample_gpu", lambda: calls.append(1))
+
+    handler._route()
+
+    assert calls == [1]
+    assert sent and sent[0][0] == 200
 
 
 def test_render_html_escapes_an_arm_name_with_a_script_tag() -> None:
@@ -228,6 +369,7 @@ def test_dashboard_data_is_json_serializable(tmp_path) -> None:
         "run_name",
         "run_dir",
         "started",
+        "started_utc",
         "elapsed_seconds",
         "status",
         "steps_done",
