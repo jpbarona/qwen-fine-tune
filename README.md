@@ -56,7 +56,7 @@ to `rlvr run`, and defaults to `configs/real.toml`. The four arms are
 Qwen generator (`src/rlvr/qwen.py`), the Docker test runner, and the judge
 client, all behind the same `Experiment` seam.
 
-A smoke run validates a fresh 3090 in minutes:
+A smoke run validates a fresh GPU in minutes:
 
 ```bash
 OPENCODE_GO_API_KEY=... ./run.sh code-score --config configs/smoke.toml
@@ -64,9 +64,22 @@ OPENCODE_GO_API_KEY=... ./run.sh code-score --config configs/smoke.toml
 
 The smoke profile runs 8 training steps (8 prompt groups of 8 generations, 64
 rollouts), two checkpoint evaluations on 4 questions, and a final evaluation on
-8 questions. Expected runtime on a 3090 is roughly 5 to 10 minutes, dominated
-by the Docker test runs. This estimate is unverified: there is no GPU in this
-environment.
+8 questions. Expected runtime is roughly 5 to 10 minutes, dominated by the Docker
+test runs. This estimate is unverified: there is no GPU in this environment.
+
+## Deploy on Massed Compute
+
+Rent one RTX A6000: 48GB VRAM, 96GB system RAM, 300GB disk, $0.57 per hour. Use the
+Ubuntu Server 24.04 image and set `OPENCODE_GO_API_KEY` at deploy time.
+
+After the instance boots, install Docker, then run the install, smoke, and full
+arm commands from the sections above:
+
+```bash
+sudo apt install -y docker.io
+OPENCODE_GO_API_KEY=... ./run.sh code-score --config configs/smoke.toml
+OPENCODE_GO_API_KEY=... ./run.sh code-score
+```
 
 ## Checkpoints and resume
 

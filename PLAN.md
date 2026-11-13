@@ -137,10 +137,11 @@ report published to GitHub Pages.
 - [ ] A publish command pushes the report to a GitHub Pages branch.
 - [ ] Metrics functions are unit tested on synthetic records.
 
-## Task 8: Vast packaging and full runs
+## Task 8: Massed Compute packaging and full runs
 
 **What to build:** A pinned environment, one-command launch, checkpoint resume, and
-budget guards, so all four arms run on a fresh 3090 without babysitting.
+budget guards, so all four arms run on a fresh Massed Compute RTX A6000 without
+babysitting.
 
 **Blocked by:** 06, 07.
 
@@ -151,7 +152,7 @@ budget guards, so all four arms run on a fresh 3090 without babysitting.
 - [ ] Resume continues from the last checkpoint after a restart.
 - [ ] Budget guard stops at the configured step or judge-call limit.
 - [ ] `meta.json` records package versions, model revision, judge model, split seed, and commit.
-- [ ] The smoke profile finishes in under 15 minutes on a 3090.
+- [ ] The smoke profile finishes in under 15 minutes on a Massed Compute RTX A6000.
 - [ ] One full arm finishes without manual intervention.
 - [ ] The report for a finished arm is reachable at a GitHub Pages URL.
 
