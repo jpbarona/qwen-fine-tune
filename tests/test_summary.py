@@ -122,6 +122,61 @@ def test_load_report_reads_the_arm_metrics_and_final_eval(tmp_path) -> None:
     assert report.final_count == 2
 
 
+def test_a_step_without_entropy_reads_as_absent_not_zero(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "rollouts": 2,
+            "mean_reward": 0.5,
+            "pass_rate": 0.5,
+            "mean_entropy": 0.8,
+            "mean_completion_tokens": 80.0,
+        },
+        {
+            "step": 2,
+            "arm": "code-score",
+            "rollouts": 2,
+            "mean_reward": 0.75,
+            "pass_rate": 1.0,
+            "mean_completion_tokens": 60.0,
+        },
+    ]
+    run_dir = write_run(tmp_path / "runs", "code-score", rows=rows)
+    report = load_report(run_dir)
+
+    assert report.steps[0].mean_entropy == pytest.approx(0.8)
+    assert report.steps[1].mean_entropy is None
+    # The run mean uses the steps that measured, never the missing one as zero.
+    assert report.mean("mean_entropy") == pytest.approx(0.8)
+
+    text = format_summary((report,))
+    assert "entropy per step" in text
+    assert "-" in text
+
+    html = render_html((report,), generated_at="now")
+    assert "0.0000" not in html
+    assert "0.8000" in html
+
+
+def test_a_run_with_no_entropy_measurement_reports_absent(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "rollouts": 2,
+            "mean_reward": 0.5,
+            "pass_rate": 0.5,
+            "mean_completion_tokens": 80.0,
+        }
+    ]
+    report = load_report(write_run(tmp_path / "runs", "code-score", rows=rows))
+    assert report.mean("mean_entropy") is None
+    html = render_html((report,), generated_at="now")
+    assert "not available" in html
+    assert "0.0000" not in html
+
+
 def test_load_report_uses_the_last_evaluation_at_a_step(tmp_path) -> None:
     run_dir = write_run(
         tmp_path / "runs",

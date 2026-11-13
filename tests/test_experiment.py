@@ -104,6 +104,7 @@ class StubGenerator:
         self.codes = codes or {}
         self.calls: list[tuple[str, float]] = []
         self.update_calls: list[tuple[str, tuple[float, ...]]] = []
+        self.measure_flags: list[bool] = []
 
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
         self.calls.append((prompt.prompt_id, temperature))
@@ -114,7 +115,6 @@ class StubGenerator:
                 code=code,
                 prompt_tokens=10,
                 completion_tokens=20,
-                mean_entropy=0.5,
             )
             for _ in range(n)
         ]
@@ -124,8 +124,12 @@ class StubGenerator:
         prompt: Prompt,
         generations: list[Generation],
         rewards: list[float],
-    ) -> None:
+        *,
+        measure_entropy: bool = False,
+    ) -> float | None:
         self.update_calls.append((prompt.prompt_id, tuple(rewards)))
+        self.measure_flags.append(measure_entropy)
+        return 0.5 if measure_entropy else None
 
     def save_checkpoint(self, directory) -> None:
         pass
@@ -390,7 +394,6 @@ def test_records_are_built_from_generator_runner_and_judge(tmp_path) -> None:
     assert record.code == "# code for mbpp-0000"
     assert record.prompt_tokens == 10
     assert record.completion_tokens == 20
-    assert record.mean_entropy == 0.5
     assert record.tests_passed == 2 and record.tests_total == 2
     assert record.error_class == "pass"
     assert record.code_score == 1.0
@@ -478,7 +481,6 @@ def test_a_truncated_generation_scores_minus_six_tenths(tmp_path) -> None:
                     code="# code",
                     prompt_tokens=10,
                     completion_tokens=20,
-                    mean_entropy=0.5,
                     truncated=True,
                 )
                 for _ in range(n)
@@ -709,7 +711,6 @@ class EmptyTraceGenerator(StubGenerator):
                 code=f"# code for {prompt.prompt_id}",
                 prompt_tokens=10,
                 completion_tokens=20,
-                mean_entropy=0.5,
             )
             for _ in range(n)
         ]
@@ -759,7 +760,6 @@ def test_a_fake_gated_process_run_populates_every_record_field(tmp_path) -> None
         assert record.arm == "gated-process"
         assert record.reasoning
         assert record.code
-        assert isinstance(record.mean_entropy, float)
         assert record.tests_passed <= record.tests_total
         if record.tests_passed == record.tests_total and record.tests_total > 0:
             assert isinstance(record.process_score, float)
@@ -776,7 +776,13 @@ def test_a_fake_gated_process_run_populates_every_record_field(tmp_path) -> None
 def test_metrics_rows_summarize_the_step(tmp_path) -> None:
     store = RecordingStore()
     runner = StubTestRunner(total=4, passes=1)
-    build("code-score", tmp_path, runner=runner, store=store).run()
+    build(
+        "code-score",
+        tmp_path,
+        runner=runner,
+        store=store,
+        config_text=CONFIG_TEXT + "\n[training]\nentropy_every = 1\n",
+    ).run()
     row = store.metrics[0]
     assert row["step"] == 1
     assert row["rollouts"] == 8
@@ -784,6 +790,38 @@ def test_metrics_rows_summarize_the_step(tmp_path) -> None:
     assert row["pass_rate"] == pytest.approx(0.0)
     assert row["mean_entropy"] == pytest.approx(0.5)
     assert row["mean_completion_tokens"] == pytest.approx(20.0)
+
+
+def test_entropy_is_measured_only_on_the_configured_cadence(tmp_path) -> None:
+    generator = StubGenerator()
+    store = RecordingStore()
+    build(
+        "code-score",
+        tmp_path,
+        generator=generator,
+        store=store,
+        config_text=CONFIG_TEXT + "\n[training]\nentropy_every = 2\n",
+    ).run()
+
+    # Two steps, cadence two: only the second update measures.
+    assert generator.measure_flags == [False, True]
+    assert "mean_entropy" not in store.metrics[0]
+    assert store.metrics[1]["mean_entropy"] == pytest.approx(0.5)
+
+
+def test_a_zero_entropy_cadence_never_measures(tmp_path) -> None:
+    generator = StubGenerator()
+    store = RecordingStore()
+    build(
+        "code-score",
+        tmp_path,
+        generator=generator,
+        store=store,
+        config_text=CONFIG_TEXT + "\n[training]\nentropy_every = 0\n",
+    ).run()
+
+    assert generator.measure_flags == [False, False]
+    assert all("mean_entropy" not in row for row in store.metrics)
 
 
 def test_eval_runs_one_greedy_generation_per_prompt(tmp_path) -> None:
@@ -822,6 +860,8 @@ def test_meta_carries_the_trainer_settings_and_checkpoint_dir(tmp_path) -> None:
     assert trainer["lora_rank"] == 32
     assert trainer["lora_alpha"] == 64
     assert trainer["learning_rate"] == 1e-5
+    assert trainer["max_completion_tokens"] == 2048
+    assert trainer["entropy_every"] == 500
     assert trainer["clip_epsilon"] == 0.2
     assert trainer["kl_beta"] == 0.0
     assert trainer["batch_size"] == 1
@@ -851,10 +891,9 @@ def test_run_is_reusable_and_writes_only_new_records(tmp_path) -> None:
     assert len(store.rollouts) == 32
 
 
-def test_every_rollout_records_entropy_and_completion_length(tmp_path) -> None:
+def test_every_rollout_records_completion_length(tmp_path) -> None:
     store = RecordingStore()
     build("code-score", tmp_path, store=store).run()
-    assert [record.mean_entropy for record in store.rollouts] == [0.5] * 16
     assert [record.completion_tokens for record in store.rollouts] == [20] * 16
 
 
@@ -1112,7 +1151,7 @@ def test_a_checkpoint_manifest_is_saved_every_configured_steps(tmp_path) -> None
 
 def test_generation_defaults_truncation_flags_to_false() -> None:
     generation = Generation(
-        reasoning="r", code="c", prompt_tokens=1, completion_tokens=1, mean_entropy=0.0
+        reasoning="r", code="c", prompt_tokens=1, completion_tokens=1
     )
     assert generation.truncated is False
     assert generation.prompt_truncated is False
@@ -1129,7 +1168,6 @@ class TruncatingGenerator(StubGenerator):
                 code=generation.code,
                 prompt_tokens=generation.prompt_tokens,
                 completion_tokens=generation.completion_tokens,
-                mean_entropy=generation.mean_entropy,
                 truncated=(index % 2 == 0),
                 prompt_truncated=True,
             )

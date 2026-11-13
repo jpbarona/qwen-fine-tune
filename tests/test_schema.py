@@ -21,7 +21,6 @@ CONTRACT: list[tuple[str, tuple[str, ...]]] = [
     ("code", ("str",)),
     ("prompt_tokens", ("int",)),
     ("completion_tokens", ("int",)),
-    ("mean_entropy", ("float",)),
     ("tests_passed", ("int",)),
     ("tests_total", ("int",)),
     ("error_class", ("str",)),
@@ -42,7 +41,6 @@ def valid_record(arm: str = "code-score", step: int = 1) -> dict:
         "code": "def f():\n    return 1",
         "prompt_tokens": 42,
         "completion_tokens": 17,
-        "mean_entropy": 0.35,
         "tests_passed": 3,
         "tests_total": 3,
         "error_class": "pass",
@@ -128,8 +126,8 @@ def test_int_is_accepted_for_a_float_field() -> None:
 
 def test_string_is_not_a_float() -> None:
     payload = valid_record()
-    payload["mean_entropy"] = "0.35"
-    with pytest.raises(SchemaError, match="mean_entropy"):
+    payload["code_score"] = "1.0"
+    with pytest.raises(SchemaError, match="code_score"):
         RolloutRecord.from_dict(payload)
 
 
@@ -163,11 +161,12 @@ def test_reward_stays_in_the_clip_range_and_may_be_negative() -> None:
             RolloutRecord.from_dict(payload)
 
 
-def test_mean_entropy_is_not_bounded_to_one() -> None:
-    # Entropy is logged, not rewarded. Real values can exceed 1.
+def test_entropy_is_not_a_rollout_field() -> None:
+    # Entropy is measured on the update pass and belongs to the step metric.
     payload = valid_record()
     payload["mean_entropy"] = 2.75
-    assert RolloutRecord.from_dict(payload).mean_entropy == 2.75
+    with pytest.raises(SchemaError, match="unexpected field"):
+        RolloutRecord.from_dict(payload)
 
 
 def test_counts_must_not_be_negative() -> None:

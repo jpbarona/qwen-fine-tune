@@ -12,6 +12,7 @@ from rlvr.qwen import (
     clipped_surrogate,
     completion_logprobs,
     completion_truncated,
+    entropy_positions,
     extract_code_from_answer,
     group_advantages,
     k3_divergence,
@@ -68,6 +69,28 @@ def test_categorical_entropy_of_uniform_two_values_is_ln2() -> None:
 
 def test_categorical_entropy_of_a_peaked_distribution_is_small() -> None:
     assert categorical_entropy([100.0, 0.0, 0.0]) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_entropy_positions_uses_every_token_when_short() -> None:
+    assert entropy_positions(4, max_tokens=8) == [0, 1, 2, 3]
+
+
+def test_entropy_positions_spans_the_completion_when_long() -> None:
+    offsets = entropy_positions(1000, max_tokens=5)
+    assert offsets == [0, 250, 500, 749, 999]
+    assert offsets == sorted(set(offsets))
+
+
+def test_entropy_positions_handles_no_tokens_and_one_sample() -> None:
+    assert entropy_positions(0) == []
+    assert entropy_positions(1000, max_tokens=1) == [0]
+
+
+def test_entropy_positions_rejects_bad_arguments() -> None:
+    with pytest.raises(ValueError, match="token_count"):
+        entropy_positions(-1)
+    with pytest.raises(ValueError, match="max_tokens"):
+        entropy_positions(4, max_tokens=0)
 
 
 def test_group_advantages_are_mean_zero_unit_std() -> None:

@@ -46,7 +46,6 @@ def _record(step: int) -> RolloutRecord:
         code="c",
         prompt_tokens=1,
         completion_tokens=1,
-        mean_entropy=0.5,
         tests_passed=1,
         tests_total=1,
         error_class="pass",

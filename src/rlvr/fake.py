@@ -9,6 +9,9 @@ The judge cache key is the judge kind plus the prompt id plus the text it scores
 Because the fake code for a prompt does not change between steps, a gated arm
 records cache_hit false on the first step and true on later steps.
 
+Entropy is returned by `update` only when the caller asks for a measurement, so
+the fake follows the same `entropy_every` cadence as the real trainer.
+
 The values are derived from SHA-256, so they are stable across Python versions
 and machines. They carry no meaning. They exist to move data through the seam.
 """
@@ -100,7 +103,6 @@ class FakeGenerator:
             code=code,
             prompt_tokens=32 + (seed >> 8) % 64,
             completion_tokens=48 + (seed >> 16) % 96,
-            mean_entropy=round(((seed >> 24) % 180) / 100 + 0.05, 4),
         )
         return [generation] * n
 
@@ -109,9 +111,20 @@ class FakeGenerator:
         prompt: Prompt,
         generations: list[Generation],
         rewards: list[float],
-    ) -> None:
-        """No-op GRPO update. Records the call so tests can assert the group shape."""
+        *,
+        measure_entropy: bool = False,
+    ) -> float | None:
+        """No-op GRPO update. Records the call so tests can assert the group shape.
+
+        On a measurement step the fake returns one deterministic entropy value
+        for the prompt, in the same 0.05 to 1.85 band the old per-rollout fake
+        values used. Otherwise it returns None and writes no entropy.
+        """
         self.update_calls.append((prompt.prompt_id, tuple(rewards)))
+        if not measure_entropy:
+            return None
+        seed = _value(prompt.prompt_id, "entropy")
+        return round(((seed >> 24) % 180) / 100 + 0.05, 4)
 
     def save_checkpoint(self, directory) -> None:
         """No-op. The fake has no weights, only the manifest is written."""

@@ -49,7 +49,9 @@ epochs = 5
 lora_rank = 32
 lora_alpha = 64
 max_prompt_tokens = 512
-max_completion_tokens = 768
+max_completion_tokens = 2048
+# Entropy is measured on the update pass every N updates. Zero disables it.
+entropy_every = 500
 # Code-arm length term. 0.001 per completion token above 900, capped at 0.2,
 # so a perfect answer keeps at least 0.8. All three must be non-negative and
 # the floor must be less than 1.

@@ -27,7 +27,8 @@ Optional keys, with the defaults shown:
     [training] lora_rank = 32
     [training] lora_alpha = 64
     [training] max_prompt_tokens = 512
-    [training] max_completion_tokens = 768
+    [training] max_completion_tokens = 2048
+    [training] entropy_every = 500
     [training] clip_epsilon = 0.2
     [training] kl_beta = 0.0
     [training] length_soft_limit = 900
@@ -45,6 +46,9 @@ Optional keys, with the defaults shown:
 `eval_subset_seed` chooses the fixed checkpoint subset from the test pool. It is
 deliberately separate from `data.split_seed`, so the eval subset is not tied to
 the train/test cut.
+
+`entropy_every` sets how often the update pass measures entropy, in updates.
+Zero turns the measurement off. A negative value is rejected.
 
 Extra keys and tables are kept and ignored here. Later tasks add the training,
 data, and judge settings they need without changing this loader's contract.
@@ -93,7 +97,8 @@ DEFAULT_LEARNING_RATE = 1e-5
 DEFAULT_LORA_RANK = 32
 DEFAULT_LORA_ALPHA = 64
 DEFAULT_MAX_PROMPT_TOKENS = 512
-DEFAULT_MAX_COMPLETION_TOKENS = 768
+DEFAULT_MAX_COMPLETION_TOKENS = 2048
+DEFAULT_ENTROPY_EVERY = 500
 DEFAULT_CLIP_EPSILON = 0.2
 DEFAULT_KL_BETA = 0.0
 DEFAULT_SEED = 0
@@ -125,6 +130,7 @@ class Config:
     lora_alpha: int = DEFAULT_LORA_ALPHA
     max_prompt_tokens: int = DEFAULT_MAX_PROMPT_TOKENS
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
+    entropy_every: int = DEFAULT_ENTROPY_EVERY
     clip_epsilon: float = DEFAULT_CLIP_EPSILON
     kl_beta: float = DEFAULT_KL_BETA
     length_soft_limit: int = DEFAULT_LENGTH_SOFT_LIMIT
@@ -308,6 +314,9 @@ def load_config(path: str | Path) -> Config:
         ),
         max_completion_tokens=_optional_positive_int(
             raw, "training.max_completion_tokens", DEFAULT_MAX_COMPLETION_TOKENS
+        ),
+        entropy_every=_optional_non_negative_int(
+            raw, "training.entropy_every", DEFAULT_ENTROPY_EVERY
         ),
         clip_epsilon=_optional_float(
             raw, "training.clip_epsilon", DEFAULT_CLIP_EPSILON, positive=True

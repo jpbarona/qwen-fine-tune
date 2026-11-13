@@ -421,6 +421,99 @@ def test_dashboard_data_is_json_serializable(tmp_path) -> None:
     assert "gpu" in decoded
 
 
+def test_sparse_entropy_points_are_kept_as_gaps_not_zero(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "rollouts": 8,
+            "mean_reward": 0.5,
+            "pass_rate": 0.5,
+            "mean_entropy": 0.8,
+            "mean_completion_tokens": 80.0,
+            "cache_hits": 0,
+            "truncation_rate": 0.0,
+        },
+        {
+            "step": 2,
+            "arm": "code-score",
+            "rollouts": 8,
+            "mean_reward": 0.6,
+            "pass_rate": 0.6,
+            "mean_completion_tokens": 70.0,
+            "cache_hits": 0,
+            "truncation_rate": 0.0,
+        },
+        {
+            "step": 3,
+            "arm": "code-score",
+            "rollouts": 8,
+            "mean_reward": 0.7,
+            "pass_rate": 0.7,
+            "mean_entropy": 0.7,
+            "mean_completion_tokens": 60.0,
+            "cache_hits": 0,
+            "truncation_rate": 0.0,
+        },
+    ]
+    run_dir = write_run(tmp_path / "runs", "code-score", rows=rows)
+    data = collect_dashboard([run_dir])
+    run = data["runs"][0]
+
+    assert run["series"]["mean_entropy"] == [0.8, None, 0.7]
+    # The KPI shows the last measurement, not a dash on a step without one.
+    assert run["latest"]["mean_entropy"] == pytest.approx(0.7)
+
+    html = render_html(data)
+    # The entropy chart drops the gaps and keeps a visible point per measurement.
+    assert "xyPresent" in html
+    assert "pointRadius: 2" in html
+
+
+def test_latest_entropy_falls_back_to_the_last_measured_step(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "rollouts": 8,
+            "mean_reward": 0.5,
+            "pass_rate": 0.5,
+            "mean_entropy": 0.8,
+            "mean_completion_tokens": 80.0,
+        },
+        {
+            "step": 2,
+            "arm": "code-score",
+            "rollouts": 8,
+            "mean_reward": 0.6,
+            "pass_rate": 0.6,
+            "mean_completion_tokens": 70.0,
+        },
+    ]
+    run = collect_dashboard(
+        [write_run(tmp_path / "runs", "code-score", rows=rows)]
+    )["runs"][0]
+    assert run["latest"]["mean_entropy"] == pytest.approx(0.8)
+
+
+def test_latest_entropy_is_absent_when_no_step_measured(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "rollouts": 8,
+            "mean_reward": 0.5,
+            "pass_rate": 0.5,
+            "mean_completion_tokens": 80.0,
+        }
+    ]
+    run = collect_dashboard(
+        [write_run(tmp_path / "runs", "code-score", rows=rows)]
+    )["runs"][0]
+    assert run["latest"]["mean_entropy"] is None
+    assert run["series"]["mean_entropy"] == [None]
+
+
 def test_series_and_distribution_shapes(tmp_path) -> None:
     run_dir = write_run(tmp_path / "runs", "code-score")
     run = collect_dashboard([run_dir])["runs"][0]
