@@ -303,9 +303,6 @@ class QwenGenerator:
 
         self._torch = torch
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self._rng = torch.Generator(device=self._device)
-        if seed is not None:
-            self._rng.manual_seed(seed)
 
         from transformers import AutoModelForCausalLM, AutoTokenizer  # lazy
 
@@ -316,7 +313,7 @@ class QwenGenerator:
         self.base_model = AutoModelForCausalLM.from_pretrained(
             model_name,
             revision=revision,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             device_map="auto",
         ).eval()
 
@@ -378,9 +375,6 @@ class QwenGenerator:
             return_dict_in_generate=True,
             output_scores=True,
         )
-        if do_sample:
-            generate_kwargs["generator"] = self._rng
-
         with torch.no_grad():
             outputs = self.model.generate(**inputs, **generate_kwargs)
 
@@ -599,7 +593,7 @@ class QwenGenerator:
         self.base_model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
             revision=self.revision,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             device_map="auto",
         ).eval()
         self.model = PeftModel.from_pretrained(self.base_model, str(folder))
