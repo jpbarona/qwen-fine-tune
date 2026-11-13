@@ -7,3 +7,4 @@ judge-cache/
 *.egg-info/
 .pytest_cache/
 report.html
+JUDGE_MODEL.md
