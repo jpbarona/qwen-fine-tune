@@ -453,10 +453,15 @@ class QwenGenerator:
         """
         import torch  # lazy
 
+        logits = logits.float()
         log_probs = torch.log_softmax(logits, dim=-1)
         probs = log_probs.exp()
-        entropy = -(probs * log_probs).sum(dim=-1)
-        return entropy.mean()
+        terms = torch.where(probs > 0, probs * log_probs, torch.zeros_like(probs))
+        entropy = -terms.sum(dim=-1)
+        mean = entropy.mean()
+        if not torch.isfinite(mean):
+            raise RuntimeError("mean token entropy is not finite")
+        return mean
 
     def _completion_logprobs(self, sequence: Any, prompt_length: int) -> Any:
         """Per-token logprobs of the completion under the policy at temperature 1.0.
