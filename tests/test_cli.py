@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ from rlvr.cli import build_judge, build_prompts, main
 from rlvr.config import load_config
 from rlvr.data import load_split, prompt_id_for
 from rlvr.fake import FakeJudge
+from rlvr.memory import ALLOCATOR_ENV, EXPANDABLE_SEGMENTS
 
 CONFIG = """\
 [model]
@@ -43,6 +45,49 @@ def test_run_fake_exits_zero_for_the_code_score_arm(config_path, tmp_path, capsy
     assert main(["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]) == 0
     assert (runs_root / "code-score").is_dir()
     assert "runs/code-score" in capsys.readouterr().out
+
+
+def test_a_run_sets_expandable_segments_before_torch(
+    config_path, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.delenv(ALLOCATOR_ENV, raising=False)
+    runs_root = tmp_path / "runs"
+
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+    assert os.environ[ALLOCATOR_ENV] == EXPANDABLE_SEGMENTS
+
+
+def test_a_user_allocator_setting_survives_the_run(
+    config_path, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv(ALLOCATOR_ENV, "max_split_size_mb:64")
+    runs_root = tmp_path / "runs"
+
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+    assert os.environ[ALLOCATOR_ENV] == "max_split_size_mb:64"
+
+
+def test_a_fake_run_writes_zero_memory_on_every_metric_row(config_path, tmp_path) -> None:
+    runs_root = tmp_path / "runs"
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+    run_dir = next((runs_root / "code-score").iterdir())
+    rows = [
+        json.loads(line)
+        for line in (run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows
+    for row in rows:
+        assert row["gpu_live_mib"] == 0.0
+        assert row["gpu_cached_mib"] == 0.0
+        assert row["gpu_fragmented_mib"] == 0.0
+        assert row["gpu_total_mib"] == 0.0
+        assert row["gpu_unaccounted_mib"] == 0.0
 
 
 @pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
