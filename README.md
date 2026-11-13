@@ -336,3 +336,7 @@ command per arm, checkpoint resume, budget guards, and the smoke profile.
 The real generator, GRPO update, and the 15-minute smoke runtime are not
 verified here because this environment has no GPU. The Pages publish command
 exists but is not run live here: it needs a writable remote.
+
+## Remote instance
+
+See `DEPLOY.md` for the live host, user, SSH key, and run commands.
