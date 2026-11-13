@@ -1,4 +1,4 @@
-"""The OpenCode Go judge client.
+"""The judge client. OpenRouter by default, OpenCode Go on request.
 
 Two judges share one transport and one file cache:
 
@@ -7,24 +7,34 @@ Two judges share one transport and one file cache:
 
 Neither prompt has a parameter for task tests, so test code cannot reach the
 judge. The rubric version is part of the cache key, so editing a rubric starts a
-new cache generation.
+new cache generation. The provider and the base URL are part of the cache key
+too, so switching providers cannot reuse a score from the other one.
 
-Endpoint, from the OpenCode Go docs:
+Two providers, chosen by `[judge] provider`:
 
-    POST https://opencode.ai/inference/go/openai/v1/chat/completions
-    Authorization: Bearer <OPENCODE_GO_API_KEY>
+    openrouter  POST https://openrouter.ai/api/v1/chat/completions
+                Authorization: Bearer <OPENROUTER_API_KEY>
+                model deepseek/deepseek-v4.1-flash-1017
 
-The request uses the OpenAI Chat Completions shape. Reasoning effort is sent as
-`medium`, the value the gateway accepts for the normal default.
+    opencode    POST https://opencode.ai/inference/go/openai/v1/chat/completions
+                Authorization: Bearer <OPENCODE_GO_API_KEY>
+                model deepseek-v4.1-flash
 
-Two headers are required in practice. The endpoint rejects the default Python
-urllib User-Agent with HTTP 403 and Cloudflare error 1010, and it expects a
-stable session identifier. `User-Agent` and `x-opencode-session` are set on
-every request.
+The request body is the OpenAI Chat Completions shape for both. Reasoning
+effort is sent as `medium`. OpenRouter lists `reasoning_effort` in this model's
+supported parameters, and the OpenCode Go gateway accepts `medium` too.
 
-The key is read from the environment by `require_api_key`. It is only placed in
-the Authorization header. It is never written to the cache, a log, an exception
-message, or `meta.json`.
+Headers differ by provider. OpenRouter gets `Authorization`, `Content-Type`,
+`User-Agent`, and `X-Title: rlvr`. The OpenRouter docs mark `HTTP-Referer` as
+optional and describe it as app attribution for the public rankings page, so it
+is not sent here. The OpenCode gateway rejects the default Python urllib
+User-Agent with HTTP 403 and Cloudflare error 1010, and it expects a stable
+session identifier, so that path keeps `User-Agent` and `x-opencode-session`.
+The OpenCode-only `x-opencode-session` header is never sent to OpenRouter.
+
+The key is read from the environment by `require_api_key`, using the env var
+named by `[judge] api_key_env`. It is only placed in the Authorization header.
+It is never written to the cache, a log, an exception message, or `meta.json`.
 """
 
 from __future__ import annotations
@@ -53,14 +63,26 @@ __all__ = [
     "DEFAULT_CACHE_DIR",
     "DEFAULT_CONCURRENCY",
     "DEFAULT_ENDPOINT",
+    "DEFAULT_KEY_ENV",
     "DEFAULT_MAX_ATTEMPTS",
     "DEFAULT_MODEL",
+    "DEFAULT_PROVIDER",
     "DEFAULT_TIMEOUT_SECONDS",
     "KEY_ENV",
+    "OPENCODE_ENDPOINT",
+    "OPENCODE_KEY_ENV",
+    "OPENCODE_MODEL",
+    "OPENROUTER_ENDPOINT",
+    "OPENROUTER_KEY_ENV",
+    "OPENROUTER_MODEL",
     "OUTPUT_RUBRIC_VERSION",
     "PROCESS_RUBRIC_VERSION",
+    "PROVIDERS",
+    "PROVIDER_OPENCODE",
+    "PROVIDER_OPENROUTER",
     "REASONING_EFFORT",
     "SESSION_VALUE",
+    "TITLE",
     "USER_AGENT",
     "HTTPResponse",
     "JudgeCache",
@@ -80,17 +102,43 @@ __all__ = [
     "output_messages",
     "parse_score_payload",
     "process_messages",
+    "provider_defaults",
     "require_api_key",
 ]
 
+#: Provider names accepted in `[judge] provider`.
+PROVIDER_OPENROUTER = "openrouter"
+PROVIDER_OPENCODE = "opencode"
+PROVIDERS = (PROVIDER_OPENROUTER, PROVIDER_OPENCODE)
+
+#: OpenRouter is the default provider.
+DEFAULT_PROVIDER = PROVIDER_OPENROUTER
+
+#: The OpenAI-compatible endpoint from the OpenRouter docs.
+OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+
+#: Environment variable that carries the OpenRouter key.
+OPENROUTER_KEY_ENV = "OPENROUTER_API_KEY"
+
+#: The OpenRouter model id, checked against https://openrouter.ai/api/v1/models.
+OPENROUTER_MODEL = "deepseek/deepseek-v4.1-flash-1017"
+
 #: The OpenAI-compatible endpoint from the OpenCode Go docs.
-DEFAULT_ENDPOINT = "https://opencode.ai/inference/go/openai/v1/chat/completions"
+OPENCODE_ENDPOINT = "https://opencode.ai/inference/go/openai/v1/chat/completions"
 
-#: The judge model fixed by SPEC.md.
-DEFAULT_MODEL = "deepseek-v4.1-flash"
+#: Environment variable that carries the OpenCode Go key.
+OPENCODE_KEY_ENV = "OPENCODE_GO_API_KEY"
 
-#: Environment variable that carries the key.
-KEY_ENV = "OPENCODE_GO_API_KEY"
+#: The OpenCode Go model name.
+OPENCODE_MODEL = "deepseek-v4.1-flash"
+
+#: Defaults for the default provider, kept under the old names.
+DEFAULT_ENDPOINT = OPENROUTER_ENDPOINT
+DEFAULT_KEY_ENV = OPENROUTER_KEY_ENV
+DEFAULT_MODEL = OPENROUTER_MODEL
+
+#: Backward-compatible alias for the default provider's key variable.
+KEY_ENV = DEFAULT_KEY_ENV
 
 #: Bounded in-flight calls. The number is fixed by SPEC.md.
 DEFAULT_CONCURRENCY = 32
@@ -116,7 +164,11 @@ PROCESS_RUBRIC_VERSION = "process-v1"
 USER_AGENT = "rlvr/0.1 (research judge)"
 SESSION_VALUE = "rlvr-judge"
 
-#: The gateway maps `medium` to the normal reasoning default.
+#: OpenRouter app title, sent as `X-Title`.
+TITLE = "rlvr"
+
+#: The gateway maps `medium` to the normal reasoning default. OpenRouter lists
+#: `reasoning_effort` among this model's supported parameters.
 REASONING_EFFORT = "medium"
 
 #: Longest reason kept from a judge response.
@@ -356,9 +408,31 @@ def process_messages(prompt: Prompt, reasoning: str) -> tuple[str, str]:
     return _system_prompt("process"), user
 
 
-def cache_key(model: str, kind: str, prompt_text: str, rubric_version: str) -> str:
-    """SHA-256 over the model, judge kind, prompt text, and rubric version."""
-    material = "\x1f".join((model, kind, prompt_text, rubric_version))
+def provider_defaults(provider: str) -> tuple[str, str, str]:
+    """Return (endpoint, key env, model) for a provider name.
+
+    Raises ValueError for an unknown provider. `JudgeClient.from_config` checks
+    the provider first and raises a ConfigError that names `judge.provider`.
+    """
+    if provider == PROVIDER_OPENROUTER:
+        return OPENROUTER_ENDPOINT, OPENROUTER_KEY_ENV, OPENROUTER_MODEL
+    if provider == PROVIDER_OPENCODE:
+        return OPENCODE_ENDPOINT, OPENCODE_KEY_ENV, OPENCODE_MODEL
+    raise ValueError(f"unknown judge provider {provider!r}")
+
+
+def cache_key(
+    provider: str,
+    base_url: str,
+    model: str,
+    kind: str,
+    prompt_text: str,
+    rubric_version: str,
+) -> str:
+    """SHA-256 over provider, base URL, model, kind, prompt text, and rubric."""
+    material = "\x1f".join(
+        (provider, base_url, model, kind, prompt_text, rubric_version)
+    )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -436,13 +510,17 @@ def _snippet(body: bytes) -> str:
     return " ".join(text.split())[:_ERROR_SNIPPET_LIMIT]
 
 
-def require_api_key(environ: Mapping[str, str] | None = None) -> str:
+def require_api_key(
+    environ: Mapping[str, str] | None = None,
+    *,
+    key_env: str = DEFAULT_KEY_ENV,
+) -> str:
     """Read the key from the environment, or fail before any work starts."""
     source = os.environ if environ is None else environ
-    value = source.get(KEY_ENV)
+    value = source.get(key_env)
     if not isinstance(value, str) or not value.strip():
         raise MissingAPIKeyError(
-            f"{KEY_ENV} is not set. Export it before starting a run."
+            f"{key_env} is not set. Export it before starting a run."
         )
     return value.strip()
 
@@ -486,7 +564,7 @@ def _float_setting(
 
 
 class JudgeClient:
-    """The concrete Judge seam for OpenCode Go.
+    """The concrete Judge seam for OpenRouter and OpenCode Go.
 
     `score_output` and `score_process` are the frozen one-at-a-time calls. The
     training loop may instead call `score_batch`, which runs the same calls on a
@@ -497,8 +575,10 @@ class JudgeClient:
         self,
         *,
         api_key: str,
-        model: str = DEFAULT_MODEL,
-        endpoint: str = DEFAULT_ENDPOINT,
+        model: str | None = None,
+        endpoint: str | None = None,
+        provider: str = DEFAULT_PROVIDER,
+        key_env: str | None = None,
         temperature: float = 0.0,
         cache: JudgeCache | None = None,
         transport: Transport | None = None,
@@ -510,9 +590,28 @@ class JudgeClient:
         sleep: Callable[[float], None] = time.sleep,
         rng: random.Random | None = None,
     ) -> None:
+        if provider not in PROVIDERS:
+            raise ValueError(
+                f"provider must be one of {', '.join(PROVIDERS)}, got {provider!r}"
+            )
+        default_endpoint, default_key_env, default_model = provider_defaults(provider)
+        resolved_model = default_model if model is None else model
+        resolved_endpoint = default_endpoint if endpoint is None else endpoint
+        resolved_key_env = default_key_env if key_env is None else key_env
+
+        if not isinstance(resolved_model, str) or not resolved_model.strip():
+            raise ValueError(f"model must be a non-empty string, got {resolved_model!r}")
+        if not isinstance(resolved_endpoint, str) or not resolved_endpoint.strip():
+            raise ValueError(
+                f"endpoint must be a non-empty string, got {resolved_endpoint!r}"
+            )
+        if not isinstance(resolved_key_env, str) or not resolved_key_env.strip():
+            raise ValueError(
+                f"key_env must be a non-empty string, got {resolved_key_env!r}"
+            )
         if not isinstance(api_key, str) or not api_key.strip():
             raise MissingAPIKeyError(
-                f"{KEY_ENV} is not set. Export it before starting a run."
+                f"{resolved_key_env} is not set. Export it before starting a run."
             )
         if max_workers < 1:
             raise ValueError(f"max_workers must be at least 1, got {max_workers}")
@@ -527,8 +626,10 @@ class JudgeClient:
                 f"backoff_max must be at least backoff_base, got {backoff_max}"
             )
 
-        self.model = model
-        self.endpoint = endpoint
+        self.provider = provider
+        self.key_env = resolved_key_env
+        self.model = resolved_model
+        self.endpoint = resolved_endpoint
         self.temperature = float(temperature)
         self.cache = cache if cache is not None else JudgeCache()
         self.transport = transport if transport is not None else UrllibTransport()
@@ -555,29 +656,52 @@ class JudgeClient:
     ) -> "JudgeClient":
         """Build a client from the `[judge]` table.
 
-        The key is read from the environment unless one is passed. A missing key
-        raises here, before the training loop starts.
+        The provider picks the defaults for base URL and key variable. The key
+        is read from the environment unless one is passed. A missing key raises
+        here, before the training loop starts.
         """
         table = config.raw.get("judge", {})
         if not isinstance(table, dict):
             raise ConfigError("config: 'judge' must be a table")
 
-        key = api_key if api_key is not None else require_api_key(environ)
+        provider = table.get("provider", DEFAULT_PROVIDER)
+        if not isinstance(provider, str) or provider not in PROVIDERS:
+            raise ConfigError(
+                f"config: 'judge.provider' must be one of {', '.join(PROVIDERS)}, "
+                f"got {provider!r}"
+            )
+        default_endpoint, default_key_env, _default_model = provider_defaults(provider)
+
+        key_env = table.get("api_key_env", default_key_env)
+        if not isinstance(key_env, str) or not key_env.strip():
+            raise ConfigError(
+                f"config: 'judge.api_key_env' must be a non-empty string, got {key_env!r}"
+            )
+
         cache_dir = table.get("cache_dir", DEFAULT_CACHE_DIR)
         if not isinstance(cache_dir, str) or not cache_dir.strip():
             raise ConfigError(
                 f"config: 'judge.cache_dir' must be a non-empty string, got {cache_dir!r}"
             )
-        endpoint = table.get("endpoint", DEFAULT_ENDPOINT)
-        if not isinstance(endpoint, str) or not endpoint.strip():
+        # `endpoint` is the old key name. `base_url` wins when both are present.
+        base_url = table.get("base_url", table.get("endpoint", default_endpoint))
+        if not isinstance(base_url, str) or not base_url.strip():
             raise ConfigError(
-                f"config: 'judge.endpoint' must be a non-empty string, got {endpoint!r}"
+                f"config: 'judge.base_url' must be a non-empty string, got {base_url!r}"
             )
+
+        key = (
+            api_key
+            if api_key is not None
+            else require_api_key(environ, key_env=key_env)
+        )
 
         return cls(
             api_key=key,
+            provider=provider,
+            key_env=key_env,
             model=config.judge_model,
-            endpoint=endpoint,
+            endpoint=base_url,
             temperature=_float_setting(table, "temperature", 0.0, allow_zero=True),
             cache=cache if cache is not None else JudgeCache(cache_dir),
             transport=transport,
@@ -646,6 +770,8 @@ class JudgeClient:
             rubric_version = PROCESS_RUBRIC_VERSION
 
         key = cache_key(
+            self.provider,
+            self.endpoint,
             self.model,
             kind,
             _prompt_text(system, user),
@@ -666,6 +792,25 @@ class JudgeClient:
             self.cache.put(key, JudgeCacheEntry(score=score, reason=reason))
         return JudgeResult(score=score, cache_hit=False, reason=reason)
 
+    def _headers(self) -> dict[str, str]:
+        """The request headers for the selected provider.
+
+        OpenRouter gets the four headers its docs describe and no session
+        header. The OpenCode gateway keeps its concrete User-Agent, `Accept`,
+        and stable session header.
+        """
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        }
+        if self.provider == PROVIDER_OPENROUTER:
+            headers["X-Title"] = TITLE
+        else:
+            headers["Accept"] = "application/json"
+            headers["x-opencode-session"] = SESSION_VALUE
+        return headers
+
     def _complete(self, system: str, user: str) -> str:
         body = json.dumps(
             {
@@ -680,13 +825,7 @@ class JudgeClient:
             },
             ensure_ascii=False,
         ).encode("utf-8")
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": USER_AGENT,
-            "x-opencode-session": SESSION_VALUE,
-        }
+        headers = self._headers()
 
         last: JudgeError | None = None
         for attempt in range(1, self.max_attempts + 1):

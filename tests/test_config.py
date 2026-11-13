@@ -121,7 +121,14 @@ def test_default_config_ships_with_the_package() -> None:
     assert Path(path).is_file()
     config = load_config(path)
     assert config.model_name == "Qwen/Qwen3-0.6B"
-    assert config.judge_model == "deepseek-v4.1-flash"
+    assert config.judge_model == "deepseek/deepseek-v4.1-flash-1017"
+
+
+def test_default_config_names_openrouter_as_the_judge_provider() -> None:
+    judge = load_config(default_config_path()).raw["judge"]
+    assert judge["provider"] == "openrouter"
+    assert judge["base_url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert judge["api_key_env"] == "OPENROUTER_API_KEY"
 
 
 def test_default_config_records_the_split_seed(tmp_path) -> None:

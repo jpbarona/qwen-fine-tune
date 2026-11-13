@@ -7,7 +7,10 @@ name = "Qwen/Qwen3-0.6B"
 revision = "c1899de289a04d12100db370d81485cdf75e47ca"
 
 [judge]
-model = "deepseek-v4.1-flash"
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash-1017"
+base_url = "https://openrouter.ai/api/v1/chat/completions"
+api_key_env = "OPENROUTER_API_KEY"
 temperature = 0.0
 concurrency = 8
 max_attempts = 2
