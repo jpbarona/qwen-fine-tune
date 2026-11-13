@@ -16,7 +16,7 @@ The instance accepts the `opencode-agent` key and jpbarona's Mac key. Password l
 - Project: `~/rl-grpo`
 - Virtualenv: `~/rl-grpo/.venv`
 - Judge key: already present in `~/.env` as `OPENCODE_GO_API_KEY`
-- Docker is installed. The `Ubuntu` user may need the `docker` group.
+- Docker is installed and the `Ubuntu` user is in the `docker` group.
 
 ## Run
 
