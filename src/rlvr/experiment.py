@@ -38,6 +38,7 @@ from .checkpoint import checkpoint_dir_name, write_checkpoint_manifest
 from .config import Config
 from .evaluation import pass_at_1, select_eval_subset, subset_selector
 from .reward import (
+    SYNTAX_ERROR_CLASS,
     all_tests_passed,
     check_arm_implemented,
     code_score,
@@ -456,12 +457,22 @@ class Experiment:
             tests_total=outcome.tests_total,
             judge_score=judge_score,
             process_score=process_score,
+            truncated=generation.truncated,
+            error_class=outcome.error_class,
+            completion_tokens=generation.completion_tokens,
+            length_soft_limit=self.config.length_soft_limit,
+            length_penalty_per_token=self.config.length_penalty_per_token,
+            length_penalty_floor=self.config.length_penalty_floor,
         )
 
         # A question with no tests cannot open the gate. The gated arms record a
         # code score of 0.0 and reward 0.0, with no judge call. The code-score
         # arm still fails loudly: there, zero tests is a broken test runner.
+        # The exception is a syntax error: the code never ran, so there are no
+        # counts to divide, and the code arm records 0.0 alongside its -0.5.
         if outcome.tests_total == 0 and gates_on_tests(self.arm):
+            record_code_score = 0.0
+        elif outcome.tests_total == 0 and outcome.error_class == SYNTAX_ERROR_CLASS:
             record_code_score = 0.0
         else:
             record_code_score = code_score(outcome.tests_passed, outcome.tests_total)

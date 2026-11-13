@@ -143,11 +143,23 @@ def test_null_scores_are_allowed() -> None:
 
 
 def test_scores_must_be_in_unit_interval() -> None:
-    # SPEC: "All scores are between 0 and 1."
-    for field in ("code_score", "judge_score", "process_score", "reward"):
+    # The three score fields stay in [0, 1]. The reward has its own clip range.
+    for field in ("code_score", "judge_score", "process_score"):
         payload = valid_record()
         payload[field] = 1.5
         with pytest.raises(SchemaError, match=field):
+            RolloutRecord.from_dict(payload)
+
+
+def test_reward_stays_in_the_clip_range_and_may_be_negative() -> None:
+    for reward in (-1.0, -0.5, -0.2, 0.0, 1.0):
+        payload = valid_record()
+        payload["reward"] = reward
+        assert RolloutRecord.from_dict(payload).reward == reward
+    for reward in (-1.5, 1.5):
+        payload = valid_record()
+        payload["reward"] = reward
+        with pytest.raises(SchemaError, match="reward"):
             RolloutRecord.from_dict(payload)
 
 

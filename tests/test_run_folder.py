@@ -99,7 +99,7 @@ def test_metrics_jsonl_has_one_row_per_step(run_fake) -> None:
     for row in metrics:
         assert row["arm"] == "code-score"
         assert isinstance(row["rollouts"], int)
-        assert 0.0 <= row["mean_reward"] <= 1.0
+        assert -1.0 <= row["mean_reward"] <= 1.0
         assert 0.0 <= row["pass_rate"] <= 1.0
         assert row["mean_entropy"] >= 0.0
         assert row["mean_completion_tokens"] >= 0.0

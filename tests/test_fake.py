@@ -6,8 +6,11 @@ import json
 
 import pytest
 
-from rlvr.experiment import Prompt
+from rlvr.config import load_config
+from rlvr.experiment import Experiment, Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
+from rlvr.runs import RunStore
+
 
 def test_prompt_ids_are_stable() -> None:
     prompts = fake_prompts(4)
@@ -70,7 +73,12 @@ def test_test_runner_uses_pass_on_success_and_a_class_on_failure() -> None:
         if result.tests_passed == result.tests_total:
             assert result.error_class == "pass"
         else:
-            assert result.error_class in {"assertion", "syntax", "runtime", "timeout"}
+            assert result.error_class in {
+                "wrong_answer",
+                "syntax_error",
+                "runtime_error",
+                "timeout",
+            }
 
 
 def test_fake_run_shows_a_spread_of_rewards_across_prompts() -> None:
@@ -89,7 +97,11 @@ def test_fake_code_score_run_never_judges(run_fake) -> None:
     assert all(record["judge_score"] is None for record in records)
     assert all(record["process_score"] is None for record in records)
     assert all(record["cache_hit"] is False for record in records)
-    assert all(record["reward"] == record["code_score"] for record in records)
+    for record in records:
+        if record["error_class"] == "syntax_error":
+            assert record["reward"] == pytest.approx(-0.5)
+        else:
+            assert record["reward"] == pytest.approx(record["code_score"])
 
 
 @pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
@@ -119,8 +131,38 @@ def test_fake_judge_arm_run_populates_scores(run_fake, arm: str) -> None:
 def test_fake_code_score_run_has_a_spread_of_rewards(run_fake) -> None:
     run_dir, _ = run_fake("code-score")
     rewards = [json.loads(line)["reward"] for line in (run_dir / "rollouts.jsonl").read_text().splitlines()]
-    assert all(0.0 <= reward <= 1.0 for reward in rewards)
+    assert all(-1.0 <= reward <= 1.0 for reward in rewards)
     assert len(set(rewards)) > 1
+
+
+def test_fake_code_score_run_writes_a_syntax_penalty(tmp_path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[model]\nname = "Qwen/Qwen3-0.6B"\nrevision = "r"\n'
+        '[judge]\nmodel = "fake-judge-model"\n'
+        "[data]\nsplit_seed = 1\n"
+        "[fake]\nsteps = 1\n",
+        encoding="utf-8",
+    )
+    # This prompt's hash maps to the syntax_error class in the fake runner.
+    prompt = fake_prompts(7)[6]
+    store = RunStore(tmp_path / "runs", "code-score", timestamp="20261112T000000Z")
+    Experiment(
+        arm="code-score",
+        config=load_config(config_path),
+        generator=FakeGenerator(),
+        judge=FakeJudge(),
+        test_runner=FakeTestRunner(),
+        store=store,
+        prompts=[prompt],
+        eval_prompts=[prompt],
+    ).run()
+    records = [
+        json.loads(line)
+        for line in (store.run_dir / "rollouts.jsonl").read_text().splitlines()
+    ]
+    assert {record["error_class"] for record in records} == {"syntax_error"}
+    assert all(record["reward"] == pytest.approx(-0.5) for record in records)
 
 
 def test_judge_scores_are_deterministic_and_bounded() -> None:

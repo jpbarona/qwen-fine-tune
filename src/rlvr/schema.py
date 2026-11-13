@@ -15,6 +15,8 @@ Notes on the contract:
   when the rollout failed its tests and the judge was never called.
 * `cache_hit` is true when any judge call for this rollout was served from the
   judge cache. It is always false for the code-score arm, which never judges.
+* `reward` may be negative. The code arm clips it to [-1, 1], so the schema
+  checks that range rather than [0, 1]. The three score fields stay in [0, 1].
 * Timestamps and truncation flags are deliberately not part of this record.
 """
 
@@ -79,7 +81,11 @@ FIELD_TYPES: dict[str, tuple[str, ...]] = {
 }
 
 #: Fields that must be a fraction of the tests, so they stay inside [0, 1].
-BOUNDED_FIELDS: tuple[str, ...] = ("code_score", "judge_score", "process_score", "reward")
+BOUNDED_FIELDS: tuple[str, ...] = ("code_score", "judge_score", "process_score")
+
+#: The reward may be negative, so it is clipped to this range instead.
+REWARD_MIN = -1.0
+REWARD_MAX = 1.0
 
 #: Fields that are counts and must not be negative.
 COUNT_FIELDS: tuple[str, ...] = (
@@ -138,6 +144,12 @@ def _value_problems(payload: dict[str, Any]) -> list[str]:
         value = payload.get(name)
         if _matches(FLOAT, value) and not 0.0 <= float(value) <= 1.0:
             problems.append(f"field {name!r} must be between 0 and 1, got {value!r}")
+
+    reward = payload.get("reward")
+    if _matches(FLOAT, reward) and not REWARD_MIN <= float(reward) <= REWARD_MAX:
+        problems.append(
+            f"field 'reward' must be between {REWARD_MIN:g} and {REWARD_MAX:g}, got {reward!r}"
+        )
 
     for name in COUNT_FIELDS:
         value = payload.get(name)

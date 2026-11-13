@@ -25,8 +25,14 @@ __all__ = ["FakeGenerator", "FakeJudge", "FakeTestRunner", "fake_prompts"]
 #: generator reads this from config. The fake keeps its own default.
 TRAINING_TEMPERATURE = 0.9
 
-#: Error classes the fake runner reports on failure. Success is "pass".
-FAKE_ERROR_CLASSES: tuple[str, ...] = ("assertion", "syntax", "runtime", "timeout")
+#: Error classes the fake runner reports on failure. Success is "pass". The
+#: names match the Docker runner so the reward path sees the same classes.
+FAKE_ERROR_CLASSES: tuple[str, ...] = (
+    "wrong_answer",
+    "syntax_error",
+    "runtime_error",
+    "timeout",
+)
 
 #: Test groups the fake runner uses, so partial passes exist.
 FAKE_TEST_COUNTS: tuple[int, ...] = (1, 2, 3, 4)

@@ -30,6 +30,9 @@ Optional keys, with the defaults shown:
     [training] max_completion_tokens = 768
     [training] clip_epsilon = 0.2
     [training] kl_beta = 0.0
+    [training] length_soft_limit = 900
+    [training] length_penalty_per_token = 0.001
+    [training] length_penalty_floor = 0.2
     [training] seed = 0
 
     [budget] max_steps = (unset: run all of fake.steps)
@@ -59,6 +62,12 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from .reward import (
+    DEFAULT_LENGTH_PENALTY_FLOOR,
+    DEFAULT_LENGTH_PENALTY_PER_TOKEN,
+    DEFAULT_LENGTH_SOFT_LIMIT,
+)
 
 __all__ = ["Config", "ConfigError", "default_config_path", "load_config"]
 
@@ -118,6 +127,9 @@ class Config:
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
     clip_epsilon: float = DEFAULT_CLIP_EPSILON
     kl_beta: float = DEFAULT_KL_BETA
+    length_soft_limit: int = DEFAULT_LENGTH_SOFT_LIMIT
+    length_penalty_per_token: float = DEFAULT_LENGTH_PENALTY_PER_TOKEN
+    length_penalty_floor: float = DEFAULT_LENGTH_PENALTY_FLOOR
     seed: int = DEFAULT_SEED
     max_steps: int | None = None
     max_judge_calls: int | None = None
@@ -215,6 +227,17 @@ def _optional_float(raw: dict[str, Any], dotted: str, default: float, *, positiv
     return number
 
 
+def _optional_unit_float(raw: dict[str, Any], dotted: str, default: float) -> float:
+    """A non-negative float from `dotted` that is at most 1, or `default`."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return default
+    number = _optional_float(raw, dotted, default, positive=False)
+    if number > 1.0:
+        raise ConfigError(f"config: '{dotted}' must be at most 1, got {value!r}")
+    return number
+
+
 def _optional_int_none(raw: dict[str, Any], dotted: str) -> int | None:
     """An optional positive integer that may be absent (None), never zero."""
     value = _optional(raw, dotted, None)
@@ -291,6 +314,18 @@ def load_config(path: str | Path) -> Config:
         ),
         kl_beta=_optional_float(
             raw, "training.kl_beta", DEFAULT_KL_BETA, positive=False
+        ),
+        length_soft_limit=_optional_non_negative_int(
+            raw, "training.length_soft_limit", DEFAULT_LENGTH_SOFT_LIMIT
+        ),
+        length_penalty_per_token=_optional_float(
+            raw,
+            "training.length_penalty_per_token",
+            DEFAULT_LENGTH_PENALTY_PER_TOKEN,
+            positive=False,
+        ),
+        length_penalty_floor=_optional_unit_float(
+            raw, "training.length_penalty_floor", DEFAULT_LENGTH_PENALTY_FLOOR
         ),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
         max_steps=_optional_int_none(raw, "budget.max_steps"),
