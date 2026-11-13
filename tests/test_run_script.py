@@ -40,12 +40,14 @@ def test_run_sh_runs_the_fake_pipeline_with_extra_args(tmp_path) -> None:
     assert (run_dir / "rollouts.jsonl").is_file()
 
 
-def test_run_sh_accepts_all_four_arms() -> None:
-    # Only the arm name is validated before the run, so a missing key for a
-    # judge arm must fail after the launcher passes the arm through. The
-    # code-score arm needs no key, so it is the one that reaches the run.
+def test_run_sh_accepts_all_four_arms(tmp_path) -> None:
+    # Only the arm name is validated before the run. `--fake` keeps this test
+    # offline: without it the code-score arm would start the real Qwen path,
+    # which loads a GPU model and trains.
     for arm in ("code-score", "hybrid", "gated-judge", "gated-process"):
-        assert "unknown arm" not in _run(arm).stderr
+        result = _run(arm, "--fake", "--runs-root", str(tmp_path / arm))
+        assert "unknown arm" not in result.stderr
+        assert result.returncode == 0, result.stderr
 
 
 def test_run_sh_honors_a_caller_supplied_config(tmp_path) -> None:
