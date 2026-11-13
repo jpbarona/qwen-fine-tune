@@ -9,8 +9,9 @@ a run that is mid-write. It serves two resources:
 The page is a monitoring tool, not a report. One section per arm, one KPI strip
 per section, and a grid of charts. Distributions come from the tail of
 `rollouts.jsonl`, so a long run does not re-read the whole file on every poll.
-GPU samples come from `nvidia-smi`, one sample per data request, and the last
-120 samples are kept in memory for the GPU chart.
+GPU samples come from `nvidia-smi`, at most one every two seconds on the
+`/data.json` route, and the last 120 samples are kept in memory for the GPU
+chart.
 
 The server binds to 127.0.0.1 and stops on Ctrl+C. Nothing here reads secrets,
 environment variables, or the network beyond the two CDN scripts the page
@@ -46,6 +47,10 @@ ROLLOUT_TAIL_BYTES = 4 * 1024 * 1024
 
 #: Number of bins for the reward histogram.
 REWARD_BINS = 20
+
+#: A GPU sample younger than this many seconds is reused instead of sampled
+#: again, so a page that polls fast does not spawn nvidia-smi every request.
+GPU_SAMPLE_SECONDS = 2.0
 
 TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 
@@ -95,6 +100,17 @@ def _parse_timestamp(value: str | None) -> float | None:
     except ValueError:
         return None
     return parsed.timestamp()
+
+
+def _started_label(value: str | None) -> str | None:
+    """A run timestamp as a readable UTC label, or the raw value if unparsable."""
+    if value is None:
+        return None
+    try:
+        parsed = datetime.strptime(value, TIMESTAMP_FORMAT).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return value
+    return parsed.strftime("%Y-%m-%d %H:%M:%SZ")
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -209,30 +225,55 @@ def _resolve_paths(paths: Iterable[str | Path]) -> list[tuple[str, Path | None]]
     return targets
 
 
+def _real_target_steps(meta: Mapping[str, Any], config: Mapping[str, Any]) -> int | None:
+    """epochs times the train size, from the trainer and data tables."""
+    epochs: int | None = None
+    trainer = meta.get("trainer")
+    if isinstance(trainer, dict):
+        epochs = _positive_int(trainer.get("epochs"))
+    if epochs is None:
+        training = config.get("training")
+        if isinstance(training, dict):
+            epochs = _positive_int(training.get("epochs"))
+    data = config.get("data")
+    if epochs is None or not isinstance(data, dict):
+        return None
+    train_size = _positive_int(data.get("train_size"))
+    if train_size is None:
+        return None
+    return epochs * train_size
+
+
+def _fake_target_steps(config: Mapping[str, Any]) -> int | None:
+    """The step count the fake path runs, from the [fake] table."""
+    fake = config.get("fake")
+    if not isinstance(fake, dict):
+        return None
+    return _positive_int(fake.get("steps"))
+
+
 def _target_steps(meta: Mapping[str, Any]) -> int | None:
-    """Target steps derivable from meta.json, or None when it is not recorded."""
+    """Target steps derivable from meta.json, or None when it is not recorded.
+
+    `mode` picks the formula. A fake run stops after `[fake] steps`, so it must
+    not be shown the real epoch budget. Meta files written before `mode` existed
+    carry no mode and fall back to the real formula.
+    """
     config = meta.get("config")
     if not isinstance(config, dict):
         return None
-    training = config.get("training")
-    data = config.get("data")
-    if isinstance(training, dict) and isinstance(data, dict):
-        epochs = _positive_int(training.get("epochs"))
-        train_size = _positive_int(data.get("train_size"))
-        if epochs is not None and train_size is not None:
-            target = epochs * train_size
-            budget = config.get("budget")
-            if isinstance(budget, dict):
-                max_steps = _positive_int(budget.get("max_steps"))
-                if max_steps is not None:
-                    target = min(target, max_steps)
-            return target
-    fake = config.get("fake")
-    if isinstance(fake, dict):
-        steps = _positive_int(fake.get("steps"))
-        if steps is not None:
-            return steps
-    return None
+    if meta.get("mode") == "fake":
+        target = _fake_target_steps(config)
+    else:
+        target = _real_target_steps(meta, config)
+    if target is None:
+        return None
+    budget = config.get("budget")
+    if isinstance(budget, dict):
+        max_steps = _positive_int(budget.get("max_steps"))
+        if max_steps is not None:
+            target = min(target, max_steps)
+    return target
 
 
 def _steps_done(rows: list[dict[str, Any]]) -> int:
@@ -357,6 +398,7 @@ def _waiting_run(arm: str) -> dict[str, Any]:
         "run_name": None,
         "run_dir": None,
         "started": None,
+        "started_utc": None,
         "elapsed_seconds": None,
         "status": "waiting",
         "steps_done": 0,
@@ -384,6 +426,7 @@ def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
         "run_name": run_dir.name,
         "run_dir": str(run_dir),
         "started": timestamp,
+        "started_utc": _started_label(timestamp),
         "elapsed_seconds": round(elapsed, 1) if elapsed is not None else None,
         "status": _status(eval_payload, run_dir / METRICS_NAME, now),
         "steps_done": _steps_done(rows),
@@ -422,11 +465,21 @@ def _gpu_read() -> dict[str, Any] | None:
     }
 
 
-def sample_gpu() -> None:
-    """Sample nvidia-smi once and keep the sample in the rolling history."""
+def sample_gpu(now: float | None = None) -> None:
+    """Sample nvidia-smi unless the last sample is still fresh.
+
+    The sample is kept in the rolling history. A sample younger than
+    `GPU_SAMPLE_SECONDS` is reused, so the 404 and HTML paths do not run
+    nvidia-smi and a fast poll does not either.
+    """
+    current = time.time() if now is None else now
+    if _gpu_history:
+        age = current - _gpu_history[-1].get("t", 0.0)
+        if age < GPU_SAMPLE_SECONDS:
+            return
     sample = _gpu_read()
     if sample is not None:
-        sample["t"] = time.time()
+        sample["t"] = current
         _gpu_history.append(sample)
 
 
@@ -545,6 +598,7 @@ _SCRIPT = """\
       '</div>' +
       '<div class="flex items-center gap-3 text-xs text-zinc-500">' +
         pill(run.status) +
+        '<span class="tnum">started ' + esc(run.started_utc || run.started || "-") + '</span>' +
         '<span class="tnum">elapsed ' + fmtElapsed(run.elapsed_seconds) + '</span>' +
         '<span class="tnum">steps ' + (run.steps_done || 0) + target + '</span>' +
       '</div>' +
@@ -835,11 +889,11 @@ class _DashboardHandler(BaseHTTPRequestHandler):
 
     def _route(self) -> None:
         path = urlsplit(self.path).path
-        sample_gpu()
         if path in ("/", "/index.html"):
             body = render_html(collect_dashboard(self.paths)).encode("utf-8")
             self._send(200, "text/html; charset=utf-8", body)
         elif path == "/data.json":
+            sample_gpu()
             body = (json.dumps(collect_dashboard(self.paths), separators=(",", ":")) + "\n").encode("utf-8")
             self._send(200, "application/json; charset=utf-8", body)
         else:
