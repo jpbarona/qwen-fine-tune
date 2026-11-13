@@ -229,6 +229,7 @@ class Experiment:
     eval_prompts: Sequence[Prompt] = ()
     resume_step: int = 0
     prior_evaluations: Sequence[Mapping[str, Any]] = ()
+    fake: bool = False
 
     def run(self) -> RunSummary:
         """Run every training step, evaluate on schedule, and summarize.
@@ -339,6 +340,7 @@ class Experiment:
         return {
             "arm": self.arm,
             "timestamp": self.store.timestamp,
+            "mode": "fake" if self.fake else "real",
             "git_commit": repro.git_commit(),
             "versions": repro.package_versions(),
             "model_revision": config.model_revision,
