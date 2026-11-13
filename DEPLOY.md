@@ -15,7 +15,8 @@ The instance accepts the `opencode-agent` key and jpbarona's Mac key. Password l
 
 - Project: `~/rl-grpo`
 - Virtualenv: `~/rl-grpo/.venv`
-- Judge key: already present in `~/.env` as `OPENCODE_GO_API_KEY`
+- Judge key: `OPENROUTER_API_KEY` is required and read from `~/.env` at startup. The judge uses OpenRouter by default.
+- Old key: `OPENCODE_GO_API_KEY` is only read when `[judge] provider = "opencode"`.
 - Docker is installed and the `Ubuntu` user is in the `docker` group.
 
 ## Run
