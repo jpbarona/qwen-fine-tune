@@ -230,10 +230,16 @@ def test_engine_accepts_the_inference_engine_spelling(write_config) -> None:
     assert load_config(path).engine == "vllm"
 
 
-def test_shipped_real_config_stays_on_hf() -> None:
+def test_shipped_real_config_uses_vllm() -> None:
     path = Path(__file__).resolve().parents[1] / "configs" / "real.toml"
 
-    assert load_config(path).engine == "hf"
+    assert load_config(path).engine == "vllm"
+
+
+def test_the_engine_defaults_to_hf_when_the_key_is_absent() -> None:
+    config = load_config(Path(__file__).resolve().parents[1] / "configs" / "smoke.toml")
+
+    assert config.engine == "hf"
 
 
 def test_sync_without_collective_rpc_raises_a_clear_error() -> None:
