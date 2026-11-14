@@ -57,6 +57,7 @@ __all__ = [
     "seed_rngs",
     "split_generated_rows",
     "split_thinking_and_code",
+    "thinking_marker_index",
     "truncate_prompt",
 ]
 
@@ -108,6 +109,20 @@ def split_thinking_and_code(text: str) -> tuple[str, str]:
     answer = text[index + len(marker) :]
     thinking = thinking.replace("<think>", "").replace(marker, "").strip()
     return thinking, answer.strip()
+
+
+def thinking_marker_index(token_ids: Sequence[int], marker_id: int) -> int:
+    """The index just past the last marker token, or 0 when the marker is absent.
+
+    This is the split point between the reasoning trace and the answer. A
+    sequence with no marker has no reasoning block, so the whole thing is the
+    answer and the index is 0. A repeated marker uses the last one, so a model
+    that restates the closing marker still splits at the final copy.
+    """
+    for index in range(len(token_ids) - 1, -1, -1):
+        if token_ids[index] == marker_id:
+            return index + 1
+    return 0
 
 
 def categorical_entropy(logits: Sequence[float]) -> float:
@@ -770,6 +785,7 @@ class QwenGenerator:
                     completion_tokens=len(generated_ids),
                     truncated=truncated,
                     prompt_truncated=prompt_truncated,
+                    closed=split > 0,
                 )
             )
 
@@ -797,11 +813,8 @@ class QwenGenerator:
         return group, entries
 
     def _split_at_think_end(self, generated_ids: list[int]) -> int:
-        """The index just past the last `</think>` token, or 0 when absent."""
-        for index in range(len(generated_ids) - 1, -1, -1):
-            if generated_ids[index] == THINK_END_TOKEN_ID:
-                return index + 1
-        return 0
+        """The index just past the last closing reasoning marker, or 0 when absent."""
+        return thinking_marker_index(generated_ids, THINK_END_TOKEN_ID)
 
     def _completion_logprobs(
         self, sequence: Any, prompt_length: int, attention_mask: list[int] | None = None

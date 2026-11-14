@@ -118,6 +118,10 @@ class Generation:
     `truncated` is true when the completion hit the max length without an end
     token. `prompt_truncated` is true when the prompt was cut at max prompt
     tokens. Neither is part of the rollout record; they feed the step metric.
+
+    `closed` is true when the completion wrote the closing reasoning marker, so
+    the reasoning block ended before the answer instead of running into the cap.
+    The code arm pays a small bonus for it so the model has a reason to close.
     """
 
     reasoning: str
@@ -126,6 +130,7 @@ class Generation:
     completion_tokens: int
     truncated: bool = False
     prompt_truncated: bool = False
+    closed: bool = False
 
 
 @dataclass(frozen=True)
@@ -881,6 +886,7 @@ class Experiment:
             judge_score=judge_score,
             process_score=process_score,
             truncated=generation.truncated,
+            closed=generation.closed,
             error_class=code_error_class,
             completion_tokens=generation.completion_tokens,
             length_soft_limit=self.config.length_soft_limit,
