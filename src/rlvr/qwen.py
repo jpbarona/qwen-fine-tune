@@ -576,14 +576,7 @@ class QwenGenerator:
         prompt_ids: list[list[int]] = []
         prompt_truncated: list[bool] = []
         for prompt in prompt_list:
-            text = self.tokenizer.apply_chat_template(
-                [{"role": "user", "content": prompt.problem}],
-                tokenize=False,
-                add_generation_prompt=True,
-                enable_thinking=thinking,
-            )
-            raw_ids = self.tokenizer(text, return_tensors="pt")["input_ids"][0].tolist()
-            kept, truncated = truncate_prompt(raw_ids, self.max_prompt_tokens)
+            kept, truncated = self._encode_prompt(prompt, thinking=thinking)
             prompt_ids.append(kept)
             prompt_truncated.append(truncated)
 
@@ -616,67 +609,192 @@ class QwenGenerator:
             prompt_length=prompt_length,
         )
 
-        eos = self.tokenizer.eos_token_id
         generations: list[list[Generation]] = []
         cached_groups: list[list[_GroupEntry]] = []
         for index, prompt in enumerate(prompt_list):
-            group: list[Generation] = []
-            entries: list[_GroupEntry] = []
-            real_prompt_length = sum(attention_mask[index])
-            for raw_ids in groups[index]:
-                truncated = completion_truncated(raw_ids, eos)
-                if truncated:
-                    generated_ids = raw_ids
-                else:
-                    generated_ids = raw_ids[: raw_ids.index(eos) + 1]
-                split = self._split_at_think_end(generated_ids)
-                reasoning = self.tokenizer.decode(
-                    generated_ids[:split], skip_special_tokens=True
-                ).strip()
-                answer = self.tokenizer.decode(
-                    generated_ids[split:], skip_special_tokens=True
-                ).strip()
-                code = extract_code_from_answer(answer)
-
-                group.append(
-                    Generation(
-                        reasoning=reasoning,
-                        code=code,
-                        prompt_tokens=real_prompt_length,
-                        completion_tokens=len(generated_ids),
-                        truncated=truncated,
-                        prompt_truncated=prompt_truncated[index],
-                    )
-                )
-
-                if caching:
-                    entry_ids = padded_ids[index] + generated_ids
-                    entry_mask = attention_mask[index] + [1] * len(generated_ids)
-                    with torch.no_grad():
-                        sequence = torch.tensor([entry_ids], device=self._device)
-                        old_logprobs = self._completion_logprobs(
-                            sequence, prompt_length, entry_mask
-                        ).tolist()
-                    reference_logprobs = self._reference_logprobs(
-                        entry_ids, prompt_length, entry_mask, generated_ids
-                    )
-                    entries.append(
-                        _GroupEntry(
-                            prompt_id=prompt.prompt_id,
-                            input_ids=entry_ids,
-                            attention_mask=entry_mask,
-                            prompt_length=prompt_length,
-                            old_logprobs=old_logprobs,
-                            reference_logprobs=reference_logprobs,
-                        )
-                    )
-
+            group, entries = self._decode_group(
+                prompt,
+                padded_ids[index],
+                attention_mask[index],
+                prompt_length,
+                prompt_truncated=prompt_truncated[index],
+                completion_rows=groups[index],
+                caching=caching,
+            )
             generations.append(group)
             cached_groups.append(entries)
 
         if caching:
             self._pending_groups = cached_groups
         return generations
+
+    def encode_prompt(
+        self, prompt: Prompt, *, thinking: bool = True
+    ) -> tuple[list[int], bool]:
+        """Prompt token ids and the truncation flag, for an external sampler.
+
+        The vLLM backend cannot tokenize, so the trainer encodes the prompt and
+        the engine samples from these ids. The prompt cap is applied here, so
+        both sampling paths see the same prompt length.
+        """
+        return self._encode_prompt(prompt, thinking=thinking)
+
+    def _encode_prompt(
+        self, prompt: Prompt, *, thinking: bool
+    ) -> tuple[list[int], bool]:
+        """Chat template, tokenize, and truncate one prompt to the token cap."""
+        text = self.tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt.problem}],
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=thinking,
+        )
+        raw_ids = self.tokenizer(text, return_tensors="pt")["input_ids"][0].tolist()
+        return truncate_prompt(raw_ids, self.max_prompt_tokens)
+
+    def build_generation_batch(
+        self,
+        prompts: Sequence[Prompt],
+        prompt_ids: Sequence[Sequence[int]],
+        prompt_truncated: Sequence[bool],
+        completion_token_ids: Sequence[Sequence[Sequence[int]]],
+        *,
+        cache: bool,
+    ) -> list[list[Generation]]:
+        """Build generation objects from token ids sampled by the vLLM engine.
+
+        The rows are the same shape the Hugging Face path splits from
+        `generate`. Each prompt is padded on its own, so the mask is all ones
+        and the completion starts at the prompt length. When `cache` is true
+        the old logprobs are computed on the training model and the group data
+        is cached for the update pass, exactly as `generate_batch` does.
+        """
+        prompt_list = list(prompts)
+        counts = (
+            len(prompt_list),
+            len(prompt_ids),
+            len(prompt_truncated),
+            len(completion_token_ids),
+        )
+        if len(set(counts)) != 1:
+            raise ValueError(
+                f"build_generation_batch got mismatched lengths {counts}: "
+                "prompts, prompt ids, truncation flags and completion rows must match"
+            )
+        if cache and not self.trainable:
+            raise RuntimeError(
+                "this generator was built without an adapter and cannot cache groups"
+            )
+        if self._accumulated_groups:
+            # A previous step stopped before apply_update. Sampling a new batch
+            # drops the partial gradients.
+            self.optimizer.zero_grad()
+            self._accumulated_groups = 0
+        if cache:
+            self.model.train()
+        else:
+            self.model.eval()
+
+        pad_token_id = self.tokenizer.pad_token_id
+        generations: list[list[Generation]] = []
+        cached_groups: list[list[_GroupEntry]] = []
+        for index, prompt in enumerate(prompt_list):
+            padded, mask = pad_prompts([prompt_ids[index]], pad_token_id)
+            check_attention_mask(padded, mask, pad_token_id)
+            group, entries = self._decode_group(
+                prompt,
+                padded[0],
+                mask[0],
+                len(padded[0]),
+                prompt_truncated=prompt_truncated[index],
+                completion_rows=completion_token_ids[index],
+                caching=cache,
+            )
+            generations.append(group)
+            cached_groups.append(entries)
+
+        self._pending_groups = cached_groups if cache else None
+        return generations
+
+    def engine_state_dict(self):
+        """The trainable weights as name and tensor pairs, for the vLLM engine.
+
+        The adapter parameters are the only ones that change during a run, so
+        these are what the engine needs after each optimizer step. The tensors
+        are detached views of the live parameters.
+        """
+        for name, parameter in self.model.named_parameters():
+            if parameter.requires_grad:
+                yield name, parameter.detach()
+
+    def _decode_group(
+        self,
+        prompt: Prompt,
+        padded_ids: Sequence[int],
+        attention_mask: Sequence[int],
+        prompt_length: int,
+        *,
+        prompt_truncated: bool,
+        completion_rows: Sequence[Sequence[int]],
+        caching: bool,
+    ) -> tuple[list[Generation], list[_GroupEntry]]:
+        """Decode one prompt's completion rows and cache its update data.
+
+        Shared by the Hugging Face batch path and the vLLM batch builder, so
+        both produce identical generation objects and identical group entries.
+        """
+        torch = self._torch
+        eos = self.tokenizer.eos_token_id
+        real_prompt_length = sum(attention_mask)
+        group: list[Generation] = []
+        entries: list[_GroupEntry] = []
+        for raw_ids in completion_rows:
+            generated_ids = [int(token) for token in raw_ids]
+            truncated = completion_truncated(generated_ids, eos)
+            if not truncated:
+                generated_ids = generated_ids[: generated_ids.index(eos) + 1]
+            split = self._split_at_think_end(generated_ids)
+            reasoning = self.tokenizer.decode(
+                generated_ids[:split], skip_special_tokens=True
+            ).strip()
+            answer = self.tokenizer.decode(
+                generated_ids[split:], skip_special_tokens=True
+            ).strip()
+            code = extract_code_from_answer(answer)
+
+            group.append(
+                Generation(
+                    reasoning=reasoning,
+                    code=code,
+                    prompt_tokens=real_prompt_length,
+                    completion_tokens=len(generated_ids),
+                    truncated=truncated,
+                    prompt_truncated=prompt_truncated,
+                )
+            )
+
+            if caching:
+                entry_ids = list(padded_ids) + generated_ids
+                entry_mask = list(attention_mask) + [1] * len(generated_ids)
+                with torch.no_grad():
+                    sequence = torch.tensor([entry_ids], device=self._device)
+                    old_logprobs = self._completion_logprobs(
+                        sequence, prompt_length, entry_mask
+                    ).tolist()
+                reference_logprobs = self._reference_logprobs(
+                    entry_ids, prompt_length, entry_mask, generated_ids
+                )
+                entries.append(
+                    _GroupEntry(
+                        prompt_id=prompt.prompt_id,
+                        input_ids=entry_ids,
+                        attention_mask=entry_mask,
+                        prompt_length=prompt_length,
+                        old_logprobs=old_logprobs,
+                        reference_logprobs=reference_logprobs,
+                    )
+                )
+        return group, entries
 
     def _split_at_think_end(self, generated_ids: list[int]) -> int:
         """The index just past the last `</think>` token, or 0 when absent."""
