@@ -39,6 +39,11 @@ max_completion_tokens = 2048
 entropy_every_steps = 500
 clip_epsilon = 0.2
 kl_beta = 0.0
+# Length penalty over the whole output, thinking included. Every token above
+# the soft limit costs per_token, and the total is floored at penalty_floor.
+length_soft_limit = 900
+length_penalty_per_token = 0.001
+length_penalty_floor = 0.2
 # Steps start at two prompts and grow while free memory stays at or above this
 # floor and at or above one prompt group's measured footprint, in MiB. The
 # largest size that fit is kept. Never below one prompt.

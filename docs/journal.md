@@ -38,3 +38,8 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 32. No KL anchor, so nothing held the policy near the base
 33. Checkpoint and eval cadence was too coarse for this collapse
 34. Run two data saved locally before the VM was killed
+35. One optimizer update per step → accumulate gradients across groups
+36. Several prompts padded and sampled in one generate call
+37. Left padding keeps every completion at one fixed column
+38. Attention mask stored with each group and reused on update
+39. Step counter now equals the number of weight updates

@@ -103,6 +103,7 @@ class GroupGenerator:
     def __init__(self) -> None:
         self.groups: list[tuple[str, tuple[float, ...]]] = []
         self.saves: list[str] = []
+        self.updates = 0
 
     def generate(self, prompt: Prompt, *, n: int, temperature: float):
         return [
@@ -115,9 +116,17 @@ class GroupGenerator:
             for _ in range(n)
         ]
 
-    def update(self, prompt, generations, rewards, *, measure_entropy: bool = False):
+    def generate_batch(self, prompts, *, n: int, temperature: float):
+        return [
+            self.generate(prompt, n=n, temperature=temperature) for prompt in prompts
+        ]
+
+    def accumulate(self, prompt, generations, rewards, *, measure_entropy: bool = False):
         self.groups.append((prompt.prompt_id, tuple(rewards)))
         return 0.5 if measure_entropy else None
+
+    def apply_update(self) -> None:
+        self.updates += 1
 
     def save_checkpoint(self, directory) -> None:
         self.saves.append(str(directory))
@@ -578,6 +587,9 @@ def test_the_fake_path_takes_two_prompts_per_step(tmp_path) -> None:
         "mbpp-0002",
         "mbpp-0003",
     ]
+    # Two groups per step, one weight update per step.
+    assert generator.update_groups == [2, 2]
+    assert generator.step == 2
 
 
 def test_the_fake_batched_run_is_deterministic(tmp_path) -> None:

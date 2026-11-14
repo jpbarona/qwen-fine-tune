@@ -138,17 +138,34 @@ Contributing causes, in order:
 
 ## D9. One update per step
 
+Status: implemented. `Experiment._training_step` accumulates every prompt group
+and calls `Generator.apply_update` once, and `QwenGenerator.step` counts calls
+to that method, so the step number is the weight update count.
+
 Gradients accumulate across every prompt group in a step, and the optimizer
 steps once at the end. Reason: per prompt updates multiply the learning rate by
 the batch size and caused the collapse. The step counter now matches the number
 of weight updates.
 
+The accumulated gradient is divided by the prompt group count before the step,
+so the update is the mean over the batch instead of a sum that grows with it.
+Advantage normalisation stays inside one prompt group.
+
 ## D10. Several prompts in one generate call
+
+Status: implemented. `Generator.generate_batch` takes the prompt list and returns
+one group per prompt. `Experiment._training_step` pairs the returned groups with
+the prompts by position and checks the shape before any scoring.
 
 Prompts are padded to a common length and sampled together, eight answers each,
 in one call. Reason: decode is CPU bound at 152 tokens per second, about 5
 percent of the roofline. One call per prompt leaves the card idle between calls.
 Gradients, rewards and parsing do not change.
+
+Padding is on the left, so every completion starts at the same column and one
+prefix length slices every row. The attention mask marks the pads, is checked
+before the call, and is stored with each group so the update pass feeds the same
+mask back.
 
 ## D11. vLLM for rollouts
 
@@ -180,7 +197,6 @@ keep the docs index accurate, and leave the code alone.
 ## Note on the length penalty
 
 The length term is implemented and on by default: soft limit 900 tokens, 0.001
-per token above it, floor 0.2. It is covered by tests. It is not written into
-`configs/real.toml`, so it is not visible or tunable there. Add the three keys
-to the config when the next run is prepared.
+per token above it, floor 0.2. It is covered by tests. The three keys now sit in
+`configs/real.toml` under `[training]`, so the term is visible and tunable.
 
