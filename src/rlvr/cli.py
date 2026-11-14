@@ -31,7 +31,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from .batching import START_PROMPTS, BatchSizePolicy
 from .config import Config, ConfigError, default_config_path, load_config
@@ -40,7 +40,9 @@ from .data import (
     TEST_SIZE,
     TRAIN_SIZE,
     DatasetError,
+    MBPPQuestion,
     load_dataset,
+    load_difficulty_labels,
     load_split,
     prompts_for_questions,
 )
@@ -70,9 +72,9 @@ from .stages import (
     Stage,
     StageError,
     build_stages as build_ordered_stages,
-    load_band_labels,
 )
 from .summary import SummaryError, format_summary, load_reports, write_report
+from .synthetic import SyntheticError, load_synthetic_questions
 
 __all__ = [
     "build_curriculum",
@@ -82,6 +84,7 @@ __all__ = [
     "build_prompts",
     "build_screen_test_runner",
     "build_test_runner",
+    "load_synthetic_rows",
     "main",
     "screen_command",
 ]
@@ -327,13 +330,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def load_synthetic_rows() -> tuple[MBPPQuestion, ...]:
+    """The 50 synthetic very easy questions as runner rows.
+
+    The synthetic file is committed beside the MBPP data. A missing or invalid
+    file stops the run before a folder is made, because the very easy stage has
+    no other material.
+    """
+    try:
+        return tuple(
+            question.as_question() for question in load_synthetic_questions()
+        )
+    except SyntheticError as error:
+        raise UsageError(f"cannot load the synthetic questions: {error}") from error
+
+
 def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
     """Load the fixed split and return the train and test prompts.
 
-    Training uses the 714 train questions and evaluation uses the 250 test
-    questions. The split and the prompt format come from `data.py`, so every
-    arm and the fake path see the same questions. The two lists never share a
-    question. A wrong or empty split stops the run before a folder is made.
+    Training uses the 714 MBPP train questions plus the 50 synthetic very easy
+    questions. Evaluation uses the 250 test questions. The split and the prompt
+    format come from `data.py`, so every arm and the fake path see the same
+    questions. The two lists never share a question, and a synthetic id can
+    never collide with an MBPP id. A wrong or empty split stops the run before
+    a folder is made.
     """
     try:
         split = load_split(seed=config.split_seed)
@@ -352,7 +372,8 @@ def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
             f"the train and test split overlap on {len(train_ids & test_ids)} task ids"
         )
 
-    train_prompts = prompts_for_questions(split.train)
+    train_questions = list(split.train) + list(load_synthetic_rows())
+    train_prompts = prompts_for_questions(train_questions)
     eval_prompts = prompts_for_questions(split.test)
     if not train_prompts or not eval_prompts:
         raise UsageError("the split produced an empty train or test prompt list")
@@ -364,30 +385,44 @@ def build_curriculum(
 ) -> tuple[Stage[Prompt], ...]:
     """Build the ordered stages for the training prompts.
 
-    A real run reads the difficulty label file. The loader returns an empty
-    mapping when the file is absent, and unlabelled prompts fall back to the
-    configured start band, so this task does not block on the label data.
+    A real run validates the difficulty label file against the MBPP split for
+    the configured seed. A missing file, an unknown or duplicated id, or labels
+    written for a different split seed all stop the run with a clear message,
+    so a wrong config cannot put every row in one band.
+
+    The 50 synthetic rows are always placed in the very easy band. They carry
+    their own tests and exist to make the first stage solvable.
 
     The fake path supplies its own deterministic labels. The first fake prompt
     that fully passes is put alone in the first band, so the fake run shows a
     stage one exhaustion and a stage two start at a fixed step.
     """
     if fake:
-        labels = fake_band_labels(prompts)
+        labels: Mapping[str, str] = fake_band_labels(prompts)
+        synthetic_ids: set[str] = set()
     else:
         try:
-            labels = load_band_labels()
-        except StageError as error:
+            split = load_split(seed=config.split_seed)
+            labels = load_difficulty_labels(split)
+        except DatasetError as error:
             raise UsageError(f"cannot load difficulty labels: {error}") from error
+        synthetic_ids = {question.prompt_id for question in load_synthetic_rows()}
 
-    rows = [
-        LabelledRow(
-            prompt_id=prompt.prompt_id,
-            band=labels.get(prompt.prompt_id, config.stage),
-            item=prompt,
+    rows = []
+    for prompt in prompts:
+        if prompt.prompt_id in synthetic_ids:
+            band = BANDS[0]
+        else:
+            band = labels.get(prompt.prompt_id)
+            if band is None:
+                raise UsageError(
+                    f"prompt {prompt.prompt_id!r} has no difficulty label. "
+                    f"The label file must cover the training split for seed "
+                    f"{config.split_seed}."
+                )
+        rows.append(
+            LabelledRow(prompt_id=prompt.prompt_id, band=band, item=prompt)
         )
-        for prompt in prompts
-    ]
     try:
         return build_ordered_stages(
             rows,
@@ -401,11 +436,12 @@ def build_curriculum(
 
 
 def build_test_runner(config: Config, *, fake: bool):
-    """The Docker runner over the full split, or the fake runner.
+    """The Docker runner over the full split and the synthetic rows, or the fake.
 
     The real runner holds every question because training rollouts run the
-    train questions and evaluation runs the held-out test questions. The fake
-    runner ignores questions entirely.
+    train questions and the synthetic easy questions, and evaluation runs the
+    held-out test questions and each stage's held-out slice. The fake runner
+    ignores questions entirely.
     """
     if fake:
         return FakeTestRunner()
@@ -413,7 +449,7 @@ def build_test_runner(config: Config, *, fake: bool):
         split = load_split(seed=config.split_seed)
     except DatasetError as error:
         raise UsageError(f"cannot load the MBPP split: {error}") from error
-    questions = list(split.train) + list(split.test)
+    questions = list(split.train) + list(split.test) + list(load_synthetic_rows())
     from .docker_runner import DockerTestRunner
 
     return DockerTestRunner(questions)

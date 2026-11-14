@@ -6,9 +6,11 @@ Study decisions, newest first. Each one says what was chosen and why.
 
 A step takes several prompt groups, one group of 8 samples each. The batch starts
 at two prompts. Free memory is read after each step, and the batch grows by one
-while free memory stays at or above `[training] memory_floor_mib`. The first
-step below the floor settles the batch at the largest size that fit, and it
-stays there. It never goes below one prompt. There is no percentage rule.
+while free memory stays at or above the larger of `[training] memory_floor_mib`
+and one prompt group's measured footprint from the previous step. The first
+step below that floor settles the batch at the largest size that fit, and it
+stays there. A CUDA out-of-memory error does the same instead of crashing. It
+never goes below one prompt. There is no percentage rule.
 
 Advantage is normalised inside one prompt group. The backward pass runs once per
 generation and gradients accumulate across the group, so only one autograd graph
@@ -100,9 +102,10 @@ Show the current stage band, the step count, and pass rate per band.
 `output_scores` comes out of `generate`. It is not used by the loss, only for
 the per-step entropy chart.
 
-Entropy is measured every N update passes instead, default 500, set by
-`entropy_every` in the config. At that point the update pass already has logits
-for the tokens, so the measurement is free. Set to 0 to disable.
+Entropy is measured every N training steps instead, default 500, set by
+`[training] entropy_every_steps` in the config. At that point the update pass
+already has logits for the tokens, so the measurement is free. Set to 0 to
+disable.
 
 The dashboard entropy chart shows one point per measurement, not per step.
 

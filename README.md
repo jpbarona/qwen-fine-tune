@@ -28,9 +28,10 @@ The CUDA 12.4 index keeps the torch build compatible with a 3090 driver. The
 
 The fake path needs no GPU, no network, no Docker, and no model download. It is
 deterministic: the same command produces the same rollout records. The CLI
-still reads the committed MBPP split, so the run trains on the 714 train
-questions and evaluates the 250 held-out test questions. Only the model, judge,
-and Docker runner are replaced by fakes.
+still reads the committed MBPP split and the synthetic easy file, so the run
+trains on the 714 MBPP train questions plus the 50 synthetic easy questions, and
+evaluates the 250 held-out test questions. Only the model, judge, and Docker
+runner are replaced by fakes.
 
 ```bash
 .venv/bin/rlvr run --arm code-score --fake
@@ -147,7 +148,8 @@ the same folder. Records are never duplicated.
 
 `[budget] max_steps` and `[budget] max_judge_calls` cap the run. The loop stops
 cleanly at the cap, writes the final evaluation, and records the reason
-(`completed`, `max_steps`, or `max_judge_calls`) in `eval.json`.
+(`completed`, `max_steps`, `max_judge_calls`, or `out_of_memory`) in
+`eval.json`.
 
 ## Tests
 
@@ -183,6 +185,11 @@ subset of the test pool with greedy decoding. The subset is
 split seed, and the subset is a seeded sample, not the first questions in file
 order. The subset keeps the pool order.
 
+Each curriculum stage also evaluates its own held-out slice. That entry has
+`kind` `"stage"` and carries the band name in `stage`, so `eval.json` holds the
+pass rate per band. The dashboard shows the band beside the evaluation. A run
+that stops inside a stage still evaluates that stage's held-out slice.
+
 The final evaluation always covers the whole test pool, which is the 250
 held-out questions for a real run. pass@1 is the only metric: the fraction of
 questions whose greedy generation passed every task test.
@@ -203,6 +210,8 @@ last checkpoint result.
   "evaluations": [
     {"step": 100, "kind": "checkpoint", "pass_at_1": 0.31, "count": 100,
      "prompt_ids": ["..."], "subset": {"...": "the same selector"}},
+    {"step": 400, "kind": "stage", "stage": "very easy", "pass_at_1": 0.55,
+     "count": 12, "prompt_ids": ["..."], "subset": null},
     {"step": 1000, "kind": "final", "pass_at_1": 0.42, "count": 250,
      "prompt_ids": ["..."], "subset": null}
   ]
@@ -210,11 +219,11 @@ last checkpoint result.
 ```
 
 The CLI loads the fixed MBPP split with `data.load_split`, uses the 714 train
-questions as training prompts, and the 250 test questions as eval prompts. Fake
-mode uses the same split, so a fake run also evaluates held-out questions and
-never evaluates a training question. The `Experiment` itself has no fallback.
-It refuses to run when `eval_prompts` is empty. A wrong or empty split stops the
-command before a run folder is made.
+questions plus the 50 synthetic easy questions as training prompts, and the 250
+test questions as eval prompts. Fake mode uses the same set, so a fake run also
+evaluates held-out questions and never evaluates a training question. The
+`Experiment` itself has no fallback. It refuses to run when `eval_prompts` is
+empty. A wrong or empty split stops the command before a run folder is made.
 
 ## Completion length and sampled entropy
 
@@ -222,8 +231,9 @@ command before a run folder is made.
 logged, not rewarded.
 
 Entropy is not a rollout field. It is measured on the update pass, on the same
-forward logits the policy loss uses, every `[training] entropy_every` updates
-(default 500). Zero disables it. The value is the mean Shannon entropy in nats
+forward logits the policy loss uses, every `[training] entropy_every_steps`
+training steps (default 500). Every prompt group updated in that step is
+measured. Zero disables it. The value is the mean Shannon entropy in nats
 over the generated tokens, estimated from at most 64 evenly spaced positions
 when a completion is longer than that. It is logged, not rewarded, and it is
 not bounded by 1.

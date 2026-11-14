@@ -302,7 +302,7 @@ def _steps_done(rows: list[dict[str, Any]]) -> int:
 def _last_number(rows: list[dict[str, Any]], name: str) -> float | None:
     """The last present numeric value of a field, or None.
 
-    Entropy is measured only every `entropy_every` steps, so the newest row
+    Entropy is measured only every `entropy_every_steps` training steps, so the newest row
     often has no value. The KPI shows the last measured value instead of
     flickering back to a dash.
     """
@@ -359,6 +359,7 @@ def _evaluations(eval_payload: Mapping[str, Any]) -> list[dict[str, Any]]:
             {
                 "step": _integer(point.get("step")),
                 "kind": _string(point.get("kind")) or "",
+                "stage": _string(point.get("stage")),
                 "count": _integer(point.get("count")),
                 "pass_at_1": _number(point.get("pass_at_1")),
             }
@@ -717,16 +718,18 @@ _SCRIPT = """\
     html += '<thead><tr class="text-left text-zinc-500">' +
       '<th class="px-3 py-1.5 font-normal">step</th>' +
       '<th class="px-3 py-1.5 font-normal">kind</th>' +
+      '<th class="px-3 py-1.5 font-normal">stage</th>' +
       '<th class="px-3 py-1.5 font-normal text-right">count</th>' +
       '<th class="px-3 py-1.5 font-normal text-right">pass@1</th></tr></thead><tbody>';
     if (!evals.length) {
-      html += '<tr><td colspan="4" class="px-3 py-2 text-zinc-500">no evaluation recorded</td></tr>';
+      html += '<tr><td colspan="5" class="px-3 py-2 text-zinc-500">no evaluation recorded</td></tr>';
     } else {
       for (var e = 0; e < evals.length; e++) {
         var it = evals[e];
         html += '<tr class="border-t border-zinc-800/60">' +
           '<td class="px-3 py-1.5 tnum">' + (it.step === null || it.step === undefined ? "-" : it.step) + '</td>' +
           '<td class="px-3 py-1.5">' + esc(it.kind || "") + '</td>' +
+          '<td class="px-3 py-1.5">' + esc(it.stage || "-") + '</td>' +
           '<td class="px-3 py-1.5 text-right tnum">' + (it.count === null || it.count === undefined ? "-" : it.count) + '</td>' +
           '<td class="px-3 py-1.5 text-right tnum">' + fmt(it.pass_at_1) + '</td></tr>';
       }

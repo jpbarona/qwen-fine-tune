@@ -15,6 +15,7 @@ from rlvr.config import load_config
 from rlvr.data import load_split, prompt_id_for
 from rlvr.fake import FakeJudge
 from rlvr.memory import ALLOCATOR_ENV, EXPANDABLE_SEGMENTS
+from rlvr.synthetic import load_synthetic_questions
 
 CONFIG = """\
 [model]
@@ -25,7 +26,7 @@ revision = "r"
 model = "fake-judge-model"
 
 [data]
-split_seed = 7
+split_seed = 1234
 
 [fake]
 steps = 2
@@ -450,19 +451,36 @@ def test_build_prompts_separates_the_train_and_test_questions(tmp_path) -> None:
     config = load_config(write_split_config(tmp_path))
     train, evaluation = build_prompts(config)
 
-    assert len(train) == 714
+    assert len(train) == 714 + 50
     assert len(evaluation) == 250
     assert {prompt.prompt_id for prompt in train}.isdisjoint(
         {prompt.prompt_id for prompt in evaluation}
     )
     split = load_split(seed=7)
+    synthetic_ids = {
+        question.prompt_id for question in load_synthetic_questions()
+    }
     assert {prompt.prompt_id for prompt in train} == {
         prompt_id_for(question) for question in split.train
-    }
+    } | synthetic_ids
     assert {prompt.prompt_id for prompt in evaluation} == {
         prompt_id_for(question) for question in split.test
     }
     assert train[0].problem.startswith("Write a Python function")
+
+
+def test_build_prompts_puts_the_synthetic_questions_in_training(tmp_path) -> None:
+    train, evaluation = build_prompts(load_config(write_split_config(tmp_path)))
+    train_ids = {prompt.prompt_id for prompt in train}
+    synthetic_ids = {
+        question.prompt_id for question in load_synthetic_questions()
+    }
+
+    assert len(synthetic_ids) == 50
+    assert synthetic_ids <= train_ids
+    assert synthetic_ids.isdisjoint(
+        {prompt.prompt_id for prompt in evaluation}
+    )
 
 
 def test_a_fake_run_evaluates_the_held_out_test_split(tmp_path, capsys) -> None:
@@ -510,9 +528,14 @@ def test_a_fake_run_evaluates_the_held_out_test_split(tmp_path, capsys) -> None:
         for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     # One step trains one prompt group (8 identical rollouts), so the rollout
-    # prompt ids are a subset of the train ids, never a test id.
-    assert {record["prompt_id"] for record in records} <= train_ids
-    assert {record["prompt_id"] for record in records}.isdisjoint(test_ids)
+    # prompt ids are a subset of the train ids or the synthetic easy ids, never
+    # a test id.
+    synthetic_ids = {
+        question.prompt_id for question in load_synthetic_questions()
+    }
+    record_ids = {record["prompt_id"] for record in records}
+    assert record_ids <= train_ids | synthetic_ids
+    assert record_ids.isdisjoint(test_ids)
 
 
 def test_a_bad_split_stops_before_the_run_folder(
@@ -684,60 +707,101 @@ def test_the_fake_run_moves_from_the_first_stage_to_the_second(
     assert {record["stage"] for record in records} == {"very easy", "medium"}
 
 
-def test_build_curriculum_uses_the_difficulty_labels(
-    write_config, monkeypatch
+def test_build_curriculum_puts_the_synthetic_rows_in_the_very_easy_band(
+    write_config,
 ) -> None:
     from rlvr import cli
-    from rlvr.experiment import Prompt
+    from rlvr.data import load_difficulty_labels
 
     config = load_config(write_config())
-    prompts = [Prompt(f"mbpp-{index:04d}", "p") for index in range(4)]
-    monkeypatch.setattr(
-        cli,
-        "load_band_labels",
-        lambda: {"mbpp-0000": "very easy", "mbpp-0001": "hard"},
-    )
-
+    prompts, _ = build_prompts(config)
     stages = cli.build_curriculum(config, prompts, fake=False)
     by_name = {stage.name: stage for stage in stages}
-    assert [stage.name for stage in stages] == [
-        "very easy",
-        "medium",
-        "hard",
-        "very hard",
-    ]
-    assert "mbpp-0000" in {
-        prompt.prompt_id for prompt in by_name["very easy"].train + by_name["very easy"].held_out
+
+    synthetic_ids = {
+        question.prompt_id for question in load_synthetic_questions()
     }
-    assert "mbpp-0001" in {
-        prompt.prompt_id for prompt in by_name["hard"].train + by_name["hard"].held_out
-    }
-    # The missing ids fall back to the configured start band.
-    assert "mbpp-0002" in {
+    very_easy = {
         prompt.prompt_id
         for prompt in by_name["very easy"].train + by_name["very easy"].held_out
     }
+    assert synthetic_ids <= very_easy
+    # Carry over takes a share of the very easy training pool into medium, so a
+    # synthetic id may appear there. It never reaches a held-out slice or a
+    # later band.
+    medium_held = {
+        prompt.prompt_id for prompt in by_name["medium"].held_out
+    }
+    assert synthetic_ids.isdisjoint(medium_held)
+    for name in ("hard", "very hard"):
+        band_ids = {
+            prompt.prompt_id
+            for prompt in by_name[name].train + by_name[name].held_out
+        }
+        assert synthetic_ids.isdisjoint(band_ids)
+
+    # The MBPP rows keep the band from the validated label file.
+    labels = load_difficulty_labels(load_split(seed=config.split_seed))
+    mbpp = next(prompt for prompt in prompts if prompt.prompt_id in labels)
+    placed = next(
+        stage
+        for stage in stages
+        if mbpp.prompt_id
+        in {item.prompt_id for item in stage.train + stage.held_out}
+    )
+    assert placed.name == labels[mbpp.prompt_id]
 
 
-def test_build_curriculum_degrades_when_the_label_file_is_absent(
+def test_build_curriculum_rejects_a_prompt_with_no_label(
     write_config, monkeypatch
 ) -> None:
     from rlvr import cli
+    from rlvr.data import DatasetSplit
     from rlvr.experiment import Prompt
 
     config = load_config(write_config())
     prompts = [Prompt("mbpp-0000", "p"), Prompt("mbpp-0001", "p")]
-    monkeypatch.setattr(cli, "load_band_labels", lambda: {})
+    monkeypatch.setattr(
+        cli, "load_split", lambda **kwargs: DatasetSplit(train=(), test=())
+    )
+    monkeypatch.setattr(
+        cli, "load_difficulty_labels", lambda split: {"mbpp-0000": "very easy"}
+    )
+    monkeypatch.setattr(cli, "load_synthetic_rows", lambda: ())
 
-    stages = cli.build_curriculum(config, prompts, fake=False)
-    assert [stage.name for stage in stages] == [
-        "very easy",
-        "medium",
-        "hard",
-        "very hard",
-    ]
-    placed = {prompt.prompt_id for prompt in stages[0].train + stages[0].held_out}
-    assert placed == {"mbpp-0000", "mbpp-0001"}
+    with pytest.raises(cli.UsageError, match="has no difficulty label"):
+        cli.build_curriculum(config, prompts, fake=False)
+
+
+def test_build_curriculum_rejects_labels_for_a_different_split_seed(
+    tmp_path,
+) -> None:
+    from rlvr import cli
+
+    config_path = write_split_config(tmp_path)
+    config = load_config(config_path)
+    prompts, _ = build_prompts(config)
+
+    with pytest.raises(cli.UsageError, match="cannot load difficulty labels"):
+        cli.build_curriculum(config, prompts, fake=False)
+
+
+def test_build_curriculum_reports_a_missing_label_file(write_config, monkeypatch) -> None:
+    from rlvr import cli
+    from rlvr.data import DatasetError, DatasetSplit
+
+    config = load_config(write_config())
+    monkeypatch.setattr(
+        cli, "load_split", lambda **kwargs: DatasetSplit(train=(), test=())
+    )
+
+    def missing(split):
+        raise DatasetError("difficulty label file not found: /nowhere/labels.jsonl")
+
+    monkeypatch.setattr(cli, "load_difficulty_labels", missing)
+
+    with pytest.raises(cli.UsageError, match="difficulty label file not found"):
+        cli.build_curriculum(config, [], fake=False)
 
 
 def test_build_test_runner_uses_fakes_or_docker(write_config) -> None:
@@ -747,7 +811,12 @@ def test_build_test_runner_uses_fakes_or_docker(write_config) -> None:
 
     config = load_config(write_config())
     assert isinstance(build_test_runner(config, fake=True), FakeTestRunner)
-    # The real runner is built from the merged train and test questions. No
-    # Docker binary is invoked at construction, so this is safe on CPU.
+    # The real runner is built from the merged train and test questions and the
+    # synthetic easy set. No Docker binary is invoked at construction, so this
+    # is safe on CPU.
     runner = build_test_runner(config, fake=False)
     assert isinstance(runner, DockerTestRunner)
+    synthetic_ids = {
+        question.prompt_id for question in load_synthetic_questions()
+    }
+    assert synthetic_ids <= set(runner._questions)

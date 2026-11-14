@@ -28,7 +28,7 @@ split_seed = 1234
 steps = 3
 
 [training]
-entropy_every = 2
+entropy_every_steps = 2
 """
 
 

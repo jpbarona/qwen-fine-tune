@@ -794,7 +794,7 @@ def test_metrics_rows_summarize_the_step(tmp_path) -> None:
         tmp_path,
         runner=runner,
         store=store,
-        config_text=CONFIG_TEXT + "\n[training]\nentropy_every = 1\n",
+        config_text=CONFIG_TEXT + "\n[training]\nentropy_every_steps = 1\n",
     ).run()
     row = store.metrics[0]
     assert row["step"] == 1
@@ -813,7 +813,7 @@ def test_entropy_is_measured_only_on_the_configured_cadence(tmp_path) -> None:
         tmp_path,
         generator=generator,
         store=store,
-        config_text=CONFIG_TEXT + "\n[training]\nentropy_every = 2\n",
+        config_text=CONFIG_TEXT + "\n[training]\nentropy_every_steps = 2\n",
     ).run()
 
     # Two steps, cadence two: only the second update measures.
@@ -830,7 +830,7 @@ def test_a_zero_entropy_cadence_never_measures(tmp_path) -> None:
         tmp_path,
         generator=generator,
         store=store,
-        config_text=CONFIG_TEXT + "\n[training]\nentropy_every = 0\n",
+        config_text=CONFIG_TEXT + "\n[training]\nentropy_every_steps = 0\n",
     ).run()
 
     assert generator.measure_flags == [False, False]
@@ -874,7 +874,7 @@ def test_meta_carries_the_trainer_settings_and_checkpoint_dir(tmp_path) -> None:
     assert trainer["lora_alpha"] == 64
     assert trainer["learning_rate"] == 1e-5
     assert trainer["max_completion_tokens"] == 2048
-    assert trainer["entropy_every"] == 500
+    assert trainer["entropy_every_steps"] == 500
     assert trainer["clip_epsilon"] == 0.2
     assert trainer["kl_beta"] == 0.0
     assert trainer["batch_size"] == "adaptive"

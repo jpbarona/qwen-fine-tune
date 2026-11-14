@@ -190,6 +190,25 @@ def test_load_report_uses_the_last_evaluation_at_a_step(tmp_path) -> None:
     assert report.steps[-1].pass_at_1 == pytest.approx(0.9)
 
 
+def test_a_stage_evaluation_does_not_replace_the_checkpoint_value(tmp_path) -> None:
+    run_dir = write_run(
+        tmp_path / "runs",
+        "hybrid",
+        evaluations=[
+            {"step": 1, "kind": "checkpoint", "pass_at_1": 0.1, "count": 2},
+            {
+                "step": 1,
+                "kind": "stage",
+                "stage": "very easy",
+                "pass_at_1": 0.9,
+                "count": 2,
+            },
+        ],
+    )
+    report = load_report(run_dir)
+    assert report.steps[0].pass_at_1 == pytest.approx(0.1)
+
+
 def test_a_run_without_an_eval_file_still_loads(tmp_path) -> None:
     run_dir = write_run(tmp_path / "runs", "hybrid", eval_file=False)
     report = load_report(run_dir)

@@ -92,7 +92,7 @@ class RunReport:
     def mean(self, field: str) -> float | None:
         """The mean of a step field over the steps that carry a value.
 
-        Entropy is measured only every `entropy_every` steps, so a step without
+        Entropy is measured only every `entropy_every_steps` training steps, so a step without
         a value is skipped rather than counted as zero. With no measured step
         the result is None.
         """
@@ -170,7 +170,11 @@ def _step_number(row: Mapping[str, Any], source: str) -> int:
 
 
 def _checkpoint_pass_at_1(payload: Mapping[str, Any], source: str) -> dict[int, float]:
-    """Map step to the last evaluation pass@1 at that step."""
+    """Map step to the last checkpoint or final evaluation pass@1 at that step.
+
+    A stage evaluation carries its own band name and is shown separately. It
+    never replaces a checkpoint value for the per-step pass@1 line.
+    """
     points = payload.get("evaluations")
     if points is None:
         points = []
@@ -181,6 +185,8 @@ def _checkpoint_pass_at_1(payload: Mapping[str, Any], source: str) -> dict[int, 
     for point in points:
         if not isinstance(point, dict):
             raise SummaryError(f"{source}: each evaluation must be an object")
+        if point.get("kind") == "stage":
+            continue
         step = _step_number(point, source)
         result[step] = _number(point, "pass_at_1", source)
     return result

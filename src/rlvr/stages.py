@@ -15,10 +15,11 @@ band and never takes from a held out slice. With a start band other than the
 first, the first stage of the run carries nothing, because the run never saw
 the band before it.
 
-The difficulty labels are owned by another task. This module only defines the
-seam: `load_band_labels` maps a prompt id to a band name. A missing file returns
-an empty mapping, so a run without labels still works and falls back to the
-start band everywhere.
+The difficulty labels are owned by another task. This module also holds a
+standalone `load_band_labels` reader that maps a prompt id to a band name. A
+missing file returns an empty mapping. A training run does not use it: the run
+path validates the label file against the split through
+`data.load_difficulty_labels`.
 """
 
 from __future__ import annotations
