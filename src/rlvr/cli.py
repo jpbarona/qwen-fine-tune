@@ -33,8 +33,9 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from .batching import START_PROMPTS, BatchSizePolicy
 from .config import Config, ConfigError, default_config_path, load_config
-from .checkpoint import find_latest_checkpoint
+from .checkpoint import find_latest_checkpoint, read_checkpoint_manifest
 from .data import (
     TEST_SIZE,
     TRAIN_SIZE,
@@ -106,6 +107,71 @@ class UnusedJudge:
 
     def score_processes(self, items) -> list[JudgeResult]:
         raise AssertionError("this arm must never call the process judge")
+
+
+def _resume_batch_policy(config: Config, manifest: dict) -> BatchSizePolicy | None:
+    """The saved batch policy, or None for an older manifest.
+
+    A manifest written before batching has no `batch` table. A corrupt table is
+    ignored so the run still resumes from the step, which is the part that
+    matters most.
+    """
+    batch = manifest.get("batch")
+    if not isinstance(batch, dict):
+        return None
+    current = batch.get("current")
+    largest_fit = batch.get("largest_fit", 0)
+    settled = batch.get("settled", False)
+    if (
+        isinstance(current, bool)
+        or not isinstance(current, int)
+        or current < 1
+        or isinstance(largest_fit, bool)
+        or not isinstance(largest_fit, int)
+        or largest_fit < 0
+        or not isinstance(settled, bool)
+    ):
+        return None
+    return BatchSizePolicy(
+        floor_mib=config.memory_floor_mib,
+        current=current,
+        largest_fit=largest_fit,
+        settled=settled,
+    )
+
+
+def _resume_stage(manifest: dict) -> tuple[int | None, int, list[str] | None]:
+    """The saved curriculum position, or defaults for an older manifest.
+
+    `None` for the index and the pool means "start the curriculum from the
+    beginning", which is what a pre-batching manifest gets.
+    """
+    stage = manifest.get("stage")
+    if not isinstance(stage, dict):
+        return None, 0, None
+    index = stage.get("index")
+    step = stage.get("step", 0)
+    pool = stage.get("pool")
+    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+        return None, 0, None
+    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
+        return None, 0, None
+    if not isinstance(pool, list) or not all(isinstance(item, str) for item in pool):
+        return index, step, None
+    return index, step, list(pool)
+
+
+def _manifest_count(manifest: dict, name: str, default: int) -> int:
+    """A non-negative checkpoint manifest field, or the default.
+
+    A field absent from an older manifest falls back to the default. A corrupt
+    value does the same rather than stopping the resume, because the step and
+    arm are the only fields a checkpoint needs to be usable.
+    """
+    value = manifest.get(name, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return default
+    return value
 
 
 def build_judge(arm: str, config: Config, *, fake: bool) -> Judge:
@@ -421,15 +487,21 @@ def run_command(args: argparse.Namespace) -> int:
     if config.eval_final_questions is not None:
         eval_prompts = eval_prompts[: config.eval_final_questions]
 
-    # Real runs sweep the train questions once per epoch, one prompt group per
-    # step, so the step budget is epochs times the train size. The fake path
-    # keeps the small `[fake] steps` count.
+    # Real runs sweep the train questions once per epoch. A step takes a batch
+    # of prompts, so the budget is epochs times the number of batches at the
+    # starting size. The fake path keeps the small `[fake] steps` count.
     if not args.fake:
         from dataclasses import replace
 
-        config = replace(config, steps=config.epochs * len(train_prompts))
+        batches_per_epoch = -(-len(train_prompts) // START_PROMPTS)
+        config = replace(config, steps=config.epochs * batches_per_epoch)
 
     resume_step = 0
+    resume_prompt_cursor = 0
+    resume_stage_index: int | None = None
+    resume_stage_step = 0
+    resume_stage_pool: list[str] | None = None
+    batch_policy: BatchSizePolicy | None = None
     prior_evaluations: list[dict] = []
     checkpoint = None
     if args.resume:
@@ -439,6 +511,12 @@ def run_command(args: argparse.Namespace) -> int:
             raise UsageError(
                 f"no checkpoint found for arm {args.arm!r} under {store.run_dir}"
             )
+        manifest = read_checkpoint_manifest(checkpoint.directory)
+        resume_prompt_cursor = _manifest_count(manifest, "prompt_cursor", 0)
+        resume_stage_index, resume_stage_step, resume_stage_pool = _resume_stage(
+            manifest
+        )
+        batch_policy = _resume_batch_policy(config, manifest)
         store.truncate_to_step(checkpoint.step)
         prior_evaluations = store.read_evaluations()
         resume_step = checkpoint.step
@@ -471,6 +549,11 @@ def run_command(args: argparse.Namespace) -> int:
         prior_evaluations=prior_evaluations,
         fake=args.fake,
         memory=fake_memory if args.fake else read_torch_memory,
+        resume_prompt_cursor=resume_prompt_cursor,
+        resume_stage_index=resume_stage_index,
+        resume_stage_step=resume_stage_step,
+        resume_stage_pool=resume_stage_pool,
+        batch_policy=batch_policy,
     )
     summary = experiment.run()
 

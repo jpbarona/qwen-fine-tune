@@ -47,6 +47,36 @@ def test_manifest_round_trips(tmp_path) -> None:
     assert payload["timestamp"] == "20261112T000000Z"
 
 
+def test_manifest_carries_the_prompt_cursor_and_batch_state(tmp_path) -> None:
+    directory = tmp_path / "step-00000050"
+    write_checkpoint_manifest(
+        directory,
+        step=50,
+        arm="code-score",
+        timestamp="t",
+        prompt_cursor=125,
+        batch={"current": 4, "largest_fit": 3, "settled": False},
+        stage={"index": 1, "step": 4, "pool": ["mbpp-0002", "mbpp-0003"]},
+    )
+    payload = read_checkpoint_manifest(directory)
+    assert payload["prompt_cursor"] == 125
+    assert payload["batch"] == {"current": 4, "largest_fit": 3, "settled": False}
+    assert payload["stage"] == {
+        "index": 1,
+        "step": 4,
+        "pool": ["mbpp-0002", "mbpp-0003"],
+    }
+
+
+def test_manifest_omits_the_new_fields_when_not_given(tmp_path) -> None:
+    directory = tmp_path / "step-00000050"
+    write_checkpoint_manifest(directory, step=50, arm="code-score", timestamp="t")
+    payload = read_checkpoint_manifest(directory)
+    assert "prompt_cursor" not in payload
+    assert "batch" not in payload
+    assert "stage" not in payload
+
+
 def test_manifest_is_json_with_trailing_newline(tmp_path) -> None:
     directory = tmp_path / "step-00000001"
     write_checkpoint_manifest(directory, step=1, arm="code-score", timestamp="t")

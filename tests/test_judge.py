@@ -821,7 +821,6 @@ split_seed = 1
 
 [fake]
 steps = 1
-prompts_per_step = 1
 """
         )
     )

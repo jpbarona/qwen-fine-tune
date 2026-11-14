@@ -25,3 +25,5 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 19. Batch several prompts per step → raise memory use and throughput
 20. Always-failed questions are handled by the cohort, not a drop rule
 21. Try GRPO with the fewest samples per prompt, later on
+22. Eight graphs alive at once wastes memory → backward per generation
+23. One prompt per step leaves the card idle → grow the batch to the memory floor

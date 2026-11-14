@@ -39,6 +39,9 @@ max_completion_tokens = 2048
 entropy_every = 500
 clip_epsilon = 0.2
 kl_beta = 0.0
+# Steps start at two prompts and grow while free memory stays at or above this
+# floor, in MiB. The largest size that fit is kept. Never below one prompt.
+memory_floor_mib = 512
 seed = 0
 
 [run]

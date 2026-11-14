@@ -29,7 +29,6 @@ split_seed = 7
 
 [fake]
 steps = 2
-prompts_per_step = 2
 """
 
 
@@ -433,7 +432,6 @@ split_seed = 7
 
 [fake]
 steps = 1
-prompts_per_step = 1
 
 [run]
 eval_every_steps = 1
@@ -550,11 +548,18 @@ split_seed = 7
 
 [fake]
 steps = 3
-prompts_per_step = 1
 
 [run]
 checkpoint_every_steps = 2
 """
+
+
+def _rollout_steps(run_dir: Path) -> list[int]:
+    return [
+        json.loads(line)["step"]
+        for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
+        if line
+    ]
 
 
 def test_resume_continues_from_the_last_checkpoint_without_duplicates(
@@ -570,22 +575,36 @@ def test_resume_continues_from_the_last_checkpoint_without_duplicates(
     capsys.readouterr()
 
     run_dir = next((runs_root / "code-score").iterdir())
-    before = [
-        line for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines() if line
-    ]
-    assert len(before) == 24
+    before = _rollout_steps(run_dir)
+    before_lines = (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
+    # Step 1 has one very easy prompt. Steps 2 and 3 take the two prompt batch.
+    assert before.count(1) == 8
+    assert before.count(2) == 16
+    assert before.count(3) == 16
+
+    # The checkpoint carries the batch boundary and the curriculum position,
+    # so a resume can pick them up.
+    manifest = json.loads(
+        (run_dir / "checkpoints" / "step-00000002" / "checkpoint.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["batch"]["current"] == 2
+    assert "prompt_cursor" in manifest
+    assert manifest["stage"]["index"] == 1
+    assert manifest["stage"]["pool"]
 
     assert main(
         ["run", "--arm", "code-score", "--fake", "--resume", "--config", str(config_path), "--runs-root", str(runs_root)]
     ) == 0
     capsys.readouterr()
 
-    # Still one run folder, still 24 rollouts: step 3 was truncated then redone.
+    # Still one run folder. Step 3 was truncated and redone from the saved
+    # batch and stage state, so the run is identical to the uninterrupted one.
     assert len(list((runs_root / "code-score").iterdir())) == 1
-    after = [
-        line for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines() if line
-    ]
-    assert len(after) == 24
+    after_lines = (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
+    assert after_lines == before_lines
+    assert _rollout_steps(run_dir) == before
 
 
 def test_resume_without_a_checkpoint_fails_cleanly(tmp_path, capsys) -> None:
@@ -617,7 +636,6 @@ split_seed = 7
 
 [fake]
 steps = 1
-prompts_per_step = 1
 
 [run]
 eval_every_steps = 1

@@ -22,20 +22,27 @@ Interfaces, frozen for later tasks:
 `temperature` is 0.0 for greedy evaluation and the sampling temperature during
 training. `n` is the number of generations requested for one prompt.
 
-Training samples one prompt group per step: 8 generations, all tested, judged
-only on a full pass per arm, then one `update` call with the group rewards.
+Training samples several prompt groups per step. Each prompt keeps its own
+group of 8 generations, and each group is tested, judged only on a full pass per
+arm, then updated on its own rewards. Advantage is normalised inside one prompt
+group, never across the step. The prompt count starts at two and grows while
+free memory stays above the floor, so the card is busy instead of waiting on one
+prompt group.
+
 A staged run trains from the active stage pool and drops a question once any
 generation fully passes it. Evaluation stays greedy with n=1. Resume and budget
-guards wrap the same loop.
+guards wrap the same loop. The step counter counts batches, so a resume starts
+at the batch after the checkpoint.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from . import repro
+from .batching import START_PROMPTS, BatchSizePolicy
 from .checkpoint import checkpoint_dir_name, write_checkpoint_manifest
 from .config import Config
 from .evaluation import pass_at_1, select_eval_subset, subset_selector
@@ -69,11 +76,6 @@ __all__ = [
 
 #: Greedy decoding, used for evaluation.
 EVAL_TEMPERATURE = 0.0
-
-#: The batch size and gradient accumulation are fixed at 1, so one prompt group
-#: is one optimizer step.
-BATCH_SIZE = 1
-GRADIENT_ACCUMULATION = 1
 
 
 @dataclass(frozen=True)
@@ -214,6 +216,23 @@ class RunSummary:
     stage: str | None = None
 
 
+@dataclass(frozen=True)
+class StepResult:
+    """What one batched training step produced.
+
+    `prompts` is the number of prompt groups and `mastered` lists the prompts
+    that had at least one full test pass. The sequence count is the length of
+    `records`.
+    """
+
+    records: tuple[RolloutRecord, ...]
+    prompts: int
+    truncated: int
+    prompt_truncated: int
+    mean_entropy: float | None
+    mastered: tuple[Prompt, ...]
+
+
 @dataclass
 class Experiment:
     """Runs one arm end to end using the injected backends.
@@ -233,6 +252,15 @@ class Experiment:
     step. The CLI passes `read_torch_memory` on a real run and `fake_memory` on
     the fake path. When it is None, every metric row carries zeros, so a unit
     test can build an Experiment without a GPU.
+
+    `resume_prompt_cursor` is the position in `prompts` where the first resumed
+    step starts. The checkpoint manifest records it, and the CLI passes it back.
+    `resume_stage_index`, `resume_stage_step` and `resume_stage_pool` restore
+    the curriculum position, so a staged run continues its pool instead of
+    training the first stage again.
+
+    `batch_policy` is injectable so a test can pin the prompt count. A run
+    without one builds a policy from the configured memory floor.
     """
 
     arm: str
@@ -248,6 +276,13 @@ class Experiment:
     prior_evaluations: Sequence[Mapping[str, Any]] = ()
     fake: bool = False
     memory: Callable[[], MemoryReport] | None = None
+    resume_prompt_cursor: int = 0
+    resume_stage_index: int | None = None
+    resume_stage_step: int = 0
+    resume_stage_pool: Sequence[str] | None = None
+    batch_policy: BatchSizePolicy | None = None
+    _prompt_cursor: int = field(init=False, default=0, repr=False)
+    _policy: BatchSizePolicy | None = field(init=False, default=None, repr=False)
 
     def run(self) -> RunSummary:
         """Run every training step, evaluate on schedule, and summarize.
@@ -255,6 +290,9 @@ class Experiment:
         Records are not held in memory. Only running sums are kept, so a long
         run costs the same as a short one. `eval.json` is replaced after every
         evaluation, so a crash keeps the last checkpoint result.
+
+        Each step takes the prompt count the batch policy allows. The step
+        counter counts batches, never prompts.
 
         Budget guards wrap the loop. `max_steps` caps the step count below
         `config.steps`. `max_judge_calls` stops the loop at the next step
@@ -294,54 +332,94 @@ class Experiment:
 
         staged = bool(self.stages)
         stage_index = self._first_open_stage(0) if staged else 0
+        if (
+            staged
+            and self.resume_stage_index is not None
+            and 0 <= self.resume_stage_index < len(self.stages)
+        ):
+            stage_index = self.resume_stage_index
         stage_pool: list[Prompt] = (
             list(self.stages[stage_index].train) if staged else []
         )
-        stage_step = 0
+        if staged and self.resume_stage_pool is not None:
+            by_id = {prompt.prompt_id: prompt for prompt in stage_pool}
+            stage_pool = [
+                by_id[prompt_id]
+                for prompt_id in self.resume_stage_pool
+                if prompt_id in by_id
+            ]
+            if not stage_pool:
+                next_index = self._first_open_stage(stage_index + 1)
+                if next_index < len(self.stages):
+                    stage_index = next_index
+                    stage_pool = list(self.stages[next_index].train)
+        stage_step = self.resume_stage_step if staged else 0
         active_stage = (
             self.stages[stage_index].name if staged else UNSTAGED_STAGE
         )
+
+        # A rerun starts from the same place, so a reused Experiment is
+        # deterministic. An injected policy is left as the caller set it.
+        policy = self.batch_policy or BatchSizePolicy(
+            floor_mib=self.config.memory_floor_mib
+        )
+        self._policy = policy
+        self._prompt_cursor = self.resume_prompt_cursor
 
         rollouts = 0
         reward_sum = 0.0
         judge_calls = 0
         last_step = self.resume_step
-        stop_reason = "completed"
-        curriculum_done = False
+        # A checkpoint written after the last stage emptied means the run has
+        # nothing left to train. The final evaluation still runs.
+        curriculum_done = staged and self.resume_stage_pool is not None and not stage_pool
+        stop_reason = "curriculum_complete" if curriculum_done else "completed"
+        if curriculum_done:
+            effective_steps = min(effective_steps, self.resume_step)
         evaluations: list[dict[str, Any]] = [dict(e) for e in self.prior_evaluations]
 
         for step in range(self.resume_step + 1, effective_steps + 1):
+            stage_start = 0
             if staged:
-                prompt = stage_pool[stage_step % len(stage_pool)]
                 active_stage = self.stages[stage_index].name
+                count = policy.count(len(stage_pool))
+                stage_start = stage_step % len(stage_pool)
+                step_prompts = [
+                    stage_pool[(stage_start + index) % len(stage_pool)]
+                    for index in range(count)
+                ]
             else:
-                prompt = self._prompt_for_step(step)
+                count = policy.count(len(self.prompts))
+                step_prompts = self._prompts_for_step(count)
 
-            step_records, truncated, prompt_truncated, entropy, mastered = (
-                self._training_step(step, prompt, active_stage)
-            )
+            result = self._training_step(step, step_prompts, active_stage)
             last_step = step
-            for record in step_records:
+            for record in result.records:
                 self.store.append_rollout(record)
                 rollouts += 1
                 reward_sum += record.reward
                 judge_calls += self._judge_calls_for(record)
+
+            memory = self._memory_report()
             self.store.append_metric(
                 self._metric_row(
                     step,
-                    step_records,
+                    result.records,
+                    prompts=result.prompts,
                     stage=active_stage,
-                    truncated=truncated,
-                    prompt_truncated=prompt_truncated,
-                    mean_entropy=entropy,
-                    memory=self._memory_report(),
+                    truncated=result.truncated,
+                    prompt_truncated=result.prompt_truncated,
+                    mean_entropy=result.mean_entropy,
+                    memory=memory,
                 )
             )
+            policy.observe(memory, prompts=result.prompts)
 
             if staged:
-                stage_step += 1
-                if mastered and prompt in stage_pool:
-                    stage_pool.remove(prompt)
+                stage_step = stage_start + result.prompts
+                for prompt in result.mastered:
+                    if prompt in stage_pool:
+                        stage_pool.remove(prompt)
                 if not stage_pool:
                     next_index = self._first_open_stage(stage_index + 1)
                     if next_index < len(self.stages):
@@ -365,7 +443,12 @@ class Experiment:
                 )
 
             if step % self.config.checkpoint_every_steps == 0:
-                self._save_checkpoint(step)
+                self._save_checkpoint(
+                    step,
+                    stage_index=stage_index if staged else None,
+                    stage_step=stage_step,
+                    stage_pool=stage_pool if staged else None,
+                )
 
             if (
                 self.config.max_judge_calls is not None
@@ -439,8 +522,10 @@ class Experiment:
                 "entropy_every": config.entropy_every,
                 "clip_epsilon": config.clip_epsilon,
                 "kl_beta": config.kl_beta,
-                "batch_size": BATCH_SIZE,
-                "gradient_accumulation": GRADIENT_ACCUMULATION,
+                "batch_size": "adaptive",
+                "batch_start_prompts": START_PROMPTS,
+                "gradient_accumulation": config.generations_per_prompt,
+                "memory_floor_mib": config.memory_floor_mib,
             },
             "checkpoint_dir": str(self.store.checkpoints_dir),
         }
@@ -453,10 +538,17 @@ class Experiment:
         """
         check_arm_implemented(self.arm)
 
-    def _prompt_for_step(self, step: int) -> Prompt:
-        """The one prompt this step trains on. Batch size is 1, so one prompt
-        group per step, cycling through the training prompts."""
-        return self.prompts[(step - 1) % len(self.prompts)]
+    def _prompts_for_step(self, count: int) -> list[Prompt]:
+        """The next `count` training prompts, cycling through the list.
+
+        The cursor moves by one batch, not by one prompt, and a checkpoint
+        records it. That is what lets a resume start on a batch boundary.
+        """
+        size = len(self.prompts)
+        start = self._prompt_cursor % size
+        block = [self.prompts[(start + index) % size] for index in range(count)]
+        self._prompt_cursor = start + count
+        return block
 
     def _first_open_stage(self, index: int) -> int:
         """The first stage at or after `index` that has training questions."""
@@ -465,18 +557,58 @@ class Experiment:
         return index
 
     def _training_step(
-        self, step: int, prompt: Prompt, stage: str
+        self, step: int, prompts: Sequence[Prompt], stage: str
+    ) -> StepResult:
+        """Run one group per prompt, then update once per group.
+
+        Every prompt keeps its own group. The generator samples the group, the
+        runner tests every sequence, the passing ones are judged, and the
+        group's rewards go to `update` on their own. Advantages are therefore
+        normalised inside a prompt group and never across the step.
+
+        The entropy flag is the same for every group in a step. The step value
+        is the mean over the groups that returned one.
+        """
+        measure_entropy = self._measures_entropy(step)
+        records: list[RolloutRecord] = []
+        entropies: list[float] = []
+        mastered: list[Prompt] = []
+        truncated = 0
+        prompt_truncated = 0
+
+        for prompt in prompts:
+            group, group_truncated, group_prompt_truncated, entropy, passed = (
+                self._prompt_group(step, prompt, stage, measure_entropy)
+            )
+            records.extend(group)
+            truncated += group_truncated
+            prompt_truncated += group_prompt_truncated
+            if passed:
+                mastered.append(prompt)
+            if entropy is not None:
+                entropies.append(entropy)
+
+        mean_entropy = sum(entropies) / len(entropies) if entropies else None
+        return StepResult(
+            records=tuple(records),
+            prompts=len(prompts),
+            truncated=truncated,
+            prompt_truncated=prompt_truncated,
+            mean_entropy=mean_entropy,
+            mastered=tuple(mastered),
+        )
+
+    def _prompt_group(
+        self, step: int, prompt: Prompt, stage: str, measure_entropy: bool
     ) -> tuple[list[RolloutRecord], int, int, float | None, bool]:
-        """Sample one prompt group, run and judge all of it, update once.
+        """Sample, test, judge, and update one prompt group.
 
         All 8 generations are tested. The passing ones are judged in two batch
-        calls, one for output scores and one for process scores, so the 32-way
-        judge concurrency is used. A failed rollout still costs no judge call.
-        The group's rewards are passed to `update` once, with the entropy
-        measurement flag set on the configured cadence. Returns the 8 records,
-        the counts of truncated and prompt-truncated generations, the mean
-        entropy when this step measured it, and whether any generation fully
-        passed. A full pass is what removes the question from a stage pool.
+        calls, one for output scores and one for process scores, so the judge
+        concurrency is used. A failed rollout still costs no judge call. The
+        group's rewards are passed to `update` once, with the entropy flag the
+        step asked for. A full pass is what removes the question from a stage
+        pool.
         """
         generations = self.generator.generate(
             prompt,
@@ -526,14 +658,13 @@ class Experiment:
             prompt,
             generations,
             rewards,
-            measure_entropy=self._measures_entropy(step),
+            measure_entropy=measure_entropy,
         )
         truncated = sum(1 for generation in generations if generation.truncated)
         prompt_truncated = sum(
             1 for generation in generations if generation.prompt_truncated
         )
-        mastered = bool(passing)
-        return records, truncated, prompt_truncated, entropy, mastered
+        return records, truncated, prompt_truncated, entropy, bool(passing)
 
     def _measures_entropy(self, step: int) -> bool:
         """Whether this step is an entropy measurement step.
@@ -547,9 +678,9 @@ class Experiment:
     def _memory_report(self) -> MemoryReport:
         """The allocator figures for the step that just finished.
 
-        Read after the update, so the number covers the group that was trained
-        on. Zero when no reader was injected, which is the fake path and every
-        unit test that does not care about memory.
+        Read after every group update, so the number covers the whole batch.
+        Zero when no reader was injected, which is the fake path and every unit
+        test that does not care about memory.
         """
         reader = self.memory
         if reader is None:
@@ -635,12 +766,45 @@ class Experiment:
             calls += 1
         return calls
 
-    def _save_checkpoint(self, step: int) -> None:
-        """Ask the generator for its state, then write the checkpoint manifest."""
+    def _save_checkpoint(
+        self,
+        step: int,
+        *,
+        stage_index: int | None = None,
+        stage_step: int = 0,
+        stage_pool: Sequence[Prompt] | None = None,
+    ) -> None:
+        """Ask the generator for its state, then write the checkpoint manifest.
+
+        The manifest carries the prompt cursor, the batch policy state, and the
+        curriculum position. A resume therefore continues on the next batch
+        boundary with the same size and the same stage pool, instead of
+        rewinding the prompt list or training the first stage again.
+        """
         directory = self.store.checkpoints_dir / checkpoint_dir_name(step)
         self.generator.save_checkpoint(directory)
+        batch = None
+        if self._policy is not None:
+            batch = {
+                "current": self._policy.current,
+                "largest_fit": self._policy.largest_fit,
+                "settled": self._policy.settled,
+            }
+        stage = None
+        if stage_index is not None:
+            stage = {
+                "index": stage_index,
+                "step": stage_step,
+                "pool": [prompt.prompt_id for prompt in stage_pool or ()],
+            }
         write_checkpoint_manifest(
-            directory, step=step, arm=self.arm, timestamp=self.store.timestamp
+            directory,
+            step=step,
+            arm=self.arm,
+            timestamp=self.store.timestamp,
+            prompt_cursor=self._prompt_cursor,
+            batch=batch,
+            stage=stage,
         )
 
     @staticmethod
@@ -648,13 +812,19 @@ class Experiment:
         step: int,
         records: Sequence[RolloutRecord],
         *,
+        prompts: int,
         stage: str,
         truncated: int = 0,
         prompt_truncated: int = 0,
         mean_entropy: float | None = None,
         memory: MemoryReport | None = None,
     ) -> dict[str, Any]:
-        """One metrics row. Entropy is present only on a measurement step."""
+        """One metrics row. Entropy is present only on a measurement step.
+
+        `prompts` is the prompt groups in the batch and `sequences` is the
+        sampled completions across them. `rollouts` keeps the old name for the
+        sequence count, so an older reader keeps working.
+        """
         count = len(records)
         passed = sum(
             1
@@ -665,6 +835,8 @@ class Experiment:
             "step": step,
             "arm": records[0].arm if records else None,
             "stage": stage,
+            "prompts": prompts,
+            "sequences": count,
             "rollouts": count,
             "mean_reward": sum(record.reward for record in records) / count,
             "pass_rate": passed / count,

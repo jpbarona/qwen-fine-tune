@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from rlvr.batching import BatchSizePolicy
 from rlvr.config import load_config
 from rlvr.experiment import Experiment, Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
@@ -26,7 +27,6 @@ split_seed = 1234
 
 [fake]
 steps = 3
-prompts_per_step = 2
 """
 
 FIXED_TIMESTAMP = "20261112T000000Z"
@@ -77,6 +77,9 @@ def run_fake(tmp_path: Path):
             store=store,
             prompts=fake_prompts(2),
             eval_prompts=fake_eval_prompts(2),
+            # These tests cover the run folder, not batch sizing. Batching has
+            # its own tests, which use the default policy.
+            batch_policy=BatchSizePolicy(current=1, max_prompts=1),
         )
         return store.run_dir, experiment.run()
 

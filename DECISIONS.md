@@ -2,6 +2,22 @@
 
 Study decisions, newest first. Each one says what was chosen and why.
 
+## D9. Several prompts per step, sized by free memory
+
+A step takes several prompt groups, one group of 8 samples each. The batch starts
+at two prompts. Free memory is read after each step, and the batch grows by one
+while free memory stays at or above `[training] memory_floor_mib`. The first
+step below the floor settles the batch at the largest size that fit, and it
+stays there. It never goes below one prompt. There is no percentage rule.
+
+Advantage is normalised inside one prompt group. The backward pass runs once per
+generation and gradients accumulate across the group, so only one autograd graph
+is alive at a time. This is what makes the 2,048 token cap fit at a larger batch.
+
+A checkpoint records the prompt cursor, the batch policy state, and the
+curriculum position. A resume continues on the next batch boundary with the same
+prompt position, batch size, and stage pool.
+
 ## D1. One arm only for now
 
 The four-arm comparison is paused. The judge and process arms, hybrid and

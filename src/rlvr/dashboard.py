@@ -66,7 +66,12 @@ SERIES_FIELDS: tuple[str, ...] = (
     "mean_completion_tokens",
     "truncation_rate",
     "cache_hits",
+    "prompts",
+    "sequences",
 ) + MEMORY_METRIC_FIELDS
+
+#: Fields that are whole counts and are read as integers, not floats.
+COUNT_SERIES_FIELDS: tuple[str, ...] = ("cache_hits", "prompts", "sequences")
 
 LATEST_FIELDS: tuple[str, ...] = SERIES_FIELDS + ("rollouts",)
 
@@ -231,11 +236,17 @@ def _resolve_paths(paths: Iterable[str | Path]) -> list[tuple[str, Path | None]]
 
 
 def _real_target_steps(meta: Mapping[str, Any], config: Mapping[str, Any]) -> int | None:
-    """epochs times the train size, from the trainer and data tables."""
+    """Epochs times the train size, divided into batches of prompts.
+
+    A meta file written before batching has no start size, so it counts one
+    prompt per step and keeps the old figure.
+    """
     epochs: int | None = None
+    batch_prompts = 1
     trainer = meta.get("trainer")
     if isinstance(trainer, dict):
         epochs = _positive_int(trainer.get("epochs"))
+        batch_prompts = _positive_int(trainer.get("batch_start_prompts")) or 1
     if epochs is None:
         training = config.get("training")
         if isinstance(training, dict):
@@ -246,7 +257,7 @@ def _real_target_steps(meta: Mapping[str, Any], config: Mapping[str, Any]) -> in
     train_size = _positive_int(data.get("train_size"))
     if train_size is None:
         return None
-    return epochs * train_size
+    return -(-(epochs * train_size) // batch_prompts)
 
 
 def _fake_target_steps(config: Mapping[str, Any]) -> int | None:
@@ -308,7 +319,11 @@ def _latest(rows: list[dict[str, Any]]) -> dict[str, Any]:
     last = rows[-1]
     result: dict[str, Any] = {}
     for name in SERIES_FIELDS:
-        result[name] = _integer(last.get(name)) if name == "cache_hits" else _number(last.get(name))
+        result[name] = (
+            _integer(last.get(name))
+            if name in COUNT_SERIES_FIELDS
+            else _number(last.get(name))
+        )
     result["mean_entropy"] = _last_number(rows, "mean_entropy")
     result["rollouts"] = _integer(last.get("rollouts"))
     return result
@@ -321,7 +336,11 @@ def _series(rows: list[dict[str, Any]]) -> dict[str, Any]:
     for row in rows:
         series["steps"].append(_integer(row.get("step")))
         for name in SERIES_FIELDS:
-            value = _integer(row.get(name)) if name == "cache_hits" else _number(row.get(name))
+            value = (
+                _integer(row.get(name))
+                if name in COUNT_SERIES_FIELDS
+                else _number(row.get(name))
+            )
             series[name].append(value)
     return series
 
@@ -766,6 +785,13 @@ _SCRIPT = """\
     html += kpi("cache hit rate", cacheRate);
     html += '</div>';
 
+    // The batch is chosen per step from free memory. Prompts are prompt groups,
+    // sequences are the sampled completions across those groups.
+    html += '<div class="grid grid-cols-2 gap-px bg-zinc-800 border border-zinc-800 mb-3">';
+    html += kpi("prompts per step", fmt(latest.prompts, 0));
+    html += kpi("sequences per step", fmt(latest.sequences, 0));
+    html += '</div>';
+
     // The allocator split is separate from the nvidia-smi device sample above.
     // Live, cache and fragmentation are the process view. The total is the
     // device, and unaccounted is whatever the allocator does not hold.
@@ -784,6 +810,7 @@ _SCRIPT = """\
     html += chartCard(p + "-entropy", "entropy per step");
     html += chartCard(p + "-length", "completion tokens per step");
     html += chartCard(p + "-trunc", "truncation rate per step");
+    html += chartCard(p + "-batch", "prompts and sequences per step");
     html += chartCard(p + "-mem", "gpu memory per step (MiB)");
     html += chartCard(p + "-rewardhist", "reward distribution");
     html += chartCard(p + "-testshist", "tests passed distribution");
@@ -887,6 +914,14 @@ _SCRIPT = """\
     });
     mount(p + "-length", { type: "line", data: { datasets: [d(ACCENT, s.mean_completion_tokens)] }, options: lineOpts() });
     mount(p + "-trunc", { type: "line", data: { datasets: [d(ACCENT, s.truncation_rate)] }, options: lineOpts() });
+    mount(p + "-batch", {
+      type: "line",
+      data: { datasets: [
+        { label: "prompts", data: xy(steps, s.prompts || []), borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: false },
+        { label: "sequences", data: xy(steps, s.sequences || []), borderColor: MUTED, backgroundColor: MUTED, borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: false }
+      ] },
+      options: Object.assign(lineOpts(), { plugins: { legend: { display: true, labels: { color: "#a1a1aa", boxWidth: 10, boxHeight: 10 } } } })
+    });
 
     var memSeries = function (label, color, values) {
       return {

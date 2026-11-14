@@ -30,7 +30,6 @@ split_seed = 1
 
 [fake]
 steps = 3
-prompts_per_step = 1
 
 [run]
 checkpoint_every_steps = 2

@@ -34,6 +34,7 @@ Optional keys, with the defaults shown:
     [training] length_soft_limit = 900
     [training] length_penalty_per_token = 0.001
     [training] length_penalty_floor = 0.2
+    [training] memory_floor_mib = 512
     [training] seed = 0
 
     [budget] max_steps = (unset: run all of fake.steps)
@@ -52,6 +53,9 @@ the train/test cut.
 
 `entropy_every` sets how often the update pass measures entropy, in updates.
 Zero turns the measurement off. A negative value is rejected.
+
+`memory_floor_mib` is the free memory that must remain after a step before the
+next step takes more prompts. It is an absolute figure, never a percentage.
 
 `[curriculum] stage` is the band a run starts at and must be one of the four
 fixed bands. `[curriculum] carry_over_ratio` is the share of the previous band
@@ -74,6 +78,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .batching import DEFAULT_MEMORY_FLOOR_MIB
 from .reward import (
     DEFAULT_LENGTH_PENALTY_FLOOR,
     DEFAULT_LENGTH_PENALTY_PER_TOKEN,
@@ -147,6 +152,7 @@ class Config:
     length_soft_limit: int = DEFAULT_LENGTH_SOFT_LIMIT
     length_penalty_per_token: float = DEFAULT_LENGTH_PENALTY_PER_TOKEN
     length_penalty_floor: float = DEFAULT_LENGTH_PENALTY_FLOOR
+    memory_floor_mib: int = DEFAULT_MEMORY_FLOOR_MIB
     seed: int = DEFAULT_SEED
     stage: str = DEFAULT_STAGE
     carry_over_ratio: float = DEFAULT_CARRY_OVER_RATIO
@@ -362,6 +368,9 @@ def load_config(path: str | Path) -> Config:
         ),
         length_penalty_floor=_optional_unit_float(
             raw, "training.length_penalty_floor", DEFAULT_LENGTH_PENALTY_FLOOR
+        ),
+        memory_floor_mib=_optional_non_negative_int(
+            raw, "training.memory_floor_mib", DEFAULT_MEMORY_FLOOR_MIB
         ),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
         stage=_band(raw, "curriculum.stage", DEFAULT_STAGE),

@@ -21,7 +21,6 @@ split_seed = 1234
 
 [fake]
 steps = 3
-prompts_per_step = 2
 """
 
 
@@ -292,7 +291,7 @@ def test_budget_and_checkpoint_are_read_from_config(tmp_path) -> None:
 def test_a_config_without_the_fake_table_loads(tmp_path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
-        GOOD.replace("\n[fake]\nsteps = 3\nprompts_per_step = 2\n", ""),
+        GOOD.replace("\n[fake]\nsteps = 3\n", ""),
         encoding="utf-8",
     )
     config = load_config(path)
@@ -323,6 +322,23 @@ def test_entropy_every_zero_disables_the_measurement(tmp_path) -> None:
     assert load_config(path).entropy_every == 0
 
 
+def test_the_memory_floor_defaults_to_512_mib(write_config) -> None:
+    assert load_config(write_config(GOOD)).memory_floor_mib == 512
+
+
+def test_the_memory_floor_is_read_from_config(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(GOOD + "\n[training]\nmemory_floor_mib = 1024\n", encoding="utf-8")
+    assert load_config(path).memory_floor_mib == 1024
+
+
+def test_a_negative_memory_floor_is_named(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(GOOD + "\n[training]\nmemory_floor_mib = -1\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="training.memory_floor_mib"):
+        load_config(path)
+
+
 def test_the_shipped_real_config_loads() -> None:
     config = load_config(Path(__file__).resolve().parents[1] / "configs" / "real.toml")
     assert config.model_name == "Qwen/Qwen3-0.6B"
@@ -338,7 +354,7 @@ def test_the_shipped_real_config_loads() -> None:
 def test_the_shipped_smoke_config_loads() -> None:
     config = load_config(Path(__file__).resolve().parents[1] / "configs" / "smoke.toml")
     assert config.max_steps == 8
-    assert config.max_judge_calls == 64
+    assert config.max_judge_calls == 128
     assert config.max_completion_tokens == 2048
     assert config.eval_questions == 4
     assert config.eval_final_questions == 8

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from rlvr.batching import BatchSizePolicy
 from rlvr.config import load_config
 from rlvr.experiment import (
     Experiment,
@@ -38,7 +39,6 @@ split_seed = 1
 
 [fake]
 steps = 2
-prompts_per_step = 2
 """
 
 EVAL_CONFIG_TEXT = """\
@@ -54,7 +54,6 @@ split_seed = 1
 
 [fake]
 steps = 4
-prompts_per_step = 1
 
 [run]
 eval_every_steps = 2
@@ -75,7 +74,6 @@ split_seed = 1
 
 [fake]
 steps = 1
-prompts_per_step = 1
 
 [run]
 eval_every_steps = 100
@@ -96,7 +94,6 @@ split_seed = 1
 
 [fake]
 steps = 6
-prompts_per_step = 6
 """
 
 
@@ -334,6 +331,15 @@ def make_prompts(count: int = 2) -> list[Prompt]:
     return [Prompt(prompt_id=f"mbpp-{i:04d}", problem=f"problem {i}") for i in range(count)]
 
 
+def one_prompt_per_step() -> BatchSizePolicy:
+    """Pin the batch for tests about reward, judging, and record shape.
+
+    Batching has its own tests. Pinning here keeps the older assertions about
+    one group per step readable.
+    """
+    return BatchSizePolicy(current=1, max_prompts=1)
+
+
 def build(
     arm: str,
     tmp_path,
@@ -346,8 +352,10 @@ def build(
     eval_prompts=None,
     config_text: str = CONFIG_TEXT,
     resume_step: int = 0,
+    resume_prompt_cursor: int = 0,
     prior_evaluations=None,
     memory=None,
+    batch_policy=None,
 ):
     config = load_config(_write_config(tmp_path, config_text))
     training = prompts if prompts is not None else make_prompts()
@@ -364,8 +372,10 @@ def build(
         # held-out split.
         eval_prompts=training if eval_prompts is None else eval_prompts,
         resume_step=resume_step,
+        resume_prompt_cursor=resume_prompt_cursor,
         prior_evaluations=prior_evaluations or (),
         memory=memory,
+        batch_policy=batch_policy or one_prompt_per_step(),
     )
 
 
@@ -867,8 +877,10 @@ def test_meta_carries_the_trainer_settings_and_checkpoint_dir(tmp_path) -> None:
     assert trainer["entropy_every"] == 500
     assert trainer["clip_epsilon"] == 0.2
     assert trainer["kl_beta"] == 0.0
-    assert trainer["batch_size"] == 1
-    assert trainer["gradient_accumulation"] == 1
+    assert trainer["batch_size"] == "adaptive"
+    assert trainer["batch_start_prompts"] == 2
+    assert trainer["gradient_accumulation"] == 8
+    assert trainer["memory_floor_mib"] == 512
     assert store.meta["checkpoint_dir"].endswith("checkpoints")
 
 
@@ -1029,7 +1041,6 @@ split_seed = 1
 
 [fake]
 steps = 4
-prompts_per_step = 1
 
 [budget]
 max_steps = 2
@@ -1048,7 +1059,6 @@ split_seed = 1
 
 [fake]
 steps = 4
-prompts_per_step = 1
 
 [budget]
 max_judge_calls = 5
@@ -1129,7 +1139,7 @@ def test_a_checkpoint_manifest_is_saved_every_configured_steps(tmp_path) -> None
         "[model]\nname = \"Qwen/Qwen3-0.6B\"\nrevision = \"r\"\n"
         "[judge]\nmodel = \"fake-judge-model\"\n"
         "[data]\nsplit_seed = 1\n"
-        "[fake]\nsteps = 3\nprompts_per_step = 1\n"
+        "[fake]\nsteps = 3\n"
         "[run]\ncheckpoint_every_steps = 2\n"
     )
     config = load_config(_write_config(tmp_path, config_text))
