@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from rlvr.batching import BatchSizePolicy
 from rlvr.config import load_config
 from rlvr.experiment import Experiment, Generation, Outcome, Prompt, Stage
 from rlvr.stages import (
@@ -35,7 +36,6 @@ split_seed = 1
 
 [fake]
 steps = 5
-prompts_per_step = 1
 """
 
 
@@ -264,6 +264,9 @@ def run_with_stages(tmp_path: Path, stages, *, passing: set[str], steps: int = 5
         prompts=[stage.train[0] for stage in stages if stage.train],
         stages=stages,
         eval_prompts=[prompt("eval-0000")],
+        # These tests were written for one group per step. Batch sizing inside
+        # a stage has its own test in test_batching.py.
+        batch_policy=BatchSizePolicy(current=1, max_prompts=1),
     ).run()
     return store, result
 

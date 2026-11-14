@@ -39,10 +39,11 @@ clip_epsilon = 0.2
 kl_beta = 0.0
 seed = 0
 
-# The step budget caps the run at 8 steps (8 prompt groups, 64 rollouts).
+# The step budget caps the run at 8 steps. A step takes at least two prompt
+# groups, so the judge cap is set for 16 rollouts per step.
 [budget]
 max_steps = 8
-max_judge_calls = 64
+max_judge_calls = 128
 
 [run]
 checkpoint_every_steps = 4

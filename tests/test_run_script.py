@@ -58,7 +58,7 @@ def test_run_sh_honors_a_caller_supplied_config(tmp_path) -> None:
         '[model]\nname = "Qwen/Qwen3-0.6B"\nrevision = "r"\n'
         '[judge]\nmodel = "fake-judge-model"\n'
         "[data]\nsplit_seed = 7\n"
-        "[fake]\nsteps = 2\nprompts_per_step = 1\n",
+        "[fake]\nsteps = 2\n",
         encoding="utf-8",
     )
     runs_root = tmp_path / "runs"

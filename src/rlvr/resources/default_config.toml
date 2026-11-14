@@ -62,6 +62,10 @@ length_penalty_floor = 0.2
 # beta 0.0 keeps the loss pure clipped GRPO; see the task 8 report.
 clip_epsilon = 0.2
 kl_beta = 0.0
+# A step starts with two prompts. It grows by one while free GPU memory after
+# the step stays at or above this absolute floor, in MiB, then stays at the
+# largest size that fit. Never a percentage, never below one prompt.
+memory_floor_mib = 512
 
 [budget]
 # Hard caps. Unset means the run trains every planned step. These stop the loop

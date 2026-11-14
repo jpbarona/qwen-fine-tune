@@ -3,7 +3,10 @@
 This module is the concrete `Generator` for GPU runs. It loads
 `Qwen/Qwen3-0.6B` with thinking enabled, wraps it in a LoRA adapter over the
 attention projections, and implements one GRPO update per group of sampled
-rollouts.
+rollouts. Advantage is normalised inside the group. The backward pass runs once
+per generation, so only one autograd graph is alive at a time and the gradients
+accumulate across the group. That is what makes the 2,048 token cap fit beside
+a larger prompt batch.
 
 Torch, transformers, and peft are imported lazily inside methods. The CPU test
 suite runs without any of them. The pure helpers at the top (code extraction,
@@ -582,12 +585,17 @@ class QwenGenerator:
     ) -> float | None:
         """One GRPO step over the last sampled group.
 
-        The advantage is group-normalized. The per-token clipped surrogate and
-        the per-token k3 KL are summed over the whole group and divided once by
-        the total token count, so a token in a short completion weighs the same
-        as a token in a long one. The prompt and generations are accepted for
-        interface symmetry with the seam; the token data comes from the group
-        cached by `generate`.
+        The advantage is group-normalized, so the normalisation never crosses a
+        prompt boundary. The per-token clipped surrogate and the per-token k3
+        KL are summed over the whole group and divided once by the total token
+        count, so a token in a short completion weighs the same as a token in a
+        long one. The prompt and generations are accepted for interface symmetry
+        with the seam; the token data comes from the group cached by `generate`.
+
+        Backward runs once per generation and the gradients accumulate across
+        the group. Only one autograd graph is alive at a time, which is what
+        makes a larger batch fit at the 2,048 token cap. The optimizer steps
+        once, after every generation in the group.
 
         When `measure_entropy` is true, the forward pass that computes the new
         logprobs also yields a bounded per-token entropy sample. The group mean
@@ -613,30 +621,29 @@ class QwenGenerator:
         advantages = group_advantages(list(rewards))
         advantages_tensor = torch.tensor(advantages, device=self._device)
 
+        # The loss is divided once by the whole group's token count, so the
+        # per-generation backward calls add up to the same gradient as one
+        # summed backward would. The difference is peak memory: each graph is
+        # freed before the next forward pass starts.
+        token_count = sum(len(entry.old_logprobs) for entry in self._last_group)
+        if token_count == 0:
+            raise RuntimeError("update got a group with no completion tokens")
+
         self.optimizer.zero_grad()
-        surrogate_total = None
-        kl_total = None
-        token_count = 0
         entropy_total = 0.0
         entropy_tokens = 0
         for entry, advantage in zip(self._last_group, advantages_tensor):
-            surrogate_sum, kl_sum, count, entropy_sum, measured = self._group_terms(
+            surrogate_sum, kl_sum, entropy_sum, measured = self._group_terms(
                 entry, advantage, measure_entropy
             )
-            token_count += count
-            surrogate_total = (
-                surrogate_sum if surrogate_total is None else surrogate_total + surrogate_sum
-            )
+            loss = -surrogate_sum / token_count
             if kl_sum is not None:
-                kl_total = kl_sum if kl_total is None else kl_total + kl_sum
+                loss = loss + self.kl_beta * kl_sum / token_count
+            loss.backward()
             if entropy_sum is not None:
                 entropy_total += entropy_sum
                 entropy_tokens += measured
 
-        loss = -surrogate_total / token_count
-        if kl_total is not None:
-            loss = loss + self.kl_beta * kl_total / token_count
-        loss.backward()
         self.optimizer.step()
         self.step += 1
         self._last_group = None
@@ -647,8 +654,8 @@ class QwenGenerator:
 
     def _group_terms(
         self, entry: _GroupEntry, advantage: Any, measure_entropy: bool
-    ) -> tuple[Any, Any | None, int, float | None, int]:
-        """Summed per-token surrogate and KL for one generation, plus its count.
+    ) -> tuple[Any, Any | None, float | None, int]:
+        """Summed per-token surrogate and KL for one generation.
 
         Also returns the summed sampled entropy and its position count when the
         caller asked for a measurement, both None and zero otherwise.
@@ -680,7 +687,7 @@ class QwenGenerator:
                 logits, entry.prompt_length, len(token_ids)
             )
 
-        return surrogate_sum, kl_sum, new_logprobs.numel(), entropy_sum, entropy_count
+        return surrogate_sum, kl_sum, entropy_sum, entropy_count
 
     # --- checkpoint save and load ----------------------------------------
 

@@ -104,6 +104,26 @@ def test_collect_dashboard_reads_run_files(tmp_path) -> None:
     assert data["runs"][0]["evaluations"][1]["pass_at_1"] == pytest.approx(0.5)
 
 
+def test_dashboard_shows_the_prompt_and_sequence_counts_per_step(tmp_path) -> None:
+    rows = [
+        {"step": 1, "arm": "code-score", "prompts": 2, "sequences": 16, "mean_reward": 0.5},
+        {"step": 2, "arm": "code-score", "prompts": 3, "sequences": 24, "mean_reward": 0.6},
+    ]
+    run_dir = write_run(tmp_path / "runs", "code-score", rows=rows)
+    data = collect_dashboard([run_dir])
+
+    run = data["runs"][0]
+    assert run["latest"]["prompts"] == 3
+    assert run["latest"]["sequences"] == 24
+    assert run["series"]["prompts"] == [2, 3]
+    assert run["series"]["sequences"] == [16, 24]
+
+    html = render_html(data)
+    assert "prompts per step" in html
+    assert "sequences per step" in html
+    assert "prompts and sequences per step" in html
+
+
 def test_dashboard_shows_the_active_stage_and_pass_rate_per_band(tmp_path) -> None:
     rows = [
         {
@@ -262,6 +282,20 @@ def test_target_steps_derived_for_a_real_run(tmp_path) -> None:
     )
     data = collect_dashboard([run_dir])
     assert data["runs"][0]["target_steps"] == 3570
+
+
+def test_target_steps_divide_the_epoch_into_prompt_batches(tmp_path) -> None:
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        meta_extra={
+            "mode": "real",
+            "trainer": {"epochs": 5, "batch_start_prompts": 2},
+            "config": {"training": {"epochs": 5}, "data": {"train_size": 714}},
+        },
+    )
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["target_steps"] == 1785
 
 
 def test_target_steps_fall_back_to_the_real_formula_without_mode(tmp_path) -> None:

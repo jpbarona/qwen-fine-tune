@@ -100,10 +100,19 @@ A smoke run validates a fresh GPU in minutes:
 OPENROUTER_API_KEY=... ./run.sh code-score --config configs/smoke.toml
 ```
 
-The smoke profile runs 8 training steps (8 prompt groups of 8 generations, 64
-rollouts), two checkpoint evaluations on 4 questions, and a final evaluation on
-8 questions. Expected runtime is roughly 5 to 10 minutes, dominated by the Docker
-test runs. This estimate is unverified: there is no GPU in this environment.
+The smoke profile runs 8 training steps. A step starts with two prompt groups
+and grows while free GPU memory stays above the floor, so it runs at least 128
+generations. It also runs two checkpoint evaluations on 4 questions and a final
+evaluation on 8 questions. Expected runtime is roughly 5 to 10 minutes,
+dominated by the Docker test runs. This estimate is unverified: there is no GPU
+in this environment.
+
+Each step takes a batch of prompts, one group of 8 samples per prompt. The batch
+starts at two prompts. After each step the free memory is read. While it stays at
+or above `[training] memory_floor_mib` the next step takes one more prompt. The
+first step below the floor settles the size at the largest batch that fit, and
+the run keeps that size. A group is normalised on its own rewards, never across
+the batch.
 
 ## Deploy on Massed Compute
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 __all__ = [
     "MANIFEST_NAME",
@@ -70,15 +70,30 @@ def write_checkpoint_manifest(
     step: int,
     arm: str,
     timestamp: str,
+    prompt_cursor: int | None = None,
+    batch: Mapping[str, Any] | None = None,
+    stage: Mapping[str, Any] | None = None,
 ) -> Path:
-    """Write `checkpoint.json` into `directory`, creating it. Returns the path."""
+    """Write `checkpoint.json` into `directory`, creating it. Returns the path.
+
+    `prompt_cursor` is the position in the prompt list the next batch starts
+    from. `batch` holds the batch policy state, so a resume keeps the chosen
+    size. `stage` holds the curriculum position and remaining pool. All three
+    are optional, so older callers and older manifests still work.
+    """
     folder = Path(directory)
     folder.mkdir(parents=True, exist_ok=True)
-    payload = {
+    payload: dict[str, Any] = {
         "step": step,
         "arm": arm,
         "timestamp": timestamp,
     }
+    if prompt_cursor is not None:
+        payload["prompt_cursor"] = prompt_cursor
+    if batch is not None:
+        payload["batch"] = dict(batch)
+    if stage is not None:
+        payload["stage"] = dict(stage)
     path = folder / MANIFEST_NAME
     path.write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

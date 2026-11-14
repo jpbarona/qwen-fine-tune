@@ -26,7 +26,6 @@ split_seed = 1234
 
 [fake]
 steps = 3
-prompts_per_step = 2
 
 [training]
 entropy_every = 2
@@ -171,7 +170,6 @@ split_seed = 1234
 
 [fake]
 steps = 3
-prompts_per_step = 2
 
 [run]
 eval_every_steps = 2
