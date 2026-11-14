@@ -22,7 +22,7 @@ Repo items, relative to this folder:
 - `../data/difficulty_labels.jsonl` — one band per training row.
 - `../data/synthetic_easy.jsonl` — 50 very easy rows for the first stage.
 - `../src/rlvr/` — package source.
-- `../tests/` — 725 tests, no GPU tests.
+- `../tests/` — 751 tests, no GPU tests.
 - `../runs/` — run folders, kept as study data.
 
 The dead GPU instance data is backed up at

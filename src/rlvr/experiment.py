@@ -7,7 +7,9 @@ in the package talks to a model, an API, Docker, or the filesystem during a run.
 Interfaces, frozen for later tasks:
 
     Generator.generate(prompt, *, n, temperature) -> list[Generation]
-    Generator.update(prompt, generations, rewards, *, measure_entropy) -> float | None
+    Generator.generate_batch(prompts, *, n, temperature) -> list[list[Generation]]
+    Generator.accumulate(prompt, generations, rewards, *, measure_entropy) -> float | None
+    Generator.apply_update() -> None
     Generator.save_checkpoint(directory) -> None
     Generator.load_checkpoint(directory) -> None
     TestRunner.run(prompt, code) -> Outcome
@@ -22,17 +24,19 @@ Interfaces, frozen for later tasks:
 `temperature` is 0.0 for greedy evaluation and the sampling temperature during
 training. `n` is the number of generations requested for one prompt.
 
-Training samples several prompt groups per step. Each prompt keeps its own
-group of 8 generations, and each group is tested, judged only on a full pass per
-arm, then updated on its own rewards. Advantage is normalised inside one prompt
-group, never across the step. The prompt count starts at two and grows while
-free memory stays above the floor, so the card is busy instead of waiting on one
+Training samples several prompt groups per step, in one `generate_batch` call.
+Each prompt keeps its own group of 8 generations, and each group is tested,
+judged only on a full pass per arm, then has its gradient accumulated on its own
+rewards. Advantage is normalised inside one prompt group, never across the step.
+The optimizer steps once at the end of the step, so the step counter is also the
+number of weight updates. The prompt count starts at two and grows while free
+memory stays above the floor, so the card is busy instead of waiting on one
 prompt group.
 
 A staged run trains from the active stage pool and drops a question once any
 generation fully passes it. Evaluation stays greedy with n=1. Resume and budget
-guards wrap the same loop. The step counter counts batches, so a resume starts
-at the batch after the checkpoint.
+guards wrap the same loop. The step counter counts batches and weight updates,
+so a resume starts at the batch after the checkpoint.
 """
 
 from __future__ import annotations
@@ -169,7 +173,11 @@ class JudgeResult:
 class Generator(Protocol):
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]: ...
 
-    def update(
+    def generate_batch(
+        self, prompts: Sequence[Prompt], *, n: int, temperature: float
+    ) -> list[list[Generation]]: ...
+
+    def accumulate(
         self,
         prompt: Prompt,
         generations: Sequence[Generation],
@@ -177,6 +185,8 @@ class Generator(Protocol):
         *,
         measure_entropy: bool = False,
     ) -> float | None: ...
+
+    def apply_update(self) -> None: ...
 
     def save_checkpoint(self, directory: Path) -> None: ...
 
@@ -308,8 +318,8 @@ class Experiment:
         run costs the same as a short one. `eval.json` is replaced after every
         evaluation, so a crash keeps the last checkpoint result.
 
-        Each step takes the prompt count the batch policy allows. The step
-        counter counts batches, never prompts.
+        Each step takes the prompt count the batch policy allows and applies one
+        optimizer update. The step counter counts weight updates, never prompts.
 
         Budget guards wrap the loop. `max_steps` caps the step count below
         `config.steps`. `max_judge_calls` stops the loop at the next step
@@ -581,6 +591,7 @@ class Experiment:
                 "batch_size": "adaptive",
                 "batch_start_prompts": START_PROMPTS,
                 "gradient_accumulation": config.generations_per_prompt,
+                "optimizer_updates_per_step": 1,
                 "memory_floor_mib": config.memory_floor_mib,
             },
             "checkpoint_dir": str(self.store.checkpoints_dir),
@@ -680,26 +691,34 @@ class Experiment:
     def _training_step(
         self, step: int, prompts: Sequence[Prompt], stage: str
     ) -> StepResult:
-        """Run one group per prompt, then update once per group.
+        """Sample every prompt group in one call, then apply one update.
 
-        Every prompt keeps its own group. The generator samples the group, the
-        runner tests every sequence, the passing ones are judged, and the
-        group's rewards go to `update` on their own. Advantages are therefore
-        normalised inside a prompt group and never across the step.
+        The generator returns one group per prompt, in prompt order. Each group
+        is scored and parsed on its own, and its rewards are accumulated on
+        their own, so advantages stay inside a prompt group and never cross the
+        step. The optimizer steps once after the last group, which makes this
+        step exactly one weight update.
 
         The entropy flag is the same for every group in a step. The step value
         is the mean over the groups that returned one.
         """
         measure_entropy = self._measures_entropy(step)
+        batches = self.generator.generate_batch(
+            list(prompts),
+            n=self.config.generations_per_prompt,
+            temperature=self.config.temperature,
+        )
+        self._check_batch_shape(prompts, batches)
+
         records: list[RolloutRecord] = []
         entropies: list[float] = []
         mastered: list[Prompt] = []
         truncated = 0
         prompt_truncated = 0
 
-        for prompt in prompts:
+        for prompt, generations in zip(prompts, batches):
             group, group_truncated, group_prompt_truncated, entropy, passed = (
-                self._prompt_group(step, prompt, stage, measure_entropy)
+                self._prompt_group(step, prompt, stage, generations, measure_entropy)
             )
             records.extend(group)
             truncated += group_truncated
@@ -708,6 +727,10 @@ class Experiment:
                 mastered.append(prompt)
             if entropy is not None:
                 entropies.append(entropy)
+
+        # One optimizer step for the whole batch, after every group has added
+        # its gradient. This is the only weight update in the step.
+        self.generator.apply_update()
 
         mean_entropy = sum(entropies) / len(entropies) if entropies else None
         return StepResult(
@@ -719,23 +742,46 @@ class Experiment:
             mastered=tuple(mastered),
         )
 
+    def _check_batch_shape(
+        self,
+        prompts: Sequence[Prompt],
+        batches: Sequence[Sequence[Generation]],
+    ) -> None:
+        """Reject a generator that does not return one group per prompt.
+
+        The scoring path pairs groups with prompts by position, so a missing,
+        extra or short group would score one prompt against another's output.
+        The check runs before any test or judge call.
+        """
+        if len(batches) != len(prompts):
+            raise ValueError(
+                f"generate_batch returned {len(batches)} groups for "
+                f"{len(prompts)} prompts"
+            )
+        expected = self.config.generations_per_prompt
+        for prompt, group in zip(prompts, batches):
+            if len(group) != expected:
+                raise ValueError(
+                    f"generate_batch returned {len(group)} generations for "
+                    f"prompt {prompt.prompt_id!r}, expected {expected}"
+                )
+
     def _prompt_group(
-        self, step: int, prompt: Prompt, stage: str, measure_entropy: bool
+        self,
+        step: int,
+        prompt: Prompt,
+        stage: str,
+        generations: Sequence[Generation],
+        measure_entropy: bool,
     ) -> tuple[list[RolloutRecord], int, int, float | None, bool]:
-        """Sample, test, judge, and update one prompt group.
+        """Test, judge, and accumulate one prompt group.
 
         All 8 generations are tested. The passing ones are judged in two batch
         calls, one for output scores and one for process scores, so the judge
         concurrency is used. A failed rollout still costs no judge call. The
-        group's rewards are passed to `update` once, with the entropy flag the
-        step asked for. A full pass is what removes the question from a stage
-        pool.
+        group's rewards are accumulated once, with the entropy flag the step
+        asked for. A full pass is what removes the question from a stage pool.
         """
-        generations = self.generator.generate(
-            prompt,
-            n=self.config.generations_per_prompt,
-            temperature=self.config.temperature,
-        )
         outcomes = [
             self.test_runner.run(prompt, generation.code) for generation in generations
         ]
@@ -775,7 +821,7 @@ class Experiment:
         ]
 
         rewards = [record.reward for record in records]
-        entropy = self.generator.update(
+        entropy = self.generator.accumulate(
             prompt,
             generations,
             rewards,
@@ -791,8 +837,8 @@ class Experiment:
         """Whether this step is an entropy measurement step.
 
         `entropy_every_steps` counts training steps, so step N is measured
-        when N is a multiple of the setting. Every prompt group updated in that
-        step is measured. Zero disables the measurement.
+        when N is a multiple of the setting. Every prompt group accumulated in
+        that step is measured. Zero disables the measurement.
         """
         every = self.config.entropy_every_steps
         return every > 0 and step % every == 0
@@ -800,7 +846,7 @@ class Experiment:
     def _memory_report(self) -> MemoryReport:
         """The allocator figures for the step that just finished.
 
-        Read after every group update, so the number covers the whole batch.
+        Read once after the step's update, so the number covers the whole batch.
         Zero when no reader was injected, which is the fake path and every unit
         test that does not care about memory.
         """

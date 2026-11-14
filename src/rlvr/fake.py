@@ -9,8 +9,8 @@ The judge cache key is the judge kind plus the prompt id plus the text it scores
 Because the fake code for a prompt does not change between steps, a gated arm
 records cache_hit false on the first step and true on later steps.
 
-Entropy is returned by `update` only when the caller asks for a measurement, so
-the fake follows the same `entropy_every_steps` cadence as the real trainer.
+Entropy is returned by `accumulate` only when the caller asks for a measurement,
+so the fake follows the same `entropy_every_steps` cadence as the real trainer.
 
 The values are derived from SHA-256, so they are stable across Python versions
 and machines. They carry no meaning. They exist to move data through the seam.
@@ -122,15 +122,20 @@ def fake_memory() -> MemoryReport:
 class FakeGenerator:
     """Stands in for the model. Reasoning is kept apart from code.
 
-    With n greater than 1 the fake returns n identical candidates. Task 8 adds
-    the group update seam: `update` is a no-op that counts calls, and the
-    checkpoint methods are no-ops too, because the fake has no weights.
+    With n greater than 1 the fake returns n identical candidates per prompt.
+    `generate_batch` returns one group per prompt, in prompt order, which is the
+    shape the trainer splits back up. `accumulate` records the group and its
+    rewards, `apply_update` counts one weight update per call, and the
+    checkpoint methods are no-ops because the fake has no weights.
     """
 
     def __init__(self) -> None:
         self.update_calls: list[tuple[str, tuple[float, ...]]] = []
+        self.update_groups: list[int] = []
         self.save_calls: list[str] = []
         self.load_calls: list[str] = []
+        self.step = 0
+        self._accumulated = 0
 
     def generate(
         self,
@@ -163,6 +168,57 @@ class FakeGenerator:
         )
         return [generation] * n
 
+    def generate_batch(
+        self,
+        prompts,
+        *,
+        n: int = 1,
+        temperature: float = TRAINING_TEMPERATURE,
+        thinking: bool = True,
+    ) -> list[list[Generation]]:
+        """One group per prompt, in prompt order, as one call would return.
+
+        The fake has no batched tensor path, so it samples each prompt with the
+        same deterministic rule the single prompt call uses. Grouping is what
+        matters here. The values do not depend on the batch.
+        """
+        prompt_list = list(prompts)
+        if not prompt_list:
+            raise ValueError("generate_batch needs at least one prompt")
+        return [
+            self.generate(prompt, n=n, temperature=temperature, thinking=thinking)
+            for prompt in prompt_list
+        ]
+
+    def accumulate(
+        self,
+        prompt: Prompt,
+        generations: list[Generation],
+        rewards: list[float],
+        *,
+        measure_entropy: bool = False,
+    ) -> float | None:
+        """No-op GRPO backward. Records the group so tests can assert the shape.
+
+        On a measurement step the fake returns one deterministic entropy value
+        for the prompt, in the same 0.05 to 1.85 band the old per-rollout fake
+        values used. Otherwise it returns None and writes no entropy.
+        """
+        self.update_calls.append((prompt.prompt_id, tuple(rewards)))
+        self._accumulated += 1
+        if not measure_entropy:
+            return None
+        seed = _value(prompt.prompt_id, "entropy")
+        return round(((seed >> 24) % 180) / 100 + 0.05, 4)
+
+    def apply_update(self) -> None:
+        """Count one weight update over the groups accumulated since the last call."""
+        if self._accumulated < 1:
+            raise RuntimeError("apply_update called with no accumulated groups")
+        self.update_groups.append(self._accumulated)
+        self._accumulated = 0
+        self.step += 1
+
     def update(
         self,
         prompt: Prompt,
@@ -171,17 +227,12 @@ class FakeGenerator:
         *,
         measure_entropy: bool = False,
     ) -> float | None:
-        """No-op GRPO update. Records the call so tests can assert the group shape.
-
-        On a measurement step the fake returns one deterministic entropy value
-        for the prompt, in the same 0.05 to 1.85 band the old per-rollout fake
-        values used. Otherwise it returns None and writes no entropy.
-        """
-        self.update_calls.append((prompt.prompt_id, tuple(rewards)))
-        if not measure_entropy:
-            return None
-        seed = _value(prompt.prompt_id, "entropy")
-        return round(((seed >> 24) % 180) / 100 + 0.05, 4)
+        """Single group shortcut: accumulate the group, then apply the update."""
+        entropy = self.accumulate(
+            prompt, generations, rewards, measure_entropy=measure_entropy
+        )
+        self.apply_update()
+        return entropy
 
     def save_checkpoint(self, directory) -> None:
         """No-op. The fake has no weights, only the manifest is written."""

@@ -108,12 +108,14 @@ evaluation on 8 questions. Expected runtime is roughly 5 to 10 minutes,
 dominated by the Docker test runs. This estimate is unverified: there is no GPU
 in this environment.
 
-Each step takes a batch of prompts, one group of 8 samples per prompt. The batch
-starts at two prompts. After each step the free memory is read. While it stays at
-or above `[training] memory_floor_mib` the next step takes one more prompt. The
-first step below the floor settles the size at the largest batch that fit, and
-the run keeps that size. A group is normalised on its own rewards, never across
-the batch.
+Each step takes a batch of prompts, one group of 8 samples per prompt, all
+sampled in one padded call. The batch starts at two prompts. After each step the
+free memory is read. While it stays at or above `[training] memory_floor_mib` the
+next step takes one more prompt. The first step below the floor settles the size
+at the largest batch that fit, and the run keeps that size. Gradients accumulate
+across the prompt groups and the optimizer steps once at the end of the step, so
+the step count is the number of weight updates. A group is normalised on its own
+rewards, never across the batch.
 
 ## Deploy on Massed Compute
 
@@ -329,7 +331,9 @@ or the filesystem during a run.
 
 ```python
 Generator.generate(prompt, *, n, temperature) -> list[Generation]
-Generator.update(prompt, generations, rewards, *, measure_entropy) -> float | None
+Generator.generate_batch(prompts, *, n, temperature) -> list[list[Generation]]
+Generator.accumulate(prompt, generations, rewards, *, measure_entropy) -> float | None
+Generator.apply_update() -> None
 Generator.save_checkpoint(directory) -> None
 Generator.load_checkpoint(directory) -> None
 TestRunner.run(prompt, code) -> Outcome
@@ -341,9 +345,10 @@ Store.arm, Store.timestamp, Store.run_dir, Store.checkpoints_dir
 
 `temperature` is `0.0` for greedy evaluation. `n` is the number of generations
 per prompt; training samples 8, evaluation samples 1. One training step samples
-one prompt group, runs and judges all 8, logs 8 records, then calls `update`
-once with the group rewards. The judge sees the problem and the code, or the
-problem and the trace. It never sees the tests.
+every prompt group in one `generate_batch` call, runs and judges each group,
+logs the records, accumulates the group rewards one group at a time, then calls
+`apply_update` once. That is the only weight update in the step. The judge sees
+the problem and the code, or the problem and the trace. It never sees the tests.
 
 Fakes in `src/rlvr/fake.py`: output depends on prompt id and decoding mode, test
 outcome on prompt id and code, judge score on judge kind, prompt id, and text.

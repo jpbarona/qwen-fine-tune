@@ -9,6 +9,7 @@ import pytest
 from rlvr.qwen import (
     ATTENTION_TARGET_MODULES,
     categorical_entropy,
+    check_attention_mask,
     clipped_surrogate,
     completion_logprobs,
     completion_truncated,
@@ -18,7 +19,9 @@ from rlvr.qwen import (
     k3_divergence,
     log_softmax,
     mean_token_loss,
+    pad_prompts,
     seed_rngs,
+    split_generated_rows,
     split_thinking_and_code,
     truncate_prompt,
 )
@@ -211,6 +214,85 @@ def test_truncate_prompt_leaves_a_short_prompt() -> None:
 def test_completion_truncated_flags_a_missing_end_token() -> None:
     assert completion_truncated([1, 2, 3], eos_token_id=99) is True
     assert completion_truncated([1, 2, 99], eos_token_id=99) is False
+
+
+def test_pad_prompts_left_pads_to_the_longest_prompt() -> None:
+    padded, mask = pad_prompts([[7, 8, 9], [4]], pad_token_id=0)
+    assert padded == [[7, 8, 9], [0, 0, 4]]
+    assert mask == [[1, 1, 1], [0, 0, 1]]
+
+
+def test_pad_prompts_leaves_one_prompt_unpadded() -> None:
+    padded, mask = pad_prompts([[5, 6]], pad_token_id=0)
+    assert padded == [[5, 6]]
+    assert mask == [[1, 1]]
+
+
+def test_pad_prompts_rejects_an_empty_batch_or_an_empty_prompt() -> None:
+    with pytest.raises(ValueError, match="at least one prompt"):
+        pad_prompts([], pad_token_id=0)
+    with pytest.raises(ValueError, match="holds no tokens"):
+        pad_prompts([[1], []], pad_token_id=0)
+
+
+def test_check_attention_mask_accepts_a_left_padded_batch() -> None:
+    padded, mask = pad_prompts([[7, 8, 9], [4]], pad_token_id=0)
+    check_attention_mask(padded, mask, pad_token_id=0)
+
+
+def test_check_attention_mask_rejects_a_masked_real_token() -> None:
+    # A zero in the mask must sit on a pad, so the model would skip a real one.
+    with pytest.raises(ValueError, match="masks a real token"):
+        check_attention_mask([[0, 9]], [[0, 0]], pad_token_id=0)
+
+
+def test_check_attention_mask_rejects_padding_on_the_right() -> None:
+    with pytest.raises(ValueError, match="left padded"):
+        check_attention_mask([[9, 0]], [[1, 0]], pad_token_id=0)
+
+
+def test_check_attention_mask_rejects_an_all_pad_row() -> None:
+    with pytest.raises(ValueError, match="every token"):
+        check_attention_mask([[0, 0]], [[0, 0]], pad_token_id=0)
+
+
+def test_check_attention_mask_rejects_a_bad_flag_and_a_length_mismatch() -> None:
+    with pytest.raises(ValueError, match="mask 2"):
+        check_attention_mask([[9]], [[2]], pad_token_id=0)
+    with pytest.raises(ValueError, match="mask rows"):
+        check_attention_mask([[9]], [], pad_token_id=0)
+    with pytest.raises(ValueError, match="mask entries"):
+        check_attention_mask([[9]], [[1, 1]], pad_token_id=0)
+
+
+def test_split_generated_rows_cuts_the_prompt_and_groups_by_prompt() -> None:
+    # Padded prompt width 3, two prompts, two samples each.
+    rows = [
+        [0, 1, 2, 10, 11],
+        [0, 1, 2, 12, 13],
+        [4, 5, 6, 20, 21],
+        [4, 5, 6, 22, 23],
+    ]
+    groups = split_generated_rows(
+        rows, prompt_count=2, per_prompt=2, prompt_length=3
+    )
+    assert groups == [[[10, 11], [12, 13]], [[20, 21], [22, 23]]]
+
+
+def test_split_generated_rows_rejects_the_wrong_row_count() -> None:
+    with pytest.raises(ValueError, match="expected 4"):
+        split_generated_rows(
+            [[0, 1]], prompt_count=2, per_prompt=2, prompt_length=1
+        )
+
+
+def test_split_generated_rows_rejects_bad_arguments() -> None:
+    with pytest.raises(ValueError, match="prompt_count"):
+        split_generated_rows([], prompt_count=0, per_prompt=1, prompt_length=0)
+    with pytest.raises(ValueError, match="per_prompt"):
+        split_generated_rows([], prompt_count=1, per_prompt=0, prompt_length=0)
+    with pytest.raises(ValueError, match="prompt_length"):
+        split_generated_rows([], prompt_count=1, per_prompt=1, prompt_length=-1)
 
 
 def test_seed_rngs_seeds_the_python_rng() -> None:

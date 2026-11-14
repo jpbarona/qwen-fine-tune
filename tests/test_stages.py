@@ -165,6 +165,7 @@ def test_a_bad_label_file_fails_loudly(tmp_path: Path, text: str, message: str) 
 class StubGenerator:
     def __init__(self) -> None:
         self.update_calls: list[str] = []
+        self.updates = 0
 
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
         return [
@@ -177,9 +178,17 @@ class StubGenerator:
             for _ in range(n)
         ]
 
-    def update(self, prompt, generations, rewards, *, measure_entropy: bool = False):
+    def generate_batch(self, prompts, *, n: int, temperature: float):
+        return [
+            self.generate(prompt, n=n, temperature=temperature) for prompt in prompts
+        ]
+
+    def accumulate(self, prompt, generations, rewards, *, measure_entropy: bool = False):
         self.update_calls.append(prompt.prompt_id)
         return None
+
+    def apply_update(self) -> None:
+        self.updates += 1
 
     def save_checkpoint(self, directory) -> None:
         pass

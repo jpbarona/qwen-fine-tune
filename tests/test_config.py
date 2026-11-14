@@ -349,6 +349,9 @@ def test_the_shipped_real_config_loads() -> None:
     assert config.entropy_every_steps == 500
     assert config.lora_rank == 32 and config.lora_alpha == 64
     assert config.checkpoint_every_steps == 50
+    assert config.length_soft_limit == 900
+    assert config.length_penalty_per_token == pytest.approx(0.001)
+    assert config.length_penalty_floor == pytest.approx(0.2)
 
 
 def test_the_shipped_smoke_config_loads() -> None:

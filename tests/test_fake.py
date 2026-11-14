@@ -51,12 +51,48 @@ def test_update_returns_a_deterministic_entropy_only_on_a_measurement_step() -> 
     plain = FakeGenerator()
     assert plain.update(prompt, generation, [0.0]) is None
     assert plain.update(prompt, generation, [0.0], measure_entropy=False) is None
+    assert plain.step == 2
 
     measured = FakeGenerator()
     first = measured.update(prompt, generation, [0.0], measure_entropy=True)
     assert first is not None
     assert 0.0 <= first < 2.0
     assert FakeGenerator().update(prompt, generation, [0.0], measure_entropy=True) == first
+
+
+def test_generate_batch_returns_one_group_per_prompt_in_order() -> None:
+    prompts = fake_prompts(3)
+    groups = FakeGenerator().generate_batch(prompts, n=2, temperature=0.9)
+
+    assert len(groups) == 3
+    assert all(len(group) == 2 for group in groups)
+    for prompt, group in zip(prompts, groups):
+        assert group == FakeGenerator().generate(prompt, n=2, temperature=0.9)
+        assert prompt.prompt_id in group[0].code
+
+
+def test_generate_batch_rejects_an_empty_prompt_list() -> None:
+    with pytest.raises(ValueError, match="at least one prompt"):
+        FakeGenerator().generate_batch([], n=1, temperature=0.9)
+
+
+def test_apply_update_counts_one_weight_update_per_call() -> None:
+    generator = FakeGenerator()
+    prompts = fake_prompts(3)
+    for prompt in prompts:
+        generations = generator.generate(prompt, n=2, temperature=0.9)
+        generator.accumulate(prompt, generations, [0.0, 1.0])
+    assert generator.step == 0
+
+    generator.apply_update()
+
+    assert generator.step == 1
+    assert generator.update_groups == [3]
+
+
+def test_apply_update_without_an_accumulated_group_fails() -> None:
+    with pytest.raises(RuntimeError, match="no accumulated groups"):
+        FakeGenerator().apply_update()
 
 
 def test_generator_asks_for_n_candidates() -> None:

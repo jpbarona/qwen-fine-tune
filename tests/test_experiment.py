@@ -101,8 +101,10 @@ class StubGenerator:
     def __init__(self, codes: dict[str, str] | None = None) -> None:
         self.codes = codes or {}
         self.calls: list[tuple[str, float]] = []
+        self.batch_calls: list[tuple[float, ...]] = []
         self.update_calls: list[tuple[str, tuple[float, ...]]] = []
         self.measure_flags: list[bool] = []
+        self.updates = 0
 
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
         self.calls.append((prompt.prompt_id, temperature))
@@ -117,7 +119,13 @@ class StubGenerator:
             for _ in range(n)
         ]
 
-    def update(
+    def generate_batch(self, prompts, *, n: int, temperature: float):
+        self.batch_calls.append(tuple(prompt.prompt_id for prompt in prompts))
+        return [
+            self.generate(prompt, n=n, temperature=temperature) for prompt in prompts
+        ]
+
+    def accumulate(
         self,
         prompt: Prompt,
         generations: list[Generation],
@@ -128,6 +136,9 @@ class StubGenerator:
         self.update_calls.append((prompt.prompt_id, tuple(rewards)))
         self.measure_flags.append(measure_entropy)
         return 0.5 if measure_entropy else None
+
+    def apply_update(self) -> None:
+        self.updates += 1
 
     def save_checkpoint(self, directory) -> None:
         pass

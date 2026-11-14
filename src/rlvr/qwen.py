@@ -2,17 +2,23 @@
 
 This module is the concrete `Generator` for GPU runs. It loads
 `Qwen/Qwen3-0.6B` with thinking enabled, wraps it in a LoRA adapter over the
-attention projections, and implements one GRPO update per group of sampled
-rollouts. Advantage is normalised inside the group. The backward pass runs once
-per generation, so only one autograd graph is alive at a time and the gradients
-accumulate across the group. That is what makes the 2,048 token cap fit beside
-a larger prompt batch.
+attention projections, and implements one GRPO weight update per training step.
+A step samples several prompt groups in one `generate_batch` call, accumulates
+the gradient of every group, and steps the optimizer once at the end. Advantage
+is normalised inside a prompt group, never across the step. The backward pass
+runs once per generation, so only one autograd graph is alive at a time and the
+gradients accumulate across the group. That is what makes the 2,048 token cap
+fit beside a larger prompt batch.
+
+Prompts in a batch are left padded to one length, with an attention mask that
+marks the pads. Every completion therefore starts at one fixed column, and the
+generated rows split back into per prompt groups by index.
 
 Torch, transformers, and peft are imported lazily inside methods. The CPU test
 suite runs without any of them. The pure helpers at the top (code extraction,
 thinking split, group-normalized advantage, the clipped surrogate, the entropy
-formula, and the entropy position picker) have no such dependency and are unit
-tested.
+formula, the entropy position picker, the batch padding and the row split) have
+no such dependency and are unit tested.
 
 Generation does not ask for per-step scores and keeps no logits. Entropy is
 measured on the update pass, from the same forward logits the policy loss uses,
@@ -37,6 +43,7 @@ __all__ = [
     "ATTENTION_TARGET_MODULES",
     "QwenGenerator",
     "categorical_entropy",
+    "check_attention_mask",
     "clipped_surrogate",
     "completion_logprobs",
     "completion_truncated",
@@ -46,7 +53,9 @@ __all__ = [
     "k3_divergence",
     "log_softmax",
     "mean_token_loss",
+    "pad_prompts",
     "seed_rngs",
+    "split_generated_rows",
     "split_thinking_and_code",
     "truncate_prompt",
 ]
@@ -255,6 +264,111 @@ def completion_truncated(token_ids: Sequence[int], eos_token_id: int | None) -> 
     return eos_token_id is None or eos_token_id not in ids
 
 
+def pad_prompts(
+    prompt_ids: Sequence[Sequence[int]], pad_token_id: int
+) -> tuple[list[list[int]], list[list[int]]]:
+    """Left-pad prompts to one length, with an attention mask for each row.
+
+    Left padding puts every completion at the same column, so one fixed prefix
+    length slices every generated row. A mask entry is 1 for a real token and 0
+    for a pad. The mask is what tells the model not to attend to padding, so it
+    is built here and checked by `check_attention_mask`.
+
+    The tokenizer's own `padding_side` is not used. The batch is padded here so
+    the side is fixed and the mask is built with it.
+    """
+    sequences = [list(ids) for ids in prompt_ids]
+    if not sequences:
+        raise ValueError("pad_prompts needs at least one prompt")
+    for position, sequence in enumerate(sequences):
+        if not sequence:
+            raise ValueError(f"prompt {position} holds no tokens")
+    width = max(len(sequence) for sequence in sequences)
+    padded = [
+        [pad_token_id] * (width - len(sequence)) + sequence for sequence in sequences
+    ]
+    mask = [
+        [0] * (width - len(sequence)) + [1] * len(sequence) for sequence in sequences
+    ]
+    return padded, mask
+
+
+def check_attention_mask(
+    padded_ids: Sequence[Sequence[int]],
+    attention_mask: Sequence[Sequence[int]],
+    pad_token_id: int,
+) -> None:
+    """Check that the padding is left aligned and masked.
+
+    Every column the mask marks as padding must hold the pad token, every row
+    must keep at least one real token, and the real tokens must sit in one block
+    at the right end. A mask that exposes a pad is a batch builder bug, so it
+    raises here instead of reaching the model.
+
+    A real token that equals the pad token cannot be told apart when the pad
+    token is also the end token, so that case is not rejected.
+    """
+    if len(padded_ids) != len(attention_mask):
+        raise ValueError(
+            f"got {len(padded_ids)} rows of tokens and {len(attention_mask)} mask rows"
+        )
+    for row, (ids, mask) in enumerate(zip(padded_ids, attention_mask)):
+        if len(ids) != len(mask):
+            raise ValueError(
+                f"row {row} holds {len(ids)} tokens and {len(mask)} mask entries"
+            )
+        seen_real = False
+        for column, (token, flag) in enumerate(zip(ids, mask)):
+            if flag not in (0, 1):
+                raise ValueError(f"row {row} column {column} has mask {flag}, expected 0 or 1")
+            if flag == 0:
+                if seen_real:
+                    raise ValueError(f"row {row} is not left padded")
+                if token != pad_token_id:
+                    raise ValueError(f"row {row} masks a real token at column {column}")
+            else:
+                seen_real = True
+        if not seen_real:
+            raise ValueError(f"row {row} masks every token")
+
+
+def split_generated_rows(
+    rows: Sequence[Sequence[int]],
+    *,
+    prompt_count: int,
+    per_prompt: int,
+    prompt_length: int,
+) -> list[list[list[int]]]:
+    """Split generate output into one group of completions per prompt.
+
+    `generate` returns the rows grouped by input prompt, `per_prompt` rows each
+    and in prompt order. The first `prompt_length` columns are the padded
+    prompt, which is dropped here so every group holds completion tokens only.
+    """
+    if prompt_count < 1:
+        raise ValueError(f"prompt_count must be at least 1, got {prompt_count}")
+    if per_prompt < 1:
+        raise ValueError(f"per_prompt must be at least 1, got {per_prompt}")
+    if prompt_length < 0:
+        raise ValueError(f"prompt_length must not be negative, got {prompt_length}")
+    expected = prompt_count * per_prompt
+    if len(rows) != expected:
+        raise ValueError(
+            f"got {len(rows)} rows for {prompt_count} prompts of {per_prompt}, "
+            f"expected {expected}"
+        )
+    groups: list[list[list[int]]] = []
+    for index in range(prompt_count):
+        start = index * per_prompt
+        groups.append(
+            [
+                [int(token) for token in row[prompt_length:]]
+                for row in rows[start : start + per_prompt]
+            ]
+        )
+    return groups
+
+
 def seed_rngs(seed: int) -> None:
     """Seed the Python, numpy, and torch RNGs.
 
@@ -284,14 +398,22 @@ def seed_rngs(seed: int) -> None:
 class _GroupEntry:
     """One sampled completion kept for the next GRPO update.
 
-    `input_ids` is the full prompt plus generated tokens. `old_logprobs` holds
-    the per-token policy logprobs of the completion at temperature 1.0, captured
-    at generation time and detached. `reference_logprobs` is the same under the
-    base model with the adapter disabled, present only when the KL coefficient
-    is positive.
+    `input_ids` is the padded prompt plus generated tokens, so the leading pads
+    are in the sequence the model saw. `attention_mask` marks those pads with 0,
+    and the update pass feeds the same mask back, so the logprobs match the
+    sampling forward pass. `prompt_length` is the padded prompt width, which is
+    where the completion starts. `old_logprobs` holds the per-token policy
+    logprobs of the completion at temperature 1.0, captured at generation time
+    and detached. `reference_logprobs` is the same under the base model with the
+    adapter disabled, present only when the KL coefficient is positive.
+
+    `prompt_id` guards the group order: `accumulate` checks it before using the
+    entry, so a group can never be updated against another prompt's rewards.
     """
 
+    prompt_id: str
     input_ids: list[int]
+    attention_mask: list[int]
     prompt_length: int
     old_logprobs: list[float]
     reference_logprobs: list[float] | None
@@ -301,11 +423,13 @@ class QwenGenerator:
     """The real generator and trainer behind the `Generator` seam.
 
     The class loads the model, tokenizer, LoRA adapter, and optimizer on
-    construction. `generate` samples a group and caches the token ids and old
-    logprobs the update needs, never the logits. `update` runs one GRPO step
-    over the last group and can measure entropy on the forward it already does.
-    `save_checkpoint` and `load_checkpoint` write and restore the adapter
-    weights, the optimizer state, and the step number.
+    construction. `generate_batch` samples one group per prompt in a single
+    padded call and caches the token ids, masks, and old logprobs the update
+    needs, never the logits. `accumulate` runs the backward pass for one group
+    and `apply_update` steps the optimizer once over every accumulated group.
+    `update` keeps the single group shortcut. `save_checkpoint` and
+    `load_checkpoint` write and restore the adapter weights, the optimizer
+    state, and the step number, which counts weight updates.
 
     With `trainable` false the class loads the base model only. It builds no
     adapter and no optimizer, so a measurement run cannot train or checkpoint.
@@ -339,7 +463,8 @@ class QwenGenerator:
         self.seed = seed
         self.trainable = trainable
         self.step = 0
-        self._last_group: list[_GroupEntry] | None = None
+        self._pending_groups: list[list[_GroupEntry]] | None = None
+        self._accumulated_groups = 0
 
         if seed is not None:
             seed_rngs(seed)
@@ -394,11 +519,34 @@ class QwenGenerator:
         temperature: float,
         thinking: bool = True,
     ) -> list[Generation]:
-        """Sample `n` generations for one prompt, splitting thinking from code.
+        """Sample `n` generations for one prompt.
+
+        This is the single prompt shortcut over `generate_batch`. Evaluation and
+        the difficulty screen use it. Training calls `generate_batch` so several
+        prompts share one call.
+        """
+        return self.generate_batch(
+            [prompt], n=n, temperature=temperature, thinking=thinking
+        )[0]
+
+    def generate_batch(
+        self,
+        prompts: Sequence[Prompt],
+        *,
+        n: int,
+        temperature: float,
+        thinking: bool = True,
+    ) -> list[list[Generation]]:
+        """Sample `n` generations for each prompt in one padded call.
+
+        Prompts are truncated to `max_prompt_tokens`, left padded to the longest
+        one, and passed with an attention mask that marks the pads. The output
+        rows come back grouped by prompt, so `split_generated_rows` cuts them
+        back into one group per prompt before any decoding, scoring or parsing.
 
         Greedy evaluation (temperature 0.0) runs the model in eval mode and does
-        no group bookkeeping, so it never clobbers the training group cached for
-        the next update. Sampling runs in train mode and caches the group. A
+        no group bookkeeping, so it never clobbers groups cached for the next
+        update. Sampling runs in train mode and caches one group per prompt. A
         non-trainable generator stays in eval mode and caches nothing.
 
         `thinking` is passed to the chat template. Training leaves it on. The
@@ -406,26 +554,48 @@ class QwenGenerator:
         """
         if n < 1:
             raise ValueError(f"n must be at least 1, got {n}")
+        prompt_list = list(prompts)
+        if not prompt_list:
+            raise ValueError("generate_batch needs at least one prompt")
+        if self._accumulated_groups:
+            # A previous step stopped before apply_update, for example on a CUDA
+            # out-of-memory error that the caller is retrying at a smaller batch.
+            # Sampling a new batch drops the partial gradients.
+            self.optimizer.zero_grad()
+            self._accumulated_groups = 0
+        self._pending_groups = None
         torch = self._torch
         do_sample = temperature > 0.0
+        caching = do_sample and self.trainable
 
-        if do_sample and self.trainable:
+        if caching:
             self.model.train()
         else:
             self.model.eval()
 
-        text = self.tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt.problem}],
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=thinking,
-        )
-        raw_prompt_ids = self.tokenizer(text, return_tensors="pt")["input_ids"][0].tolist()
-        prompt_ids, prompt_truncated = truncate_prompt(raw_prompt_ids, self.max_prompt_tokens)
-        prompt_length = len(prompt_ids)
+        prompt_ids: list[list[int]] = []
+        prompt_truncated: list[bool] = []
+        for prompt in prompt_list:
+            text = self.tokenizer.apply_chat_template(
+                [{"role": "user", "content": prompt.problem}],
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=thinking,
+            )
+            raw_ids = self.tokenizer(text, return_tensors="pt")["input_ids"][0].tolist()
+            kept, truncated = truncate_prompt(raw_ids, self.max_prompt_tokens)
+            prompt_ids.append(kept)
+            prompt_truncated.append(truncated)
+
+        pad_token_id = self.tokenizer.pad_token_id
+        padded_ids, attention_mask = pad_prompts(prompt_ids, pad_token_id)
+        check_attention_mask(padded_ids, attention_mask, pad_token_id)
+        prompt_length = len(padded_ids[0])
         inputs = {
-            "input_ids": torch.tensor([prompt_ids], device=self._device),
-            "attention_mask": torch.ones(1, prompt_length, dtype=torch.long, device=self._device),
+            "input_ids": torch.tensor(padded_ids, device=self._device),
+            "attention_mask": torch.tensor(
+                attention_mask, dtype=torch.long, device=self._device
+            ),
         }
 
         generate_kwargs: dict[str, Any] = dict(
@@ -433,62 +603,79 @@ class QwenGenerator:
             do_sample=do_sample,
             temperature=temperature if do_sample else None,
             num_return_sequences=n,
-            pad_token_id=self.tokenizer.pad_token_id,
+            pad_token_id=pad_token_id,
             return_dict_in_generate=True,
         )
         with torch.no_grad():
             outputs = self.model.generate(**inputs, **generate_kwargs)
 
-        generations: list[Generation] = []
-        group: list[_GroupEntry] = []
+        groups = split_generated_rows(
+            outputs.sequences,
+            prompt_count=len(prompt_list),
+            per_prompt=n,
+            prompt_length=prompt_length,
+        )
+
         eos = self.tokenizer.eos_token_id
-        for index in range(n):
-            raw_ids = outputs.sequences[index][prompt_length:].tolist()
-            truncated = completion_truncated(raw_ids, eos)
-            if truncated:
-                generated_ids = raw_ids
-            else:
-                generated_ids = raw_ids[: raw_ids.index(eos) + 1]
-            split = self._split_at_think_end(generated_ids)
-            reasoning = self.tokenizer.decode(
-                generated_ids[: split], skip_special_tokens=True
-            ).strip()
-            answer = self.tokenizer.decode(
-                generated_ids[split:], skip_special_tokens=True
-            ).strip()
-            code = extract_code_from_answer(answer)
+        generations: list[list[Generation]] = []
+        cached_groups: list[list[_GroupEntry]] = []
+        for index, prompt in enumerate(prompt_list):
+            group: list[Generation] = []
+            entries: list[_GroupEntry] = []
+            real_prompt_length = sum(attention_mask[index])
+            for raw_ids in groups[index]:
+                truncated = completion_truncated(raw_ids, eos)
+                if truncated:
+                    generated_ids = raw_ids
+                else:
+                    generated_ids = raw_ids[: raw_ids.index(eos) + 1]
+                split = self._split_at_think_end(generated_ids)
+                reasoning = self.tokenizer.decode(
+                    generated_ids[:split], skip_special_tokens=True
+                ).strip()
+                answer = self.tokenizer.decode(
+                    generated_ids[split:], skip_special_tokens=True
+                ).strip()
+                code = extract_code_from_answer(answer)
 
-            generations.append(
-                Generation(
-                    reasoning=reasoning,
-                    code=code,
-                    prompt_tokens=prompt_length,
-                    completion_tokens=len(generated_ids),
-                    truncated=truncated,
-                    prompt_truncated=prompt_truncated,
-                )
-            )
-
-            if do_sample and self.trainable:
-                with torch.no_grad():
-                    sequence = torch.tensor(
-                        [prompt_ids + generated_ids], device=self._device
-                    )
-                    old_logprobs = self._completion_logprobs(sequence, prompt_length).tolist()
-                reference_logprobs = self._reference_logprobs(
-                    prompt_ids, generated_ids
-                )
                 group.append(
-                    _GroupEntry(
-                        input_ids=prompt_ids + generated_ids,
-                        prompt_length=prompt_length,
-                        old_logprobs=old_logprobs,
-                        reference_logprobs=reference_logprobs,
+                    Generation(
+                        reasoning=reasoning,
+                        code=code,
+                        prompt_tokens=real_prompt_length,
+                        completion_tokens=len(generated_ids),
+                        truncated=truncated,
+                        prompt_truncated=prompt_truncated[index],
                     )
                 )
 
-        if do_sample and self.trainable:
-            self._last_group = group
+                if caching:
+                    entry_ids = padded_ids[index] + generated_ids
+                    entry_mask = attention_mask[index] + [1] * len(generated_ids)
+                    with torch.no_grad():
+                        sequence = torch.tensor([entry_ids], device=self._device)
+                        old_logprobs = self._completion_logprobs(
+                            sequence, prompt_length, entry_mask
+                        ).tolist()
+                    reference_logprobs = self._reference_logprobs(
+                        entry_ids, prompt_length, entry_mask, generated_ids
+                    )
+                    entries.append(
+                        _GroupEntry(
+                            prompt_id=prompt.prompt_id,
+                            input_ids=entry_ids,
+                            attention_mask=entry_mask,
+                            prompt_length=prompt_length,
+                            old_logprobs=old_logprobs,
+                            reference_logprobs=reference_logprobs,
+                        )
+                    )
+
+            generations.append(group)
+            cached_groups.append(entries)
+
+        if caching:
+            self._pending_groups = cached_groups
         return generations
 
     def _split_at_think_end(self, generated_ids: list[int]) -> int:
@@ -498,13 +685,22 @@ class QwenGenerator:
                 return index + 1
         return 0
 
-    def _completion_logprobs(self, sequence: Any, prompt_length: int) -> Any:
+    def _completion_logprobs(
+        self, sequence: Any, prompt_length: int, attention_mask: list[int] | None = None
+    ) -> Any:
         """Per-token logprobs of the completion under the policy at temperature 1.0.
 
         This is the only path used for both the old and the new logprobs, so the
-        ratio is 1.0 on the first update when the policy has not changed.
+        ratio is 1.0 on the first update when the policy has not changed. The
+        mask is the one the sampling forward pass saw, so the leading pads do
+        not enter the attention.
         """
-        logits = self.model(sequence).logits[0]
+        kwargs: dict[str, Any] = {}
+        if attention_mask is not None:
+            kwargs["attention_mask"] = self._torch.tensor(
+                [attention_mask], dtype=self._torch.long, device=sequence.device
+            )
+        logits = self.model(sequence, **kwargs).logits[0]
         token_ids = sequence[0][prompt_length:].tolist()
         return self._completion_logprobs_from_logits(logits, prompt_length, token_ids)
 
@@ -527,7 +723,7 @@ class QwenGenerator:
 
         Runs under `no_grad` on the logits the loss already holds, so nothing is
         stored and no gradient flows. Returns the sum and the position count,
-        so the group mean can be taken over the sampled positions in `update`.
+        so the group mean can be taken over the sampled positions in `accumulate`.
         """
         torch = self._torch
         offsets = entropy_positions(token_count)
@@ -554,28 +750,40 @@ class QwenGenerator:
         return total, count
 
     def _reference_logprobs(
-        self, prompt_ids: list[int], token_ids: list[int]
+        self,
+        input_ids: list[int],
+        prompt_length: int,
+        attention_mask: list[int],
+        token_ids: list[int],
     ) -> list[float] | None:
-        """The per-token base-model logprob of the completion, or None when KL is off."""
+        """The per-token base-model logprob of the completion, or None when KL is off.
+
+        The input is the padded prompt plus the completion, with the same mask
+        the sampling call used, so the pads stay out of the attention.
+        """
         if self.kl_beta <= 0.0:
             return None
         import torch  # lazy
 
-        sequence = prompt_ids + token_ids
-        inputs = torch.tensor([sequence], device=self._device)
+        inputs = torch.tensor([input_ids], device=self._device)
+        mask = torch.tensor(
+            [attention_mask], dtype=torch.long, device=self._device
+        )
         with torch.no_grad():
             with self.model.disable_adapter():
-                logits = self.model(inputs).logits[0]
+                logits = self.model(inputs, attention_mask=mask).logits[0]
         log_probs = torch.log_softmax(logits[:-1], dim=-1)
         token_ids_t = torch.tensor(token_ids, device=logits.device)
         positions = torch.arange(
-            len(prompt_ids) - 1, len(prompt_ids) - 1 + len(token_ids), device=logits.device
+            prompt_length - 1,
+            prompt_length - 1 + len(token_ids),
+            device=logits.device,
         )
         return log_probs[positions, token_ids_t].tolist()
 
     # --- the GRPO update -------------------------------------------------
 
-    def update(
+    def accumulate(
         self,
         prompt: Prompt,
         generations: Sequence[Generation],
@@ -583,36 +791,48 @@ class QwenGenerator:
         *,
         measure_entropy: bool = False,
     ) -> float | None:
-        """One GRPO step over the last sampled group.
+        """Add the gradient of one prompt group to the pending step.
 
         The advantage is group-normalized, so the normalisation never crosses a
         prompt boundary. The per-token clipped surrogate and the per-token k3
-        KL are summed over the whole group and divided once by the total token
+        KL are summed over the whole group and divided once by the group's token
         count, so a token in a short completion weighs the same as a token in a
-        long one. The prompt and generations are accepted for interface symmetry
-        with the seam; the token data comes from the group cached by `generate`.
+        long one. `apply_update` then divides the accumulated gradient by the
+        group count, which makes the step the mean over the prompt batch.
+
+        The prompt and generations are accepted for interface symmetry with the
+        seam. The token data comes from the group cached by `generate_batch`,
+        and the group is popped in order, so the rewards must belong to the
+        prompt the entry was sampled for. That is checked.
 
         Backward runs once per generation and the gradients accumulate across
         the group. Only one autograd graph is alive at a time, which is what
-        makes a larger batch fit at the 2,048 token cap. The optimizer steps
-        once, after every generation in the group.
+        makes a larger batch fit at the 2,048 token cap.
 
         When `measure_entropy` is true, the forward pass that computes the new
         logprobs also yields a bounded per-token entropy sample. The group mean
         is returned and the caller writes it to the step metric. When false,
         nothing is measured and None is returned. A non-trainable generator has
-        no adapter or optimizer and refuses to update.
+        no adapter or optimizer and refuses to accumulate.
         """
-        del prompt, generations
+        del generations
         if not self.trainable:
             raise RuntimeError(
                 "this generator was built without an adapter and cannot update"
             )
-        if self._last_group is None:
-            raise RuntimeError("update called with no sampled group")
-        if len(self._last_group) != len(rewards):
+        if self._pending_groups is None:
+            raise RuntimeError("accumulate called with no sampled groups")
+        if not self._pending_groups:
+            raise RuntimeError("accumulate called more times than generate_batch sampled")
+        group = self._pending_groups.pop(0)
+        if group and group[0].prompt_id != prompt.prompt_id:
             raise ValueError(
-                f"update got {len(rewards)} rewards for {len(self._last_group)} generations"
+                f"accumulate got prompt {prompt.prompt_id!r} for the group sampled "
+                f"for {group[0].prompt_id!r}"
+            )
+        if len(group) != len(rewards):
+            raise ValueError(
+                f"accumulate got {len(rewards)} rewards for {len(group)} generations"
             )
 
         torch = self._torch
@@ -625,14 +845,18 @@ class QwenGenerator:
         # per-generation backward calls add up to the same gradient as one
         # summed backward would. The difference is peak memory: each graph is
         # freed before the next forward pass starts.
-        token_count = sum(len(entry.old_logprobs) for entry in self._last_group)
+        token_count = sum(len(entry.old_logprobs) for entry in group)
         if token_count == 0:
-            raise RuntimeError("update got a group with no completion tokens")
+            raise RuntimeError("accumulate got a group with no completion tokens")
 
-        self.optimizer.zero_grad()
+        if self._accumulated_groups == 0:
+            # A fresh step starts with clean gradients. A step that failed
+            # halfway leaves some behind, so zero on the first group, not on
+            # every group.
+            self.optimizer.zero_grad()
         entropy_total = 0.0
         entropy_tokens = 0
-        for entry, advantage in zip(self._last_group, advantages_tensor):
+        for entry, advantage in zip(group, advantages_tensor):
             surrogate_sum, kl_sum, entropy_sum, measured = self._group_terms(
                 entry, advantage, measure_entropy
             )
@@ -644,13 +868,56 @@ class QwenGenerator:
                 entropy_total += entropy_sum
                 entropy_tokens += measured
 
-        self.optimizer.step()
-        self.step += 1
-        self._last_group = None
-
+        self._accumulated_groups += 1
         if measure_entropy and entropy_tokens:
             return entropy_total / entropy_tokens
         return None
+
+    def apply_update(self) -> None:
+        """Step the optimizer once over every group accumulated since the last call.
+
+        The accumulated gradient is divided by the group count first, so the
+        update is the mean over the prompt batch instead of a sum that grows
+        with the batch size. The weight update counter moves once per call,
+        which is also the step number a checkpoint stores.
+        """
+        if not self.trainable:
+            raise RuntimeError(
+                "this generator was built without an adapter and cannot update"
+            )
+        if self._accumulated_groups == 0:
+            raise RuntimeError("apply_update called with no accumulated groups")
+
+        count = self._accumulated_groups
+        for parameter in self.model.parameters():
+            if parameter.requires_grad and parameter.grad is not None:
+                parameter.grad.div_(count)
+
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+        self.step += 1
+        self._accumulated_groups = 0
+        self._pending_groups = None
+
+    def update(
+        self,
+        prompt: Prompt,
+        generations: Sequence[Generation],
+        rewards: Sequence[float],
+        *,
+        measure_entropy: bool = False,
+    ) -> float | None:
+        """One group shortcut: accumulate the group, then apply the update.
+
+        The training loop uses `accumulate` and `apply_update` separately so a
+        whole step shares one optimizer step. This wrapper keeps the single
+        group path, which is also the shape the fake generator exposes.
+        """
+        entropy = self.accumulate(
+            prompt, generations, rewards, measure_entropy=measure_entropy
+        )
+        self.apply_update()
+        return entropy
 
     def _group_terms(
         self, entry: _GroupEntry, advantage: Any, measure_entropy: bool
@@ -658,11 +925,15 @@ class QwenGenerator:
         """Summed per-token surrogate and KL for one generation.
 
         Also returns the summed sampled entropy and its position count when the
-        caller asked for a measurement, both None and zero otherwise.
+        caller asked for a measurement, both None and zero otherwise. The stored
+        attention mask is fed back so the pads never enter the attention.
         """
         torch = self._torch
         inputs = torch.tensor([entry.input_ids], device=self._device)
-        logits = self.model(inputs).logits[0]
+        mask = torch.tensor(
+            [entry.attention_mask], dtype=torch.long, device=self._device
+        )
+        logits = self.model(inputs, attention_mask=mask).logits[0]
         token_ids = entry.input_ids[entry.prompt_length :]
         new_logprobs = self._completion_logprobs_from_logits(
             logits, entry.prompt_length, token_ids
@@ -692,7 +963,11 @@ class QwenGenerator:
     # --- checkpoint save and load ----------------------------------------
 
     def save_checkpoint(self, directory: str | Path) -> None:
-        """Write the LoRA adapter and the optimizer state into `directory`."""
+        """Write the LoRA adapter and the optimizer state into `directory`.
+
+        The stored step is the number of applied weight updates, so a resume
+        continues the same counter the training loop reports.
+        """
         if not self.trainable:
             raise RuntimeError(
                 "this generator was built without an adapter and has no checkpoint"
@@ -732,3 +1007,5 @@ class QwenGenerator:
         self.optimizer = torch.optim.AdamW(trainable, lr=self.learning_rate)
         self.optimizer.load_state_dict(state["optimizer"])
         self.step = int(state["step"])
+        self._pending_groups = None
+        self._accumulated_groups = 0
