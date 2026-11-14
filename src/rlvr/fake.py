@@ -138,6 +138,7 @@ class FakeGenerator:
         *,
         n: int = 1,
         temperature: float = TRAINING_TEMPERATURE,
+        thinking: bool = True,
     ) -> list[Generation]:
         if n < 1:
             raise ValueError(f"n must be at least 1, got {n}")
@@ -147,6 +148,8 @@ class FakeGenerator:
         reasoning = (
             f"Read the problem. Plan a loop over the range. "
             f"Sum the values and return {answer}. Check the empty case."
+            if thinking
+            else ""
         )
         code = (
             f"def solution():\n    # {prompt.prompt_id} {mode}\n"

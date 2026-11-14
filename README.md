@@ -44,6 +44,42 @@ Flags: `--config PATH` (default: the packaged config at
 `./runs`). Unknown arms, a missing config, and an invalid config print one
 message on stderr and exit 2.
 
+## Difficulty screening
+
+The screen samples the base model on a question set and writes a difficulty
+table. It never trains, builds no optimizer, writes no checkpoint, and writes
+into its own output folder, not a run folder.
+
+```bash
+.venv/bin/rlvr screen \
+    --questions data/mbpp_full.jsonl \
+    --samples 8 \
+    --output screening/20261114
+```
+
+`--questions` is a JSONL file in the MBPP row schema, so the synthetic easy set
+and the MBPP rows both work. `--samples` is the number of model samples per
+question. The screen samples with thinking off, at the completion cap from
+`[training] max_completion_tokens`, because that is the regime the curriculum
+trains in.
+
+The output folder holds two files:
+
+```
+rows.jsonl      one row per question: prompt_id, samples, passed, pass_rate
+summary.json    the pass rate histogram from 0.0 to 1.0, and the
+                zero_pass, partial_pass, and full_pass question counts
+```
+
+A sample counts as passed only when every task test passed. A rerun reads the
+rows already written and skips those question ids, so an interrupted screen
+continues where it stopped. A torn final line is dropped and removed before the
+restart appends. Rows must keep the same sample count and belong to the same
+question set, so two screens cannot be mixed by accident.
+
+`--fake` replaces the model and Docker with the deterministic fakes and needs no
+GPU, network, or Docker. It exercises the same writer, summary, and resume path.
+
 ## Real training
 
 One command per arm, no manual edits:

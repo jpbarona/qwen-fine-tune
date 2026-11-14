@@ -303,6 +303,10 @@ class QwenGenerator:
     over the last group and can measure entropy on the forward it already does.
     `save_checkpoint` and `load_checkpoint` write and restore the adapter
     weights, the optimizer state, and the step number.
+
+    With `trainable` false the class loads the base model only. It builds no
+    adapter and no optimizer, so a measurement run cannot train or checkpoint.
+    That is the difficulty screen. Training keeps the default.
     """
 
     def __init__(
@@ -318,6 +322,7 @@ class QwenGenerator:
         clip_epsilon: float,
         kl_beta: float,
         seed: int | None = None,
+        trainable: bool = True,
     ) -> None:
         self.model_name = model_name
         self.revision = revision
@@ -329,6 +334,7 @@ class QwenGenerator:
         self.clip_epsilon = float(clip_epsilon)
         self.kl_beta = float(kl_beta)
         self.seed = seed
+        self.trainable = trainable
         self.step = 0
         self._last_group: list[_GroupEntry] | None = None
 
@@ -353,6 +359,12 @@ class QwenGenerator:
             device_map="auto",
         ).eval()
 
+        if not trainable:
+            self.model = self.base_model
+            self.model.eval()
+            self.optimizer = None
+            return
+
         from peft import LoraConfig, TaskType, get_peft_model  # lazy
 
         lora_config = LoraConfig(
@@ -366,24 +378,35 @@ class QwenGenerator:
         self.model = get_peft_model(self.base_model, lora_config)
         self.model.train()
 
-        trainable = [param for param in self.model.parameters() if param.requires_grad]
-        self.optimizer = torch.optim.AdamW(trainable, lr=self.learning_rate)
+        trainable_params = [param for param in self.model.parameters() if param.requires_grad]
+        self.optimizer = torch.optim.AdamW(trainable_params, lr=self.learning_rate)
 
     # --- generation ------------------------------------------------------
 
-    def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
+    def generate(
+        self,
+        prompt: Prompt,
+        *,
+        n: int,
+        temperature: float,
+        thinking: bool = True,
+    ) -> list[Generation]:
         """Sample `n` generations for one prompt, splitting thinking from code.
 
         Greedy evaluation (temperature 0.0) runs the model in eval mode and does
         no group bookkeeping, so it never clobbers the training group cached for
-        the next update. Sampling runs in train mode and caches the group.
+        the next update. Sampling runs in train mode and caches the group. A
+        non-trainable generator stays in eval mode and caches nothing.
+
+        `thinking` is passed to the chat template. Training leaves it on. The
+        difficulty screen turns it off at the same completion cap.
         """
         if n < 1:
             raise ValueError(f"n must be at least 1, got {n}")
         torch = self._torch
         do_sample = temperature > 0.0
 
-        if do_sample:
+        if do_sample and self.trainable:
             self.model.train()
         else:
             self.model.eval()
@@ -392,7 +415,7 @@ class QwenGenerator:
             [{"role": "user", "content": prompt.problem}],
             tokenize=False,
             add_generation_prompt=True,
-            enable_thinking=True,
+            enable_thinking=thinking,
         )
         raw_prompt_ids = self.tokenizer(text, return_tensors="pt")["input_ids"][0].tolist()
         prompt_ids, prompt_truncated = truncate_prompt(raw_prompt_ids, self.max_prompt_tokens)
@@ -443,7 +466,7 @@ class QwenGenerator:
                 )
             )
 
-            if do_sample:
+            if do_sample and self.trainable:
                 with torch.no_grad():
                     sequence = torch.tensor(
                         [prompt_ids + generated_ids], device=self._device
@@ -461,7 +484,7 @@ class QwenGenerator:
                     )
                 )
 
-        if do_sample:
+        if do_sample and self.trainable:
             self._last_group = group
         return generations
 
@@ -569,9 +592,14 @@ class QwenGenerator:
         When `measure_entropy` is true, the forward pass that computes the new
         logprobs also yields a bounded per-token entropy sample. The group mean
         is returned and the caller writes it to the step metric. When false,
-        nothing is measured and None is returned.
+        nothing is measured and None is returned. A non-trainable generator has
+        no adapter or optimizer and refuses to update.
         """
         del prompt, generations
+        if not self.trainable:
+            raise RuntimeError(
+                "this generator was built without an adapter and cannot update"
+            )
         if self._last_group is None:
             raise RuntimeError("update called with no sampled group")
         if len(self._last_group) != len(rewards):
@@ -658,6 +686,10 @@ class QwenGenerator:
 
     def save_checkpoint(self, directory: str | Path) -> None:
         """Write the LoRA adapter and the optimizer state into `directory`."""
+        if not self.trainable:
+            raise RuntimeError(
+                "this generator was built without an adapter and has no checkpoint"
+            )
         import torch  # lazy
 
         folder = Path(directory)
@@ -670,6 +702,10 @@ class QwenGenerator:
 
     def load_checkpoint(self, directory: str | Path) -> None:
         """Restore the adapter weights, optimizer state, and step number."""
+        if not self.trainable:
+            raise RuntimeError(
+                "this generator was built without an adapter and cannot load a checkpoint"
+            )
         import torch  # lazy
         from peft import PeftModel  # lazy
         from transformers import AutoModelForCausalLM  # lazy
