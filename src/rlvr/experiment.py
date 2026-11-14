@@ -47,6 +47,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from . import repro
 from .batching import START_PROMPTS, BatchSizePolicy, is_cuda_out_of_memory
+from .budget import thinking_budget_for_stage
 from .checkpoint import checkpoint_dir_name, write_checkpoint_manifest
 from .config import Config
 from .evaluation import pass_at_1, select_eval_subset, subset_selector
@@ -179,7 +180,12 @@ class Generator(Protocol):
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]: ...
 
     def generate_batch(
-        self, prompts: Sequence[Prompt], *, n: int, temperature: float
+        self,
+        prompts: Sequence[Prompt],
+        *,
+        n: int,
+        temperature: float,
+        thinking_budget: int | None = None,
     ) -> list[list[Generation]]: ...
 
     def accumulate(
@@ -418,6 +424,11 @@ class Experiment:
         for step in range(self.resume_step + 1, effective_steps + 1):
             if staged:
                 active_stage = self.stages[stage_index].name
+            thinking_budget = thinking_budget_for_stage(
+                self.config.thinking_budget_start,
+                stage_index,
+                self.config.max_completion_tokens,
+            )
             trained = self._train_with_memory_guard(
                 step,
                 policy,
@@ -425,6 +436,7 @@ class Experiment:
                 stage_pool=stage_pool,
                 stage_step=stage_step,
                 stage=active_stage,
+                thinking_budget=thinking_budget,
             )
             if trained is None:
                 # The step was attempted and stopped on memory. Record its
@@ -654,6 +666,7 @@ class Experiment:
         stage_pool: Sequence[Prompt],
         stage_step: int,
         stage: str,
+        thinking_budget: int | None = None,
     ) -> tuple[StepResult, int] | None:
         """Run one step and shrink once if CUDA runs out of memory.
 
@@ -666,7 +679,12 @@ class Experiment:
             policy, staged=staged, stage_pool=stage_pool, stage_step=stage_step
         )
         try:
-            return self._training_step(step, prompts, stage), start
+            return (
+                self._training_step(
+                    step, prompts, stage, thinking_budget=thinking_budget
+                ),
+                start,
+            )
         except Exception as error:
             if not is_cuda_out_of_memory(error):
                 raise
@@ -679,7 +697,12 @@ class Experiment:
                 policy, staged=staged, stage_pool=stage_pool, stage_step=stage_step
             )
             try:
-                return self._training_step(step, prompts, stage), start
+                return (
+                self._training_step(
+                    step, prompts, stage, thinking_budget=thinking_budget
+                ),
+                start,
+            )
             except Exception as retry_error:
                 if not is_cuda_out_of_memory(retry_error):
                     raise
@@ -694,7 +717,11 @@ class Experiment:
         return index
 
     def _training_step(
-        self, step: int, prompts: Sequence[Prompt], stage: str
+        self,
+        step: int,
+        prompts: Sequence[Prompt],
+        stage: str,
+        thinking_budget: int | None = None,
     ) -> StepResult:
         """Sample every prompt group in one call, then apply one update.
 
@@ -712,6 +739,7 @@ class Experiment:
             list(prompts),
             n=self.config.generations_per_prompt,
             temperature=self.config.temperature,
+            thinking_budget=thinking_budget,
         )
         self._check_batch_shape(prompts, batches)
 

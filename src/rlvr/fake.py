@@ -175,6 +175,7 @@ class FakeGenerator:
         n: int = 1,
         temperature: float = TRAINING_TEMPERATURE,
         thinking: bool = True,
+        thinking_budget: int | None = None,
     ) -> list[list[Generation]]:
         """One group per prompt, in prompt order, as one call would return.
 

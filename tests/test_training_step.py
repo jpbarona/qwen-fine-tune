@@ -58,7 +58,7 @@ class RecordingGenerator:
             for _ in range(n)
         ]
 
-    def generate_batch(self, prompts, *, n: int, temperature: float):
+    def generate_batch(self, prompts, *, n: int, temperature: float, thinking_budget: int | None = None):
         self.batches.append(tuple(prompt.prompt_id for prompt in prompts))
         return [
             self.generate(prompt, n=n, temperature=temperature) for prompt in prompts
@@ -93,7 +93,7 @@ class ShortBatchGenerator(RecordingGenerator):
         super().__init__()
         self.drop_group = drop_group
 
-    def generate_batch(self, prompts, *, n: int, temperature: float):
+    def generate_batch(self, prompts, *, n: int, temperature: float, thinking_budget: int | None = None):
         groups = super().generate_batch(prompts, n=n, temperature=temperature)
         if self.drop_group:
             return groups[:-1]

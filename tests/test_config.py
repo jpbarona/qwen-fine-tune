@@ -246,6 +246,24 @@ def test_length_settings_are_read_from_the_training_table(tmp_path) -> None:
     assert config.length_penalty_floor == pytest.approx(0.5)
 
 
+def test_the_thinking_budget_is_read_from_the_training_table(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        GOOD + "\n[training]\nthinking_budget_start = 512\n", encoding="utf-8"
+    )
+    config = load_config(path)
+    assert config.thinking_budget_start == 512
+
+
+def test_a_zero_thinking_budget_is_named(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        GOOD + "\n[training]\nthinking_budget_start = 0\n", encoding="utf-8"
+    )
+    with pytest.raises(ConfigError, match="training.thinking_budget_start"):
+        load_config(path)
+
+
 @pytest.mark.parametrize(
     "line, key",
     [

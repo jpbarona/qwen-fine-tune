@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
+from .budget import row_should_force_end
 from .experiment import Generation, Prompt
 
 __all__ = [
@@ -123,6 +124,43 @@ def thinking_marker_index(token_ids: Sequence[int], marker_id: int) -> int:
         if token_ids[index] == marker_id:
             return index + 1
     return 0
+
+
+class _ThinkingBudgetProcessor:
+    """Force a row to EOS once its thinking budget is spent unclosed.
+
+    A row that already wrote the closing marker is left alone. A row that
+    reaches the budget without it has every logit except EOS set to minus
+    infinity, so generation ends there and the rollout scores as truncated.
+    The decision itself lives in `row_should_force_end`, which is unit tested.
+    """
+
+    def __init__(
+        self,
+        *,
+        prompt_length: int,
+        budget: int,
+        marker_id: int,
+        eos_token_id: int | None,
+    ) -> None:
+        self.prompt_length = prompt_length
+        self.budget = budget
+        self.marker_id = marker_id
+        self.eos_token_id = eos_token_id
+
+    def __call__(self, input_ids: Any, scores: Any) -> Any:
+        if self.eos_token_id is None:
+            return scores
+        generated = input_ids[:, self.prompt_length :]
+        length = int(generated.shape[1])
+        if length < self.budget:
+            return scores
+        closed = (generated == self.marker_id).any(dim=1)
+        for row in range(int(input_ids.shape[0])):
+            if row_should_force_end(length, self.budget, bool(closed[row])):
+                scores[row, :] = float("-inf")
+                scores[row, self.eos_token_id] = 0.0
+        return scores
 
 
 def categorical_entropy(logits: Sequence[float]) -> float:
@@ -551,6 +589,7 @@ class QwenGenerator:
         n: int,
         temperature: float,
         thinking: bool = True,
+        thinking_budget: int | None = None,
     ) -> list[list[Generation]]:
         """Sample `n` generations for each prompt in one padded call.
 
@@ -614,6 +653,15 @@ class QwenGenerator:
             pad_token_id=pad_token_id,
             return_dict_in_generate=True,
         )
+        if thinking_budget is not None and do_sample:
+            generate_kwargs["logits_processor"] = [
+                _ThinkingBudgetProcessor(
+                    prompt_length=prompt_length,
+                    budget=thinking_budget,
+                    marker_id=THINK_END_TOKEN_ID,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                )
+            ]
         with torch.no_grad():
             outputs = self.model.generate(**inputs, **generate_kwargs)
 
