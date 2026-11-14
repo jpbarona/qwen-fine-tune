@@ -116,3 +116,71 @@ The dashboard entropy chart shows one point per measurement, not per step.
 - Whether the 250 held out MBPP rows stay as the final evaluation set.
 - Smallest workable group size. Try GRPO with as few samples per prompt as
   still trains, 4 or 6, as a later experiment. Default stays 8 for now.
+
+## Finding: run two collapsed at step 22
+
+Run `20261114T042144Z` reached reward 0.31 by step 2, then collapsed. From
+step 22 every completion ran to the 2,048 token cap without closing the
+reasoning block, so no code was parsed, every reward was -0.8, and every group
+had zero advantage. No checkpoint existed before step 50, so there was nothing
+to resume. The run was stopped at step 35.
+
+Contributing causes, in order:
+
+1. One optimizer update per prompt. A 26 prompt step meant 26 updates, about
+   300 updates by step 22, so the policy moved far faster than the step counter
+   suggests.
+2. No KL anchor, so nothing held the policy near the base model.
+3. Checkpoint and eval cadence of 50 and 100 steps, too coarse for a collapse
+   at step 22.
+4. Batching ran prompt groups one at a time, so the batch per generate call
+   stayed at 8 sequences.
+
+## D9. One update per step
+
+Gradients accumulate across every prompt group in a step, and the optimizer
+steps once at the end. Reason: per prompt updates multiply the learning rate by
+the batch size and caused the collapse. The step counter now matches the number
+of weight updates.
+
+## D10. Several prompts in one generate call
+
+Prompts are padded to a common length and sampled together, eight answers each,
+in one call. Reason: decode is CPU bound at 152 tokens per second, about 5
+percent of the roofline. One call per prompt leaves the card idle between calls.
+Gradients, rewards and parsing do not change.
+
+## D11. vLLM for rollouts
+
+Rollouts move to vLLM. Training stays on the Hugging Face model with LoRA
+weights synced to the engine. Reason: decode is the bottleneck. This is a
+separate ticket and a larger change than D9 or D10.
+
+## D12. Thinking budget schedule
+
+The thinking budget starts short, around 512 to 768 tokens, so that closing the
+reasoning block is reachable. Closing pays 0.25, which is below the worst
+correct answer of 0.8, so closing never beats correct code. The budget grows in
+stages as the close rate rises.
+
+Reason: while every rollout fails to close, every reward is identical and no
+shaping term can help. A short budget makes closing reachable and creates the
+variance the bonus needs.
+
+## D13. Checkpoint and eval every 20 steps
+
+Reason: the collapse arrived at step 22 and the first checkpoint was at 50.
+
+## D14. Docs live in docs/
+
+Every markdown document moves to `docs/`. `README.md` stays at the root for
+GitHub. "Go and update the docs" means update `DECISIONS.md` and `journal.md`,
+keep the docs index accurate, and leave the code alone.
+
+## Note on the length penalty
+
+The length term is implemented and on by default: soft limit 900 tokens, 0.001
+per token above it, floor 0.2. It is covered by tests. It is not written into
+`configs/real.toml`, so it is not visible or tunable there. Add the three keys
+to the config when the next run is prepared.
+

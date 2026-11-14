@@ -27,3 +27,14 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 21. Try GRPO with the fewest samples per prompt, later on
 22. Eight graphs alive at once wastes memory → backward per generation
 23. One prompt per step leaves the card idle → grow the batch to the memory floor
+24. Second run hit reward 0.31 by step two, then collapsed
+25. By step 22 the model stopped closing its reasoning block
+26. Every rollout ran to 2048 tokens, so reward froze at -0.8
+27. No checkpoint before step 50, so collapse could not be resumed
+28. Batching added groups per step but still ran them serially
+29. Decode is CPU bound, one core pinned at 97 percent
+30. Measured 152 tokens per second against a 2900 roofline
+31. Batch stopped at 26 because mastered questions shrank the pool
+32. No KL anchor, so nothing held the policy near the base
+33. Checkpoint and eval cadence was too coarse for this collapse
+34. Run two data saved locally before the VM was killed
