@@ -2,7 +2,7 @@
 
 **Status:** ready-for-agent
 
-Supersedes the four-arm design in `SPEC.md` for now. The arms are deferred, not
+Supersedes the four-arm design in `../docs/SPEC.md` for now. The arms are deferred, not
 deleted.
 
 ## Problem Statement
@@ -70,7 +70,7 @@ code, on a curriculum that starts at the easiest questions.
 
 ## Implementation Decisions
 
-- One arm runs for now. The arm dispatch table stays, the code arm is the default, and the other three remain implemented but unused. `SPEC.md` gets a note that the four-arm comparison is deferred, and `DECISIONS.md` remains the record of why.
+- One arm runs for now. The arm dispatch table stays, the code arm is the default, and the other three remain implemented but unused. `../docs/SPEC.md` gets a note that the four-arm comparison is deferred, and `../docs/DECISIONS.md` remains the record of why.
 - The completion cap becomes 2,048, counted over reasoning plus code.
 - `output_scores` is removed from generation. Entropy is computed during the update pass, every `entropy_every` updates, default 500, zero disables. The entropy chart becomes sparse points rather than one per step.
 - The reward is one pure function of a rollout outcome plus token count. Cases: truncated -0.6, syntax error or no code -0.5, compiles but fails every test 0.0, partial passed over total, all passed 1.0. Length term is 0.001 per token above 900, floor 0.2. The sum is clipped to -1 to 1.

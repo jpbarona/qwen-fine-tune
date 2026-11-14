@@ -1,8 +1,8 @@
 # rlvr
 
 A study of whether an LLM judge can train a small code model as well as unit
-tests. See `SPEC.md` for the study design and `PLAN.md` for the task breakdown.
-`journal.md` holds the running problem and fix notes. `DECISIONS.md` records
+tests. See `docs/SPEC.md` for the study design and `docs/PLAN.md` for the task breakdown.
+`docs/journal.md` holds the running problem and fix notes. `docs/DECISIONS.md` records
 the current choices.
 
 ## Install
@@ -441,4 +441,4 @@ exists but is not run live here: it needs a writable remote.
 
 ## Remote instance
 
-See `DEPLOY.md` for the live host, user, SSH key, and run commands.
+See `docs/DEPLOY.md` for the live host, user, SSH key, and run commands.
