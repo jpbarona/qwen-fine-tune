@@ -91,6 +91,10 @@ __all__ = [
 
 USAGE_ERROR = 2
 
+#: vLLM shares the card with the training model, so the engine gets a fraction
+#: of the memory and a context that covers one prompt plus one completion.
+VLLM_GPU_MEMORY_UTILISATION = 0.45
+
 
 class UsageError(ValueError):
     """A command line problem the user can fix."""
@@ -455,14 +459,8 @@ def build_test_runner(config: Config, *, fake: bool):
     return DockerTestRunner(questions)
 
 
-def build_generator(config: Config, *, fake: bool, trainable: bool = True):
-    """The real Qwen generator, or the fake generator.
-
-    `trainable` false loads the base model with no adapter and no optimizer.
-    The difficulty screen uses that. Training keeps the default.
-    """
-    if fake:
-        return FakeGenerator()
+def _qwen_generator(config: Config, *, trainable: bool):
+    """Build the Hugging Face generator, with one startup message on a miss."""
     from .qwen import QwenGenerator
 
     try:
@@ -484,6 +482,41 @@ def build_generator(config: Config, *, fake: bool, trainable: bool = True):
             "the real generator needs torch, transformers, and peft. "
             f"install the train extra or pass --fake. ({error})"
         ) from error
+
+
+def build_generator(config: Config, *, fake: bool, trainable: bool = True):
+    """The real generator, or the fake generator.
+
+    `trainable` false loads the base model with no adapter and no optimizer.
+    The difficulty screen uses that, and it always stays on the Hugging Face
+    path. Training honours `[training] engine`, building the vLLM wrapper when
+    it is `vllm`.
+    """
+    if fake:
+        return FakeGenerator()
+    if not trainable or config.engine == "hf":
+        return _qwen_generator(config, trainable=trainable)
+
+    from .vllm_backend import VLLMEngine, VLLMGenerator
+
+    # Build the engine first, so a missing vllm package fails before the
+    # training model is loaded.
+    try:
+        engine = VLLMEngine(
+            model_name=config.model_name,
+            revision=config.model_revision,
+            gpu_memory_utilisation=VLLM_GPU_MEMORY_UTILISATION,
+            max_model_len=config.max_prompt_tokens + config.max_completion_tokens,
+            max_lora_rank=config.lora_rank,
+        )
+    except ImportError as error:
+        raise UsageError(
+            "the vllm inference engine needs the vllm package. install it or "
+            'set engine = "hf" under [training]. '
+            f"({error})"
+        ) from error
+    trainer = _qwen_generator(config, trainable=True)
+    return VLLMGenerator(trainer=trainer, engine=engine)
 
 
 def build_screen_test_runner(questions, *, fake: bool):

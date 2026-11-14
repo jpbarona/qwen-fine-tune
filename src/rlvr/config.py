@@ -23,6 +23,7 @@ Optional keys, with the defaults shown:
     [training] generations_per_prompt = 8
     [training] epochs = 5
     [training] temperature = 0.9
+    [training] engine = "hf"  (also accepted as inference_engine)
     [training] learning_rate = 1e-5
     [training] lora_rank = 32
     [training] lora_alpha = 64
@@ -119,6 +120,11 @@ DEFAULT_CLIP_EPSILON = 0.2
 DEFAULT_KL_BETA = 0.0
 DEFAULT_SEED = 0
 
+#: Which backend samples rollouts. Training always stays on the Hugging Face
+#: model, so `vllm` changes the sampler only.
+DEFAULT_INFERENCE_ENGINE = "hf"
+INFERENCE_ENGINES: tuple[str, ...] = ("hf", "vllm")
+
 #: The band a run starts at, and the default carry over share.
 DEFAULT_STAGE = BANDS[0]
 
@@ -144,6 +150,7 @@ class Config:
     generations_per_prompt: int = DEFAULT_GENERATIONS_PER_PROMPT
     epochs: int = DEFAULT_EPOCHS
     temperature: float = DEFAULT_TEMPERATURE
+    engine: str = DEFAULT_INFERENCE_ENGINE
     learning_rate: float = DEFAULT_LEARNING_RATE
     lora_rank: int = DEFAULT_LORA_RANK
     lora_alpha: int = DEFAULT_LORA_ALPHA
@@ -280,6 +287,31 @@ def _optional_unit_float(raw: dict[str, Any], dotted: str, default: float) -> fl
     return number
 
 
+def _engine(raw: dict[str, Any], default: str) -> str:
+    """One of the allowed inference engines, or `default` when absent.
+
+    `training.engine` is the documented key. `training.inference_engine` is
+    accepted as the same setting, so the sample config's spelling also works.
+    Conflicting values are rejected rather than silently picking one.
+    """
+    primary = _optional(raw, "training.engine", None)
+    alias = _optional(raw, "training.inference_engine", None)
+    if primary is not None and alias is not None and primary != alias:
+        raise ConfigError(
+            "config: 'training.engine' and 'training.inference_engine' disagree, "
+            f"got {_shown(primary)} and {_shown(alias)}"
+        )
+    value = primary if primary is not None else alias
+    if value is None:
+        return default
+    if not isinstance(value, str) or value not in INFERENCE_ENGINES:
+        raise ConfigError(
+            "config: 'training.engine' must be one of "
+            f"{', '.join(INFERENCE_ENGINES)}, got {_shown(value)}"
+        )
+    return value
+
+
 def _optional_int_none(raw: dict[str, Any], dotted: str) -> int | None:
     """An optional positive integer that may be absent (None), never zero."""
     value = _optional(raw, dotted, None)
@@ -336,6 +368,7 @@ def load_config(path: str | Path) -> Config:
         temperature=_optional_float(
             raw, "training.temperature", DEFAULT_TEMPERATURE, positive=True
         ),
+        engine=_engine(raw, DEFAULT_INFERENCE_ENGINE),
         learning_rate=_optional_float(
             raw, "training.learning_rate", DEFAULT_LEARNING_RATE, positive=True
         ),

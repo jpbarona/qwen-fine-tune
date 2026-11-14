@@ -169,9 +169,16 @@ mask back.
 
 ## D11. vLLM for rollouts
 
-Rollouts move to vLLM. Training stays on the Hugging Face model with LoRA
-weights synced to the engine. Reason: decode is the bottleneck. This is a
-separate ticket and a larger change than D9 or D10.
+The seam is built. `VLLMGenerator` implements the `Generator` protocol and
+samples token ids with a vLLM engine while the Hugging Face model keeps the LoRA
+adapter and does the update. The engine is optional: `[training] engine`
+defaults to `hf`, so the existing path is unchanged, and `vllm` is a startup
+error when the package is missing.
+
+Weight sync is the risk. One `sync` call per optimizer step sends the adapter
+weights to the engine through `collective_rpc`, never per prompt. A vLLM build
+without that hook raises instead of sampling from stale weights. Training still
+recomputes old logprobs on the training model, so engine logprobs are not used.
 
 ## D12. Thinking budget schedule
 
