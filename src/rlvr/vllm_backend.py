@@ -147,7 +147,12 @@ class VLLMGenerator:
         return self.generate_batch([prompt], n=n, temperature=temperature)[0]
 
     def generate_batch(
-        self, prompts: Sequence[Prompt], *, n: int, temperature: float
+        self,
+        prompts: Sequence[Prompt],
+        *,
+        n: int,
+        temperature: float,
+        thinking_budget: int | None = None,
     ) -> list[list[Generation]]:
         """Sample every prompt group in one engine call.
 
@@ -156,6 +161,10 @@ class VLLMGenerator:
         per prompt. The trainer turns those rows into the same `Generation`
         objects the Hugging Face path builds and caches the old logprobs, so the
         update pass does not depend on engine logprobs.
+
+        `thinking_budget` is enforced by the Hugging Face path only. vLLM stays
+        opt-in until its weight copy is proven, so it is accepted for the
+        protocol and unused here.
         """
         prompt_list = list(prompts)
         if not prompt_list:

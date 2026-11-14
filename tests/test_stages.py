@@ -178,7 +178,7 @@ class StubGenerator:
             for _ in range(n)
         ]
 
-    def generate_batch(self, prompts, *, n: int, temperature: float):
+    def generate_batch(self, prompts, *, n: int, temperature: float, thinking_budget: int | None = None):
         return [
             self.generate(prompt, n=n, temperature=temperature) for prompt in prompts
         ]

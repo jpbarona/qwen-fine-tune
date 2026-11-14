@@ -88,6 +88,7 @@ from .reward import (
     DEFAULT_LENGTH_PENALTY_PER_TOKEN,
     DEFAULT_LENGTH_SOFT_LIMIT,
 )
+from .budget import DEFAULT_THINKING_BUDGET_START
 from .stages import BANDS, DEFAULT_CARRY_OVER_RATIO
 
 __all__ = ["Config", "ConfigError", "default_config_path", "load_config"]
@@ -156,6 +157,7 @@ class Config:
     lora_alpha: int = DEFAULT_LORA_ALPHA
     max_prompt_tokens: int = DEFAULT_MAX_PROMPT_TOKENS
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
+    thinking_budget_start: int = DEFAULT_THINKING_BUDGET_START
     entropy_every_steps: int = DEFAULT_ENTROPY_EVERY_STEPS
     clip_epsilon: float = DEFAULT_CLIP_EPSILON
     kl_beta: float = DEFAULT_KL_BETA
@@ -383,6 +385,9 @@ def load_config(path: str | Path) -> Config:
         ),
         max_completion_tokens=_optional_positive_int(
             raw, "training.max_completion_tokens", DEFAULT_MAX_COMPLETION_TOKENS
+        ),
+        thinking_budget_start=_optional_positive_int(
+            raw, "training.thinking_budget_start", DEFAULT_THINKING_BUDGET_START
         ),
         entropy_every_steps=_optional_non_negative_int(
             raw, "training.entropy_every_steps", DEFAULT_ENTROPY_EVERY_STEPS
