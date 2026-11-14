@@ -13,7 +13,7 @@ Qwen3-0.6B GRPO reward study. Pointers only.
 - `configs/` — `real.toml` and `smoke.toml`.
 - `data/mbpp_full.jsonl` — 964 MBPP rows, fixed 714 and 250 split.
 - `src/rlvr/` — package source.
-- `tests/` — 513 tests, no GPU tests.
+- `tests/` — 630 tests, no GPU tests.
 - `runs/` — run folders, kept as study data.
 
 The dead GPU instance home is backed up at

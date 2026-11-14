@@ -22,11 +22,13 @@ import hashlib
 
 from .experiment import Generation, JudgeResult, Prompt, Outcome
 from .memory import MemoryReport
+from .stages import BANDS
 
 __all__ = [
     "FakeGenerator",
     "FakeJudge",
     "FakeTestRunner",
+    "fake_band_labels",
     "fake_memory",
     "fake_prompts",
 ]
@@ -70,6 +72,41 @@ def fake_prompts(count: int) -> list[Prompt]:
         )
         for index in range(count)
     ]
+
+
+def fake_band_labels(prompts: list[Prompt] | tuple[Prompt, ...]) -> dict[str, str]:
+    """Deterministic bands for a fake run.
+
+    The fake run has to show stage one exhausting and stage two starting. The
+    first prompt, in id order, that the fake runner fully passes goes alone
+    into the first band. One training step then masters it, the pool empties,
+    and the next step is in the second band. The remaining prompts are spread
+    round robin over the later bands.
+
+    The result depends only on the prompt ids and the fake code path, so the
+    same command always moves stage at the same step.
+    """
+    ordered = sorted(prompts, key=lambda prompt: prompt.prompt_id)
+    if not ordered:
+        return {}
+
+    generator, runner = FakeGenerator(), FakeTestRunner()
+    first = ordered[0]
+    for prompt in ordered:
+        generation = generator.generate(
+            prompt, n=1, temperature=TRAINING_TEMPERATURE
+        )[0]
+        outcome = runner.run(prompt, generation.code)
+        if outcome.tests_total > 0 and outcome.tests_passed == outcome.tests_total:
+            first = prompt
+            break
+
+    later_bands = BANDS[1:] or BANDS
+    labels = {first.prompt_id: BANDS[0]}
+    rest = [prompt for prompt in ordered if prompt.prompt_id != first.prompt_id]
+    for index, prompt in enumerate(rest):
+        labels[prompt.prompt_id] = later_bands[index % len(later_bands)]
+    return labels
 
 
 def fake_memory() -> MemoryReport:

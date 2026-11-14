@@ -24,7 +24,9 @@ training. `n` is the number of generations requested for one prompt.
 
 Training samples one prompt group per step: 8 generations, all tested, judged
 only on a full pass per arm, then one `update` call with the group rewards.
-Evaluation stays greedy with n=1. Resume and budget guards wrap the same loop.
+A staged run trains from the active stage pool and drops a question once any
+generation fully passes it. Evaluation stays greedy with n=1. Resume and budget
+guards wrap the same loop.
 """
 
 from __future__ import annotations
@@ -49,6 +51,7 @@ from .reward import (
     uses_process_judge,
 )
 from .schema import RolloutRecord
+from .stages import BANDS, UNSTAGED_STAGE, Stage
 
 __all__ = [
     "Experiment",
@@ -208,6 +211,7 @@ class RunSummary:
     mean_reward: float
     pass_at_1: float
     stop_reason: str = "completed"
+    stage: str | None = None
 
 
 @dataclass
@@ -217,6 +221,13 @@ class Experiment:
     `prompts` holds the training questions. `eval_prompts` holds the held-out
     test questions and must be non-empty. The two lists must not overlap. The
     CLI builds both from the fixed MBPP split.
+
+    `stages` is the ordered curriculum built by `stages.build_stages`. When it
+    is empty the loop keeps the old behaviour: prompt groups cycle through
+    `prompts` and no question is removed. When it is present, the loop trains
+    from the active stage pool, removes a question after any full pass, and
+    moves to the next stage once the pool is empty. Exhausting the last stage
+    ends the run with `stop_reason` `"curriculum_complete"`.
 
     `memory` is an optional callable that reads the allocator for the current
     step. The CLI passes `read_torch_memory` on a real run and `fake_memory` on
@@ -231,6 +242,7 @@ class Experiment:
     test_runner: TestRunner
     store: Store
     prompts: Sequence[Prompt]
+    stages: Sequence[Stage[Prompt]] = ()
     eval_prompts: Sequence[Prompt] = ()
     resume_step: int = 0
     prior_evaluations: Sequence[Mapping[str, Any]] = ()
@@ -258,6 +270,8 @@ class Experiment:
                 "experiment needs at least one evaluation prompt. "
                 "Pass the held-out test questions as eval_prompts."
             )
+        if self.stages and all(not stage.train for stage in self.stages):
+            raise ValueError("curriculum stages hold no training questions")
 
         resumed = self.resume_step > 0
         if not resumed:
@@ -278,15 +292,34 @@ class Experiment:
         if self.config.max_steps is not None:
             effective_steps = min(effective_steps, self.config.max_steps)
 
+        staged = bool(self.stages)
+        stage_index = self._first_open_stage(0) if staged else 0
+        stage_pool: list[Prompt] = (
+            list(self.stages[stage_index].train) if staged else []
+        )
+        stage_step = 0
+        active_stage = (
+            self.stages[stage_index].name if staged else UNSTAGED_STAGE
+        )
+
         rollouts = 0
         reward_sum = 0.0
         judge_calls = 0
         last_step = self.resume_step
         stop_reason = "completed"
+        curriculum_done = False
         evaluations: list[dict[str, Any]] = [dict(e) for e in self.prior_evaluations]
 
         for step in range(self.resume_step + 1, effective_steps + 1):
-            step_records, truncated, prompt_truncated, entropy = self._training_step(step)
+            if staged:
+                prompt = stage_pool[stage_step % len(stage_pool)]
+                active_stage = self.stages[stage_index].name
+            else:
+                prompt = self._prompt_for_step(step)
+
+            step_records, truncated, prompt_truncated, entropy, mastered = (
+                self._training_step(step, prompt, active_stage)
+            )
             last_step = step
             for record in step_records:
                 self.store.append_rollout(record)
@@ -297,12 +330,26 @@ class Experiment:
                 self._metric_row(
                     step,
                     step_records,
-                    truncated,
-                    prompt_truncated,
-                    entropy,
-                    self._memory_report(),
+                    stage=active_stage,
+                    truncated=truncated,
+                    prompt_truncated=prompt_truncated,
+                    mean_entropy=entropy,
+                    memory=self._memory_report(),
                 )
             )
+
+            if staged:
+                stage_step += 1
+                if mastered and prompt in stage_pool:
+                    stage_pool.remove(prompt)
+                if not stage_pool:
+                    next_index = self._first_open_stage(stage_index + 1)
+                    if next_index < len(self.stages):
+                        stage_index = next_index
+                        stage_pool = list(self.stages[next_index].train)
+                        stage_step = 0
+                    else:
+                        curriculum_done = True
 
             if step % self.config.eval_every_steps == 0:
                 evaluations.append(
@@ -327,6 +374,10 @@ class Experiment:
                 stop_reason = "max_judge_calls"
                 break
 
+            if curriculum_done:
+                stop_reason = "curriculum_complete"
+                break
+
         if stop_reason == "completed" and self.config.max_steps is not None:
             if last_step >= self.config.max_steps and self.config.max_steps < self.config.steps:
                 stop_reason = "max_steps"
@@ -345,6 +396,7 @@ class Experiment:
             mean_reward=reward_sum / rollouts if rollouts else 0.0,
             pass_at_1=final["pass_at_1"],
             stop_reason=stop_reason,
+            stage=active_stage if staged else None,
         )
 
     def build_meta(self) -> dict[str, Any]:
@@ -360,6 +412,19 @@ class Experiment:
             "judge_model": config.judge_model,
             "split_seed": config.split_seed,
             "config": config.raw,
+            "curriculum": {
+                "bands": list(BANDS),
+                "start_stage": self.stages[0].name if self.stages else None,
+                "carry_over_ratio": config.carry_over_ratio,
+                "stages": [
+                    {
+                        "name": stage.name,
+                        "train": len(stage.train),
+                        "held_out": len(stage.held_out),
+                    }
+                    for stage in self.stages
+                ],
+            },
             "trainer": {
                 "method": "grpo",
                 "model_name": config.model_name,
@@ -393,9 +458,15 @@ class Experiment:
         group per step, cycling through the training prompts."""
         return self.prompts[(step - 1) % len(self.prompts)]
 
+    def _first_open_stage(self, index: int) -> int:
+        """The first stage at or after `index` that has training questions."""
+        while index < len(self.stages) and not self.stages[index].train:
+            index += 1
+        return index
+
     def _training_step(
-        self, step: int
-    ) -> tuple[list[RolloutRecord], int, int, float | None]:
+        self, step: int, prompt: Prompt, stage: str
+    ) -> tuple[list[RolloutRecord], int, int, float | None, bool]:
         """Sample one prompt group, run and judge all of it, update once.
 
         All 8 generations are tested. The passing ones are judged in two batch
@@ -403,10 +474,10 @@ class Experiment:
         judge concurrency is used. A failed rollout still costs no judge call.
         The group's rewards are passed to `update` once, with the entropy
         measurement flag set on the configured cadence. Returns the 8 records,
-        the counts of truncated and prompt-truncated generations, and the mean
-        entropy when this step measured it.
+        the counts of truncated and prompt-truncated generations, the mean
+        entropy when this step measured it, and whether any generation fully
+        passed. A full pass is what removes the question from a stage pool.
         """
-        prompt = self._prompt_for_step(step)
         generations = self.generator.generate(
             prompt,
             n=self.config.generations_per_prompt,
@@ -442,6 +513,7 @@ class Experiment:
                 generation,
                 outcome,
                 step,
+                stage=stage,
                 judge_score=judge_scores[index],
                 process_score=process_scores[index],
                 cache_hit=cache_hits[index],
@@ -460,7 +532,8 @@ class Experiment:
         prompt_truncated = sum(
             1 for generation in generations if generation.prompt_truncated
         )
-        return records, truncated, prompt_truncated, entropy
+        mastered = bool(passing)
+        return records, truncated, prompt_truncated, entropy, mastered
 
     def _measures_entropy(self, step: int) -> bool:
         """Whether this step is an entropy measurement step.
@@ -490,6 +563,7 @@ class Experiment:
         outcome: Outcome,
         step: int,
         *,
+        stage: str,
         judge_score: float | None,
         process_score: float | None,
         cache_hit: bool,
@@ -530,6 +604,7 @@ class Experiment:
         return RolloutRecord(
             arm=self.arm,
             step=step,
+            stage=stage,
             prompt_id=prompt.prompt_id,
             reasoning=generation.reasoning,
             code=generation.code,
@@ -572,6 +647,8 @@ class Experiment:
     def _metric_row(
         step: int,
         records: Sequence[RolloutRecord],
+        *,
+        stage: str,
         truncated: int = 0,
         prompt_truncated: int = 0,
         mean_entropy: float | None = None,
@@ -587,6 +664,7 @@ class Experiment:
         row: dict[str, Any] = {
             "step": step,
             "arm": records[0].arm if records else None,
+            "stage": stage,
             "rollouts": count,
             "mean_reward": sum(record.reward for record in records) / count,
             "pass_rate": passed / count,

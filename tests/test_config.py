@@ -348,3 +348,30 @@ def test_seed_defaults_to_zero_and_is_read(write_config) -> None:
     assert load_config(write_config(GOOD)).seed == 0
     path = write_config(GOOD + "\n[training]\nseed = 7\n", name="seed.toml")
     assert load_config(path).seed == 7
+
+
+def test_curriculum_defaults(write_config) -> None:
+    config = load_config(write_config(GOOD))
+    assert config.stage == "very easy"
+    assert config.carry_over_ratio == 0.2
+
+
+def test_curriculum_settings_are_read(write_config) -> None:
+    path = write_config(
+        GOOD + '\n[curriculum]\nstage = "hard"\ncarry_over_ratio = 0.35\n',
+        name="curriculum.toml",
+    )
+    config = load_config(path)
+    assert config.stage == "hard"
+    assert config.carry_over_ratio == 0.35
+
+
+@pytest.mark.parametrize(
+    "line",
+    ['stage = "easy"', "stage = 3", "carry_over_ratio = 1.0", "carry_over_ratio = -0.1"],
+)
+def test_a_bad_curriculum_setting_is_named(tmp_path, line: str) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(GOOD + f"\n[curriculum]\n{line}\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="curriculum"):
+        load_config(path)

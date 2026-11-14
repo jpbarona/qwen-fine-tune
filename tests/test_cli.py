@@ -642,6 +642,86 @@ def test_eval_final_questions_caps_the_final_eval_pool(tmp_path, capsys) -> None
     assert payload["evaluations"][-1]["count"] == 10
 
 
+def test_the_fake_run_moves_from_the_first_stage_to_the_second(
+    config_path, tmp_path, capsys
+) -> None:
+    runs_root = tmp_path / "runs"
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+    capsys.readouterr()
+
+    run_dir = next((runs_root / "code-score").iterdir())
+    metrics = [
+        json.loads(line)
+        for line in (run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    records = [
+        json.loads(line)
+        for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert [row["stage"] for row in metrics] == ["very easy", "medium"]
+    assert {record["stage"] for record in records} <= {row["stage"] for row in metrics}
+    assert {record["stage"] for record in records} == {"very easy", "medium"}
+
+
+def test_build_curriculum_uses_the_difficulty_labels(
+    write_config, monkeypatch
+) -> None:
+    from rlvr import cli
+    from rlvr.experiment import Prompt
+
+    config = load_config(write_config())
+    prompts = [Prompt(f"mbpp-{index:04d}", "p") for index in range(4)]
+    monkeypatch.setattr(
+        cli,
+        "load_band_labels",
+        lambda: {"mbpp-0000": "very easy", "mbpp-0001": "hard"},
+    )
+
+    stages = cli.build_curriculum(config, prompts, fake=False)
+    by_name = {stage.name: stage for stage in stages}
+    assert [stage.name for stage in stages] == [
+        "very easy",
+        "medium",
+        "hard",
+        "very hard",
+    ]
+    assert "mbpp-0000" in {
+        prompt.prompt_id for prompt in by_name["very easy"].train + by_name["very easy"].held_out
+    }
+    assert "mbpp-0001" in {
+        prompt.prompt_id for prompt in by_name["hard"].train + by_name["hard"].held_out
+    }
+    # The missing ids fall back to the configured start band.
+    assert "mbpp-0002" in {
+        prompt.prompt_id
+        for prompt in by_name["very easy"].train + by_name["very easy"].held_out
+    }
+
+
+def test_build_curriculum_degrades_when_the_label_file_is_absent(
+    write_config, monkeypatch
+) -> None:
+    from rlvr import cli
+    from rlvr.experiment import Prompt
+
+    config = load_config(write_config())
+    prompts = [Prompt("mbpp-0000", "p"), Prompt("mbpp-0001", "p")]
+    monkeypatch.setattr(cli, "load_band_labels", lambda: {})
+
+    stages = cli.build_curriculum(config, prompts, fake=False)
+    assert [stage.name for stage in stages] == [
+        "very easy",
+        "medium",
+        "hard",
+        "very hard",
+    ]
+    placed = {prompt.prompt_id for prompt in stages[0].train + stages[0].held_out}
+    assert placed == {"mbpp-0000", "mbpp-0001"}
+
+
 def test_build_test_runner_uses_fakes_or_docker(write_config) -> None:
     from rlvr.cli import build_test_runner
     from rlvr.docker_runner import DockerTestRunner

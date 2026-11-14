@@ -38,7 +38,13 @@ from .data import (
     prompts_for_questions,
 )
 from .experiment import Experiment, Judge, JudgeResult, Prompt
-from .fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_memory
+from .fake import (
+    FakeGenerator,
+    FakeJudge,
+    FakeTestRunner,
+    fake_band_labels,
+    fake_memory,
+)
 from .judge import JudgeClient, MissingAPIKeyError
 from .memory import configure_expandable_segments, read_torch_memory
 from .publish import PublishError, publish_report
@@ -50,9 +56,24 @@ from .reward import (
     uses_process_judge,
 )
 from .runs import RunStore
+from .stages import (
+    BANDS,
+    LabelledRow,
+    Stage,
+    StageError,
+    build_stages as build_ordered_stages,
+    load_band_labels,
+)
 from .summary import SummaryError, format_summary, load_reports, write_report
 
-__all__ = ["build_judge", "build_parser", "build_prompts", "build_test_runner", "main"]
+__all__ = [
+    "build_curriculum",
+    "build_judge",
+    "build_parser",
+    "build_prompts",
+    "build_test_runner",
+    "main",
+]
 
 USAGE_ERROR = 2
 
@@ -225,6 +246,47 @@ def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
     return train_prompts, eval_prompts
 
 
+def build_curriculum(
+    config: Config, prompts: list[Prompt], *, fake: bool
+) -> tuple[Stage[Prompt], ...]:
+    """Build the ordered stages for the training prompts.
+
+    A real run reads the difficulty label file. The loader returns an empty
+    mapping when the file is absent, and unlabelled prompts fall back to the
+    configured start band, so this task does not block on the label data.
+
+    The fake path supplies its own deterministic labels. The first fake prompt
+    that fully passes is put alone in the first band, so the fake run shows a
+    stage one exhaustion and a stage two start at a fixed step.
+    """
+    if fake:
+        labels = fake_band_labels(prompts)
+    else:
+        try:
+            labels = load_band_labels()
+        except StageError as error:
+            raise UsageError(f"cannot load difficulty labels: {error}") from error
+
+    rows = [
+        LabelledRow(
+            prompt_id=prompt.prompt_id,
+            band=labels.get(prompt.prompt_id, config.stage),
+            item=prompt,
+        )
+        for prompt in prompts
+    ]
+    try:
+        return build_ordered_stages(
+            rows,
+            BANDS,
+            config.carry_over_ratio,
+            seed=config.split_seed,
+            start_stage=config.stage,
+        )
+    except StageError as error:
+        raise UsageError(f"cannot build curriculum stages: {error}") from error
+
+
 def build_test_runner(config: Config, *, fake: bool):
     """The Docker runner over the full split, or the fake runner.
 
@@ -289,6 +351,7 @@ def run_command(args: argparse.Namespace) -> int:
     judge = build_judge(args.arm, config, fake=args.fake)
 
     train_prompts, eval_prompts = build_prompts(config)
+    stages = build_curriculum(config, train_prompts, fake=args.fake)
     if config.eval_final_questions is not None:
         eval_prompts = eval_prompts[: config.eval_final_questions]
 
@@ -336,6 +399,7 @@ def run_command(args: argparse.Namespace) -> int:
         test_runner=test_runner,
         store=store,
         prompts=train_prompts,
+        stages=stages,
         eval_prompts=eval_prompts,
         resume_step=resume_step,
         prior_evaluations=prior_evaluations,
@@ -347,8 +411,14 @@ def run_command(args: argparse.Namespace) -> int:
     print(f"arm={summary.arm} steps={summary.steps} rollouts={summary.rollouts}")
     print(
         f"mean_reward={summary.mean_reward:.4f} pass_at_1={summary.pass_at_1:.4f} "
-        f"stop_reason={summary.stop_reason} run folder: {summary.run_dir}"
+        f"stop_reason={summary.stop_reason} stage={summary.stage or '-'} "
+        f"run folder: {summary.run_dir}"
     )
+    if summary.stop_reason == "curriculum_complete":
+        print(
+            "curriculum complete: every stage pool was exhausted "
+            f"after {summary.steps} steps"
+        )
     return 0
 
 

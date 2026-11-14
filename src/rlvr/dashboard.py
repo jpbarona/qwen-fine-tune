@@ -34,6 +34,7 @@ from typing import Any, Iterable, Iterator, Mapping
 from urllib.parse import urlsplit
 
 from .memory import MEMORY_METRIC_FIELDS
+from .stages import BANDS
 
 __all__ = ["collect_dashboard", "render_html", "sample_gpu", "serve_dashboard"]
 
@@ -381,6 +382,42 @@ def _tests_passed_histogram(passed_counts: list[int]) -> dict[str, Any]:
     return {"bins": list(range(highest + 1)), "counts": counts}
 
 
+def _band_pass_rates(run_dir: Path) -> list[dict[str, Any]]:
+    """Full pass rate per curriculum band, from the rollout tail.
+
+    A rollout counts as passed only when every test passed, matching the
+    training pool rule. Bands appear in the fixed order first, then any band
+    name the run folder carries that is not one of the four.
+    """
+    counts: dict[str, int] = {}
+    passed: dict[str, int] = {}
+    for record in _rollout_records(run_dir / ROLLOUTS_NAME):
+        band = _string(record.get("stage"))
+        if band is None:
+            continue
+        counts[band] = counts.get(band, 0) + 1
+        passed_count = _integer(record.get("tests_passed"))
+        total = _integer(record.get("tests_total"))
+        if (
+            passed_count is not None
+            and total is not None
+            and total > 0
+            and passed_count == total
+        ):
+            passed[band] = passed.get(band, 0) + 1
+
+    ordered = [band for band in BANDS if band in counts]
+    ordered += sorted(band for band in counts if band not in BANDS)
+    return [
+        {
+            "band": band,
+            "rollouts": counts[band],
+            "pass_rate": passed.get(band, 0) / counts[band],
+        }
+        for band in ordered
+    ]
+
+
 def _distributions(run_dir: Path) -> dict[str, Any]:
     rewards: list[float] = []
     passed_counts: list[int] = []
@@ -422,6 +459,8 @@ def _waiting_run(arm: str) -> dict[str, Any]:
         "status": "waiting",
         "steps_done": 0,
         "target_steps": None,
+        "stage": None,
+        "bands": [],
         "latest": {name: None for name in LATEST_FIELDS},
         "series": {"steps": []} | {name: [] for name in SERIES_FIELDS},
         "pass_at_1": {"checkpoint": {"steps": [], "values": []}, "final": {"steps": [], "values": []}},
@@ -450,6 +489,8 @@ def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
         "status": _status(eval_payload, run_dir / METRICS_NAME, now),
         "steps_done": _steps_done(rows),
         "target_steps": _target_steps(meta),
+        "stage": _string(rows[-1].get("stage")) if rows else None,
+        "bands": _band_pass_rates(run_dir),
         "latest": _latest(rows),
         "series": _series(rows),
         "pass_at_1": _pass_at_1_series(eval_payload),
@@ -643,6 +684,7 @@ _SCRIPT = """\
       '</div>' +
       '<div class="flex items-center gap-3 text-xs text-zinc-500">' +
         pill(run.status) +
+        '<span class="tnum">stage <span class="text-zinc-300">' + esc(run.stage || "-") + '</span></span>' +
         '<span class="tnum">started ' + esc(run.started_utc || run.started || "-") + '</span>' +
         '<span class="tnum">elapsed ' + fmtElapsed(run.elapsed_seconds) + '</span>' +
         '<span class="tnum">steps ' + (run.steps_done || 0) + target + '</span>' +
@@ -668,6 +710,28 @@ _SCRIPT = """\
           '<td class="px-3 py-1.5">' + esc(it.kind || "") + '</td>' +
           '<td class="px-3 py-1.5 text-right tnum">' + (it.count === null || it.count === undefined ? "-" : it.count) + '</td>' +
           '<td class="px-3 py-1.5 text-right tnum">' + fmt(it.pass_at_1) + '</td></tr>';
+      }
+    }
+    html += '</tbody></table></div>';
+    return html;
+  }
+  function bandTable(bands) {
+    var html = '<div class="mt-3 border border-zinc-800">';
+    html += '<div class="px-3 py-2 text-[11px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">pass rate per band</div>';
+    html += '<table class="w-full text-xs">';
+    html += '<thead><tr class="text-left text-zinc-500">' +
+      '<th class="px-3 py-1.5 font-normal">band</th>' +
+      '<th class="px-3 py-1.5 font-normal text-right">rollouts</th>' +
+      '<th class="px-3 py-1.5 font-normal text-right">pass rate</th></tr></thead><tbody>';
+    if (!bands.length) {
+      html += '<tr><td colspan="3" class="px-3 py-2 text-zinc-500">no stage records</td></tr>';
+    } else {
+      for (var b = 0; b < bands.length; b++) {
+        var band = bands[b];
+        html += '<tr class="border-t border-zinc-800/60">' +
+          '<td class="px-3 py-1.5">' + esc(band.band || "") + '</td>' +
+          '<td class="px-3 py-1.5 text-right tnum">' + (band.rollouts === null || band.rollouts === undefined ? "-" : band.rollouts) + '</td>' +
+          '<td class="px-3 py-1.5 text-right tnum">' + fmt(band.pass_rate) + '</td></tr>';
       }
     }
     html += '</tbody></table></div>';
@@ -725,6 +789,7 @@ _SCRIPT = """\
     html += chartCard(p + "-testshist", "tests passed distribution");
     html += '</div>';
 
+    html += bandTable(run.bands || []);
     html += evaluationTable(evals);
     html += '</section>';
     return html;
