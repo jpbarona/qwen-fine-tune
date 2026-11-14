@@ -24,9 +24,11 @@ from pathlib import Path
 from typing import Iterable
 
 from .experiment import Prompt
+from .stages import BANDS, DEFAULT_LABELS_PATH
 
 __all__ = [
     "DEFAULT_DATA_PATH",
+    "DEFAULT_LABELS_PATH",
     "PROMPT_TEMPLATE",
     "TEST_SIZE",
     "TOTAL_QUESTIONS",
@@ -36,6 +38,7 @@ __all__ = [
     "MBPPQuestion",
     "format_prompt",
     "load_dataset",
+    "load_difficulty_labels",
     "load_split",
     "prompt_for_question",
     "prompt_id_for",
@@ -70,13 +73,19 @@ class DatasetError(ValueError):
 
 @dataclass(frozen=True)
 class MBPPQuestion:
-    """One MBPP row. The tests stay on the runner side, never in the prompt."""
+    """One MBPP row. The tests stay on the runner side, never in the prompt.
+
+    `prompt_id` is empty for an MBPP row and derived from the task id. A
+    synthetic row sets it, because its numeric id lives in its own range and
+    the prompt id must say where it came from.
+    """
 
     task_id: int
     text: str
     test_list: tuple[str, ...]
     test_setup_code: str = ""
     source_split: str = ""
+    prompt_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -212,8 +221,92 @@ def load_split(
     return split_questions(load_dataset(path), seed, train_size, test_size)
 
 
+def load_difficulty_labels(
+    split: DatasetSplit,
+    path: str | Path = DEFAULT_LABELS_PATH,
+) -> dict[str, str]:
+    """Read the band label file and check it against the training split.
+
+    The file holds one row per training prompt id, in the same order as
+    `split.train`. Every training id must appear exactly once and no other id
+    may appear. Bands come from `BANDS`. The returned mapping keeps the split
+    order, so a caller that iterates it sees the same order as the split.
+    """
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise DatasetError(f"difficulty label file not found: {file_path}")
+
+    expected = [prompt_id_for(question) for question in split.train]
+    expected_set = set(expected)
+
+    labels: dict[str, str] = {}
+    try:
+        lines = file_path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise DatasetError(
+            f"cannot read difficulty labels {file_path}: {error}"
+        ) from error
+
+    for line_number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise DatasetError(
+                f"difficulty labels line {line_number}: not valid JSON: {error}"
+            ) from error
+        if not isinstance(row, dict):
+            raise DatasetError(
+                f"difficulty labels line {line_number}: row must be an object"
+            )
+
+        prompt_id = row.get("prompt_id")
+        if not isinstance(prompt_id, str) or not prompt_id.strip():
+            raise DatasetError(
+                f"difficulty labels line {line_number}: 'prompt_id' must be a "
+                f"non-empty string"
+            )
+        band = row.get("band")
+        if not isinstance(band, str) or band not in BANDS:
+            raise DatasetError(
+                f"difficulty labels line {line_number}: unknown band {band!r}, "
+                f"expected one of {', '.join(BANDS)}"
+            )
+        if prompt_id in labels:
+            raise DatasetError(
+                f"difficulty labels line {line_number}: duplicate prompt id "
+                f"{prompt_id!r}"
+            )
+        if prompt_id not in expected_set:
+            raise DatasetError(
+                f"difficulty labels line {line_number}: unknown prompt id "
+                f"{prompt_id!r}, it is not a training question"
+            )
+        position = len(labels)
+        if expected[position] != prompt_id:
+            raise DatasetError(
+                f"difficulty labels line {line_number}: prompt id {prompt_id!r} "
+                f"is out of split order, expected {expected[position]!r}"
+            )
+        labels[prompt_id] = band
+
+    missing = [prompt_id for prompt_id in expected if prompt_id not in labels]
+    if missing:
+        shown = ", ".join(missing[:5])
+        more = "" if len(missing) <= 5 else f" and {len(missing) - 5} more"
+        raise DatasetError(
+            f"difficulty labels are missing {len(missing)} training id(s): "
+            f"{shown}{more}"
+        )
+
+    return labels
+
+
 def prompt_id_for(question: MBPPQuestion) -> str:
     """The stable prompt id for one question."""
+    if question.prompt_id:
+        return question.prompt_id
     return f"mbpp-{question.task_id}"
 
 

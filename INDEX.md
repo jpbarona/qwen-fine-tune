@@ -12,9 +12,12 @@ Qwen3-0.6B GRPO reward study. Pointers only.
 - `README.md` — install, run, and test commands.
 - `configs/` — `real.toml` and `smoke.toml`.
 - `data/mbpp_full.jsonl` — 964 MBPP rows, fixed 714 and 250 split.
+- `data/difficulty_labels.jsonl` — one band per training row, in split order.
+- `data/synthetic_easy.jsonl` — 50 very easy rows for the first stage.
 - `src/rlvr/` — package source.
 - `src/rlvr/batching.py` — prompt count per step, chosen from free memory.
-- `tests/` — 688 tests, no GPU tests.
+- `src/rlvr/synthetic.py` — synthetic row loader and prompt id rule.
+- `tests/` — 711 tests, no GPU tests.
 - `runs/` — run folders, kept as study data.
 
 The dead GPU instance home is backed up at
