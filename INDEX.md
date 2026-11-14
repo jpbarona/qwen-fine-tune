@@ -17,7 +17,7 @@ Qwen3-0.6B GRPO reward study. Pointers only.
 - `src/rlvr/` — package source.
 - `src/rlvr/batching.py` — prompt count per step, chosen from free memory.
 - `src/rlvr/synthetic.py` — synthetic row loader and prompt id rule.
-- `tests/` — 711 tests, no GPU tests.
+- `tests/` — 725 tests, no GPU tests.
 - `runs/` — run folders, kept as study data.
 
 The dead GPU instance home is backed up at

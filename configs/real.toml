@@ -35,12 +35,13 @@ lora_rank = 32
 lora_alpha = 64
 max_prompt_tokens = 512
 max_completion_tokens = 2048
-# Measure entropy on the update pass every N updates. Zero disables it.
-entropy_every = 500
+# Measure entropy every N training steps. Zero disables it.
+entropy_every_steps = 500
 clip_epsilon = 0.2
 kl_beta = 0.0
 # Steps start at two prompts and grow while free memory stays at or above this
-# floor, in MiB. The largest size that fit is kept. Never below one prompt.
+# floor and at or above one prompt group's measured footprint, in MiB. The
+# largest size that fit is kept. Never below one prompt.
 memory_floor_mib = 512
 seed = 0
 

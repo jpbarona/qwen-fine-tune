@@ -304,6 +304,47 @@ def test_an_exhausted_pool_advances_to_the_next_stage(tmp_path: Path) -> None:
     assert result.stage == "medium"
 
 
+def test_each_stage_held_out_slice_is_evaluated_with_its_band_name(
+    tmp_path: Path,
+) -> None:
+    stages = (
+        Stage("very easy", (prompt("q0"),), (prompt("ve-0"), prompt("ve-1"))),
+        Stage("medium", (prompt("q1"),), (prompt("me-0"),)),
+    )
+    store, result = run_with_stages(tmp_path, stages, passing={"q0", "q1"}, steps=5)
+
+    stage_points = [
+        point for point in store.eval["evaluations"] if point["kind"] == "stage"
+    ]
+    assert [(point["stage"], point["count"]) for point in stage_points] == [
+        ("very easy", 2),
+        ("medium", 1),
+    ]
+    assert set(stage_points[0]["prompt_ids"]) == {"ve-0", "ve-1"}
+    assert set(stage_points[1]["prompt_ids"]) == {"me-0"}
+    # The existing final evaluation still covers the fixed evaluation pool.
+    assert store.eval["evaluations"][-1]["kind"] == "final"
+    assert store.eval["evaluations"][-1]["count"] == 1
+    assert result.stop_reason == "curriculum_complete"
+
+
+def test_a_run_that_stops_inside_a_stage_still_evaluates_its_held_out_slice(
+    tmp_path: Path,
+) -> None:
+    stages = (Stage("hard", (prompt("q0"), prompt("q1")), (prompt("h-0"),)),)
+    store, result = run_with_stages(tmp_path, stages, passing=set(), steps=1)
+
+    stage_points = [
+        point for point in store.eval["evaluations"] if point["kind"] == "stage"
+    ]
+    assert [(point["stage"], point["count"]) for point in stage_points] == [
+        ("hard", 1)
+    ]
+    assert stage_points[0]["prompt_ids"] == ["h-0"]
+    assert result.stop_reason == "completed"
+    assert store.eval["evaluations"][-1]["kind"] == "final"
+
+
 def test_exhausting_the_last_stage_ends_the_run_with_a_clear_reason(
     tmp_path: Path,
 ) -> None:

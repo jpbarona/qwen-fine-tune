@@ -199,7 +199,7 @@ def test_training_settings_default_and_are_read(tmp_path) -> None:
     assert config.lora_alpha == 64
     assert config.max_prompt_tokens == 512
     assert config.max_completion_tokens == 2048
-    assert config.entropy_every == 500
+    assert config.entropy_every_steps == 500
     assert config.clip_epsilon == pytest.approx(0.2)
     assert config.kl_beta == pytest.approx(0.0)
     assert config.length_soft_limit == 900
@@ -214,7 +214,7 @@ def test_training_settings_are_read_from_the_table(tmp_path) -> None:
         + "\n[training]\ngenerations_per_prompt = 4\nepochs = 2\n"
         "temperature = 0.7\nlearning_rate = 2e-5\nlora_rank = 16\nlora_alpha = 32\n"
         "max_prompt_tokens = 256\nmax_completion_tokens = 384\n"
-        "entropy_every = 25\n"
+        "entropy_every_steps = 25\n"
         "clip_epsilon = 0.1\nkl_beta = 0.05\n",
         encoding="utf-8",
     )
@@ -227,7 +227,7 @@ def test_training_settings_are_read_from_the_table(tmp_path) -> None:
     assert config.lora_alpha == 32
     assert config.max_prompt_tokens == 256
     assert config.max_completion_tokens == 384
-    assert config.entropy_every == 25
+    assert config.entropy_every_steps == 25
     assert config.clip_epsilon == pytest.approx(0.1)
     assert config.kl_beta == pytest.approx(0.05)
 
@@ -305,8 +305,8 @@ def test_a_config_without_the_fake_table_loads(tmp_path) -> None:
         ("kl_beta = -0.1", "training.kl_beta"),
         ("temperature = 0", "training.temperature"),
         ("learning_rate = 0", "training.learning_rate"),
-        ("entropy_every = -1", "training.entropy_every"),
-        ("entropy_every = 1.5", "training.entropy_every"),
+        ("entropy_every_steps = -1", "training.entropy_every_steps"),
+        ("entropy_every_steps = 1.5", "training.entropy_every_steps"),
     ],
 )
 def test_a_bad_training_setting_is_named(tmp_path, line: str, key: str) -> None:
@@ -316,10 +316,10 @@ def test_a_bad_training_setting_is_named(tmp_path, line: str, key: str) -> None:
         load_config(path)
 
 
-def test_entropy_every_zero_disables_the_measurement(tmp_path) -> None:
+def test_entropy_every_steps_zero_disables_the_measurement(tmp_path) -> None:
     path = tmp_path / "config.toml"
-    path.write_text(GOOD + "\n[training]\nentropy_every = 0\n", encoding="utf-8")
-    assert load_config(path).entropy_every == 0
+    path.write_text(GOOD + "\n[training]\nentropy_every_steps = 0\n", encoding="utf-8")
+    assert load_config(path).entropy_every_steps == 0
 
 
 def test_the_memory_floor_defaults_to_512_mib(write_config) -> None:
@@ -346,7 +346,7 @@ def test_the_shipped_real_config_loads() -> None:
     assert config.epochs == 5
     assert config.generations_per_prompt == 8
     assert config.max_completion_tokens == 2048
-    assert config.entropy_every == 500
+    assert config.entropy_every_steps == 500
     assert config.lora_rank == 32 and config.lora_alpha == 64
     assert config.checkpoint_every_steps == 50
 

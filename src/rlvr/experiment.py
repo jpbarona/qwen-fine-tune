@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from . import repro
-from .batching import START_PROMPTS, BatchSizePolicy
+from .batching import START_PROMPTS, BatchSizePolicy, is_cuda_out_of_memory
 from .checkpoint import checkpoint_dir_name, write_checkpoint_manifest
 from .config import Config
 from .evaluation import pass_at_1, select_eval_subset, subset_selector
@@ -76,6 +76,23 @@ __all__ = [
 
 #: Greedy decoding, used for evaluation.
 EVAL_TEMPERATURE = 0.0
+
+
+def _empty_cuda_cache() -> None:
+    """Release cached allocator blocks after an out-of-memory error.
+
+    The CPU suite and the fake path have no torch, so the import failure is the
+    normal case there. A failed cache release must not hide the original error.
+    """
+    try:
+        import torch
+    except ImportError:
+        return
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except (RuntimeError, AssertionError):
+        return
 
 
 @dataclass(frozen=True)
@@ -377,22 +394,30 @@ class Experiment:
         if curriculum_done:
             effective_steps = min(effective_steps, self.resume_step)
         evaluations: list[dict[str, Any]] = [dict(e) for e in self.prior_evaluations]
+        stage_evaluated = {
+            point["stage"]
+            for point in evaluations
+            if point.get("kind") == "stage" and isinstance(point.get("stage"), str)
+        }
 
         for step in range(self.resume_step + 1, effective_steps + 1):
-            stage_start = 0
             if staged:
                 active_stage = self.stages[stage_index].name
-                count = policy.count(len(stage_pool))
-                stage_start = stage_step % len(stage_pool)
-                step_prompts = [
-                    stage_pool[(stage_start + index) % len(stage_pool)]
-                    for index in range(count)
-                ]
-            else:
-                count = policy.count(len(self.prompts))
-                step_prompts = self._prompts_for_step(count)
-
-            result = self._training_step(step, step_prompts, active_stage)
+            trained = self._train_with_memory_guard(
+                step,
+                policy,
+                staged=staged,
+                stage_pool=stage_pool,
+                stage_step=stage_step,
+                stage=active_stage,
+            )
+            if trained is None:
+                # The step was attempted and stopped on memory. Record its
+                # number so the evaluation payload keeps a positive step.
+                last_step = step
+                stop_reason = "out_of_memory"
+                break
+            result, stage_start = trained
             last_step = step
             for record in result.records:
                 self.store.append_rollout(record)
@@ -423,11 +448,28 @@ class Experiment:
                 if not stage_pool:
                     next_index = self._first_open_stage(stage_index + 1)
                     if next_index < len(self.stages):
+                        self._record_stage_evaluation(
+                            step,
+                            stage_index,
+                            evaluations,
+                            stage_evaluated,
+                            checkpoint_subset,
+                            stop_reason,
+                        )
                         stage_index = next_index
                         stage_pool = list(self.stages[next_index].train)
                         stage_step = 0
                     else:
                         curriculum_done = True
+                        stop_reason = "curriculum_complete"
+                        self._record_stage_evaluation(
+                            step,
+                            stage_index,
+                            evaluations,
+                            stage_evaluated,
+                            checkpoint_subset,
+                            stop_reason,
+                        )
 
             if step % self.config.eval_every_steps == 0:
                 evaluations.append(
@@ -464,6 +506,20 @@ class Experiment:
         if stop_reason == "completed" and self.config.max_steps is not None:
             if last_step >= self.config.max_steps and self.config.max_steps < self.config.steps:
                 stop_reason = "max_steps"
+
+        # A run can stop inside a stage, on a budget cap or a policy stop. The
+        # held-out slice of that stage is still evaluated, so every band the
+        # run reached has a pass rate.
+        if staged:
+            for index in range(stage_index + 1):
+                self._record_stage_evaluation(
+                    last_step,
+                    index,
+                    evaluations,
+                    stage_evaluated,
+                    checkpoint_subset,
+                    stop_reason,
+                )
 
         final = self._evaluate(last_step, eval_pool, kind="final", subset=None)
         evaluations.append(final)
@@ -519,7 +575,7 @@ class Experiment:
                 "lora_alpha": config.lora_alpha,
                 "max_prompt_tokens": config.max_prompt_tokens,
                 "max_completion_tokens": config.max_completion_tokens,
-                "entropy_every": config.entropy_every,
+                "entropy_every_steps": config.entropy_every_steps,
                 "clip_epsilon": config.clip_epsilon,
                 "kl_beta": config.kl_beta,
                 "batch_size": "adaptive",
@@ -549,6 +605,71 @@ class Experiment:
         block = [self.prompts[(start + index) % size] for index in range(count)]
         self._prompt_cursor = start + count
         return block
+
+    def _plan_step(
+        self,
+        policy: BatchSizePolicy,
+        *,
+        staged: bool,
+        stage_pool: Sequence[Prompt],
+        stage_step: int,
+    ) -> tuple[list[Prompt], int]:
+        """The prompts for one step and the active pool offset it starts at.
+
+        The offset is only used by a staged run, to advance the pool position
+        by what the step actually trained.
+        """
+        if staged:
+            count = policy.count(len(stage_pool))
+            start = stage_step % len(stage_pool)
+            return [
+                stage_pool[(start + index) % len(stage_pool)]
+                for index in range(count)
+            ], start
+        count = policy.count(len(self.prompts))
+        return self._prompts_for_step(count), 0
+
+    def _train_with_memory_guard(
+        self,
+        step: int,
+        policy: BatchSizePolicy,
+        *,
+        staged: bool,
+        stage_pool: Sequence[Prompt],
+        stage_step: int,
+        stage: str,
+    ) -> tuple[StepResult, int] | None:
+        """Run one step and shrink once if CUDA runs out of memory.
+
+        The policy settles at the largest batch that fit, the allocator cache is
+        released, and the step is retried at the smaller size. When the batch is
+        already at one prompt and still cannot fit, None is returned so the run
+        stops cleanly with `stop_reason` `"out_of_memory"` instead of crashing.
+        """
+        prompts, start = self._plan_step(
+            policy, staged=staged, stage_pool=stage_pool, stage_step=stage_step
+        )
+        try:
+            return self._training_step(step, prompts, stage), start
+        except Exception as error:
+            if not is_cuda_out_of_memory(error):
+                raise
+            policy.settle()
+            _empty_cuda_cache()
+            available = len(stage_pool) if staged else len(self.prompts)
+            if policy.count(available) >= len(prompts):
+                return None
+            prompts, start = self._plan_step(
+                policy, staged=staged, stage_pool=stage_pool, stage_step=stage_step
+            )
+            try:
+                return self._training_step(step, prompts, stage), start
+            except Exception as retry_error:
+                if not is_cuda_out_of_memory(retry_error):
+                    raise
+                policy.settle()
+                _empty_cuda_cache()
+                return None
 
     def _first_open_stage(self, index: int) -> int:
         """The first stage at or after `index` that has training questions."""
@@ -669,10 +790,11 @@ class Experiment:
     def _measures_entropy(self, step: int) -> bool:
         """Whether this step is an entropy measurement step.
 
-        `entropy_every` counts updates, so step N is measured when N is a
-        multiple of the setting. Zero disables the measurement.
+        `entropy_every_steps` counts training steps, so step N is measured
+        when N is a multiple of the setting. Every prompt group updated in that
+        step is measured. Zero disables the measurement.
         """
-        every = self.config.entropy_every
+        every = self.config.entropy_every_steps
         return every > 0 and step % every == 0
 
     def _memory_report(self) -> MemoryReport:
@@ -850,6 +972,38 @@ class Experiment:
             row["mean_entropy"] = mean_entropy
         return row
 
+    def _record_stage_evaluation(
+        self,
+        step: int,
+        index: int,
+        evaluations: list[dict[str, Any]],
+        evaluated: set[str],
+        checkpoint_subset: Mapping[str, Any],
+        stop_reason: str,
+    ) -> None:
+        """Evaluate one stage's held-out slice once, and write `eval.json`.
+
+        The evaluation carries the stage name, so `eval.json` holds the pass
+        rate per band in the same list as the checkpoint and final evaluations.
+        A stage with no held-out questions is skipped.
+        """
+        stage = self.stages[index]
+        if stage.name in evaluated or not stage.held_out:
+            return
+        evaluations.append(
+            self._evaluate(
+                step,
+                stage.held_out,
+                kind="stage",
+                subset=None,
+                stage=stage.name,
+            )
+        )
+        evaluated.add(stage.name)
+        self.store.write_eval(
+            self._eval_payload(evaluations, checkpoint_subset, stop_reason)
+        )
+
     def _evaluate(
         self,
         step: int,
@@ -857,6 +1011,7 @@ class Experiment:
         *,
         kind: str,
         subset: Mapping[str, Any] | None,
+        stage: str | None = None,
     ) -> dict[str, Any]:
         """Greedy pass@1 over `prompts`. One generation per question."""
         prompt_ids: list[str] = []
@@ -866,7 +1021,7 @@ class Experiment:
             result = self.test_runner.run(prompt, generation.code)
             prompt_ids.append(prompt.prompt_id)
             passed.append(all_tests_passed(result.tests_passed, result.tests_total))
-        return {
+        point: dict[str, Any] = {
             "step": step,
             "kind": kind,
             "pass_at_1": pass_at_1(passed),
@@ -874,6 +1029,9 @@ class Experiment:
             "prompt_ids": prompt_ids,
             "subset": dict(subset) if subset is not None else None,
         }
+        if stage is not None:
+            point["stage"] = stage
+        return point
 
     def _eval_payload(
         self,

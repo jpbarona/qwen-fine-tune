@@ -21,7 +21,7 @@ Notes on the contract:
   curriculum use the fixed string `"unstaged"`.
 * Timestamps and truncation flags are deliberately not part of this record.
 * Entropy is not a rollout field. It is measured on the update pass, at the
-  `entropy_every` cadence, so it belongs to the step metric row and may be
+  `entropy_every_steps` cadence, so it belongs to the step metric row and may be
   absent there on a step without a measurement.
 """
 

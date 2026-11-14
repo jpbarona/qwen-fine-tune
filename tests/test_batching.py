@@ -19,6 +19,7 @@ from rlvr.batching import (
     START_PROMPTS,
     BatchSizePolicy,
     free_memory_mib,
+    is_cuda_out_of_memory,
 )
 from rlvr.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
 from rlvr.config import default_config_path, load_config
@@ -36,6 +37,7 @@ def config_text(
     *,
     checkpoint_every_steps: int = 100,
     memory_floor_mib: int | None = None,
+    entropy_every_steps: int | None = None,
 ) -> str:
     text = f"""\
 [model]
@@ -54,8 +56,13 @@ steps = {steps}
 [run]
 checkpoint_every_steps = {checkpoint_every_steps}
 """
+    training = []
     if memory_floor_mib is not None:
-        text += f"\n[training]\nmemory_floor_mib = {memory_floor_mib}\n"
+        training.append(f"memory_floor_mib = {memory_floor_mib}")
+    if entropy_every_steps is not None:
+        training.append(f"entropy_every_steps = {entropy_every_steps}")
+    if training:
+        text += "\n[training]\n" + "\n".join(training) + "\n"
     return text
 
 
@@ -119,6 +126,29 @@ class GroupGenerator:
         pass
 
 
+class OomOnceGenerator(GroupGenerator):
+    """Fails the first training call with a CUDA out-of-memory error."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed = False
+
+    def generate(self, prompt: Prompt, *, n: int, temperature: float):
+        if temperature != 0.0 and not self.failed:
+            self.failed = True
+            raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+        return super().generate(prompt, n=n, temperature=temperature)
+
+
+class AlwaysOomGenerator(GroupGenerator):
+    """Fails every training call, but still serves greedy evaluation."""
+
+    def generate(self, prompt: Prompt, *, n: int, temperature: float):
+        if temperature != 0.0:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 1.00 GiB")
+        return super().generate(prompt, n=n, temperature=temperature)
+
+
 class PromptRunner:
     """Full pass for the named prompts, one of four tests for the rest."""
 
@@ -166,6 +196,7 @@ def run_experiment(
     config_steps: int | None = None,
     checkpoint_every_steps: int = 100,
     memory_floor_mib: int | None = None,
+    entropy_every_steps: int | None = None,
     store=None,
     resume_step: int = 0,
     resume_prompt_cursor: int = 0,
@@ -178,6 +209,7 @@ def run_experiment(
             steps=steps if config_steps is None else config_steps,
             checkpoint_every_steps=checkpoint_every_steps,
             memory_floor_mib=memory_floor_mib,
+            entropy_every_steps=entropy_every_steps,
         ),
         encoding="utf-8",
     )
@@ -246,6 +278,58 @@ def test_the_floor_is_inclusive() -> None:
     policy = BatchSizePolicy(floor_mib=512)
     policy.observe(report(free_mib=512.0), prompts=2)
     assert policy.current == 3
+
+
+def test_the_floor_rises_to_one_measured_group_footprint() -> None:
+    policy = BatchSizePolicy(floor_mib=512)
+
+    # First step: no earlier measurement, so the configured floor applies.
+    policy.observe(report(total_mib=10000.0, free_mib=8000.0), prompts=2)
+    assert policy.group_footprint_mib == 0.0
+    assert policy.effective_floor_mib == 512
+
+    # The third prompt raised the reserved total by 1000 MiB, so one group is
+    # measured at 1000 MiB and the floor rises to match it.
+    policy.observe(report(total_mib=10000.0, free_mib=7000.0), prompts=3)
+    assert policy.group_footprint_mib == pytest.approx(1000.0)
+    assert policy.effective_floor_mib == pytest.approx(1000.0)
+
+    # 800 MiB free clears the old 512 floor but not one group's footprint.
+    policy.observe(report(total_mib=10000.0, free_mib=800.0), prompts=3)
+    assert policy.settled is True
+    assert policy.current == 3
+
+
+def test_the_configured_floor_wins_when_it_is_larger() -> None:
+    policy = BatchSizePolicy(floor_mib=2048)
+    policy.observe(report(total_mib=10000.0, free_mib=8000.0), prompts=2)
+    policy.observe(report(total_mib=10000.0, free_mib=7000.0), prompts=3)
+
+    assert policy.group_footprint_mib == pytest.approx(1000.0)
+    assert policy.effective_floor_mib == pytest.approx(2048.0)
+
+
+def test_settle_keeps_the_largest_size_that_fit() -> None:
+    policy = BatchSizePolicy(floor_mib=512)
+    policy.observe(report(free_mib=8000.0), prompts=2)
+
+    policy.settle()
+    assert policy.settled is True
+    assert policy.current == 2
+
+    # A good measurement afterwards does not resume growth.
+    policy.observe(report(free_mib=8000.0), prompts=2)
+    assert policy.current == 2
+
+
+def test_cuda_out_of_memory_is_detected_without_torch() -> None:
+    class OutOfMemoryError(RuntimeError):
+        pass
+
+    assert is_cuda_out_of_memory(
+        OutOfMemoryError("CUDA out of memory. Tried to allocate 2.00 GiB")
+    )
+    assert not is_cuda_out_of_memory(ValueError("bad input"))
 
 
 def test_no_memory_measurement_holds_the_current_size() -> None:
@@ -351,6 +435,24 @@ def test_advantage_is_normalised_inside_a_group_not_across_the_batch(
     assert any(advantage != 0.0 for advantage in mixed)
 
 
+def test_the_entropy_cadence_counts_steps_not_prompt_updates(tmp_path) -> None:
+    experiment, store = run_experiment(
+        tmp_path,
+        prompts=make_prompts(6),
+        steps=3,
+        generator=GroupGenerator(),
+        batch_policy=BatchSizePolicy(current=2, max_prompts=2),
+        entropy_every_steps=2,
+    )
+    experiment.run()
+
+    # Four prompt updates ran in the first two steps, but the cadence is per
+    # step, so only step 2 carries an entropy value.
+    assert [row["prompts"] for row in store.metrics] == [2, 2, 2]
+    assert ["mean_entropy" in row for row in store.metrics] == [False, True, False]
+    assert store.metrics[1]["mean_entropy"] == pytest.approx(0.5)
+
+
 # --- memory-driven growth -------------------------------------------------
 
 
@@ -418,6 +520,37 @@ def test_without_a_memory_reader_the_batch_holds_its_start(tmp_path) -> None:
 def test_the_default_floor_is_an_absolute_number() -> None:
     config = load_config(default_config_path())
     assert config.memory_floor_mib == DEFAULT_MEMORY_FLOOR_MIB == 512
+
+
+def test_a_cuda_oom_settles_the_batch_and_continues(tmp_path) -> None:
+    experiment, store = run_experiment(
+        tmp_path,
+        prompts=make_prompts(4),
+        steps=2,
+        generator=OomOnceGenerator(),
+        memory=lambda: report(free_mib=8000.0),
+    )
+    result = experiment.run()
+
+    # The first step asked for two prompts, hit the guard, and retried at one.
+    assert [row["prompts"] for row in store.metrics] == [1, 1]
+    assert result.stop_reason == "completed"
+
+
+def test_a_cuda_oom_at_one_prompt_stops_cleanly(tmp_path) -> None:
+    experiment, store = run_experiment(
+        tmp_path,
+        prompts=make_prompts(4),
+        steps=3,
+        generator=AlwaysOomGenerator(),
+        batch_policy=BatchSizePolicy(current=1, max_prompts=1),
+    )
+    result = experiment.run()
+
+    assert result.stop_reason == "out_of_memory"
+    assert result.steps == 1
+    assert store.eval["stop_reason"] == "out_of_memory"
+    assert store.metrics == []
 
 
 # --- the fake path --------------------------------------------------------

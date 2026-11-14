@@ -124,6 +124,26 @@ def test_dashboard_shows_the_prompt_and_sequence_counts_per_step(tmp_path) -> No
     assert "prompts and sequences per step" in html
 
 
+def test_a_stage_evaluation_is_surfaced_with_its_band(tmp_path) -> None:
+    evaluations = [
+        {
+            "step": 1,
+            "kind": "stage",
+            "stage": "very easy",
+            "pass_at_1": 0.5,
+            "count": 2,
+        },
+        {"step": 2, "kind": "final", "pass_at_1": 0.6, "count": 2},
+    ]
+    run_dir = write_run(tmp_path / "runs", "code-score", evaluations=evaluations)
+    data = collect_dashboard([run_dir])
+
+    points = data["runs"][0]["evaluations"]
+    assert points[0]["stage"] == "very easy"
+    assert points[1]["stage"] is None
+    assert "very easy" in render_html(data)
+
+
 def test_dashboard_shows_the_active_stage_and_pass_rate_per_band(tmp_path) -> None:
     rows = [
         {

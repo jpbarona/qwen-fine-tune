@@ -10,7 +10,7 @@ Because the fake code for a prompt does not change between steps, a gated arm
 records cache_hit false on the first step and true on later steps.
 
 Entropy is returned by `update` only when the caller asks for a measurement, so
-the fake follows the same `entropy_every` cadence as the real trainer.
+the fake follows the same `entropy_every_steps` cadence as the real trainer.
 
 The values are derived from SHA-256, so they are stable across Python versions
 and machines. They carry no meaning. They exist to move data through the seam.
