@@ -72,6 +72,18 @@ def test_greedy_and_sampled_generations_differ() -> None:
     assert greedy.code != sampled.code
 
 
+def test_thinking_off_drops_the_reasoning_trace_but_keeps_the_code() -> None:
+    prompt = Prompt("mbpp-0000", "p")
+    generator = FakeGenerator()
+    with_thinking = generator.generate(prompt, n=1, temperature=0.9)[0]
+    without_thinking = generator.generate(
+        prompt, n=1, temperature=0.9, thinking=False
+    )[0]
+    assert with_thinking.reasoning
+    assert without_thinking.reasoning == ""
+    assert without_thinking.code == with_thinking.code
+
+
 def test_test_runner_is_deterministic_and_bounded() -> None:
     runner = FakeTestRunner()
     prompt = Prompt("mbpp-0000", "p")

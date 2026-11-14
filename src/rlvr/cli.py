@@ -1,6 +1,7 @@
 """Command line interface.
 
     rlvr run --arm <code-score|hybrid|gated-judge|gated-process> --fake
+    rlvr screen --questions <path> --samples <n> --output <dir> [--fake]
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
     rlvr dashboard [<run-dir> ...] [--runs-root <runs-root>] [--port 8081]
     rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
@@ -11,14 +12,18 @@ backend is chosen before the run folder is made, so a judge arm with no key
 fails at startup. `--resume` continues the latest run folder from its last
 checkpoint.
 
+`screen` samples the base model with thinking off and writes a difficulty table.
+It never trains, builds no optimizer, and writes into its own output folder, not
+a run folder. A restart skips the question ids already in the table.
+
 `summary` reads run folders that already exist. It prints one table per metric
 with arms side by side and writes a static, self-contained HTML report.
 `publish` force-pushes that report to a Pages branch. It needs a remote the
 caller's git can already write to.
 
 Exit codes: 0 success, 2 for a bad command line, unknown or unimplemented arm,
-bad config, a missing judge key, a bad run folder, or a failed publish. Messages
-for those cases go to stderr without a traceback.
+bad config, a missing judge key, a bad run folder, a bad question set, or a
+failed publish. Messages for those cases go to stderr without a traceback.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from .data import (
     TEST_SIZE,
     TRAIN_SIZE,
     DatasetError,
+    load_dataset,
     load_split,
     prompts_for_questions,
 )
@@ -56,6 +62,7 @@ from .reward import (
     uses_process_judge,
 )
 from .runs import RunStore
+from .screening import ScreenError, screen as run_screen
 from .stages import (
     BANDS,
     LabelledRow,
@@ -68,11 +75,14 @@ from .summary import SummaryError, format_summary, load_reports, write_report
 
 __all__ = [
     "build_curriculum",
+    "build_generator",
     "build_judge",
     "build_parser",
     "build_prompts",
+    "build_screen_test_runner",
     "build_test_runner",
     "main",
+    "screen_command",
 ]
 
 USAGE_ERROR = 2
@@ -140,6 +150,43 @@ def build_parser() -> argparse.ArgumentParser:
         "--resume",
         action="store_true",
         help="continue the latest run folder from its last checkpoint",
+    )
+
+    screen_parser = subparsers.add_parser(
+        "screen",
+        help="sample the base model and write a difficulty table",
+    )
+    screen_parser.add_argument(
+        "--questions",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="question set in the MBPP JSONL row schema",
+    )
+    screen_parser.add_argument(
+        "--samples",
+        type=int,
+        required=True,
+        metavar="N",
+        help="samples per question",
+    )
+    screen_parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        metavar="DIR",
+        help="folder for rows.jsonl and summary.json",
+    )
+    screen_parser.add_argument(
+        "--fake",
+        action="store_true",
+        help="use the deterministic fake generator and test runner",
+    )
+    screen_parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="config file to read (default: the packaged config)",
     )
 
     summary = subparsers.add_parser(
@@ -306,8 +353,12 @@ def build_test_runner(config: Config, *, fake: bool):
     return DockerTestRunner(questions)
 
 
-def build_generator(config: Config, *, fake: bool):
-    """The real Qwen trainer, or the fake generator."""
+def build_generator(config: Config, *, fake: bool, trainable: bool = True):
+    """The real Qwen generator, or the fake generator.
+
+    `trainable` false loads the base model with no adapter and no optimizer.
+    The difficulty screen uses that. Training keeps the default.
+    """
     if fake:
         return FakeGenerator()
     from .qwen import QwenGenerator
@@ -324,12 +375,27 @@ def build_generator(config: Config, *, fake: bool):
             clip_epsilon=config.clip_epsilon,
             kl_beta=config.kl_beta,
             seed=config.seed,
+            trainable=trainable,
         )
     except ImportError as error:
         raise UsageError(
             "the real generator needs torch, transformers, and peft. "
             f"install the train extra or pass --fake. ({error})"
         ) from error
+
+
+def build_screen_test_runner(questions, *, fake: bool):
+    """The Docker runner over this question set, or the fake runner.
+
+    The screen builds its runner from the same rows it samples, not from the
+    fixed split, so a synthetic question set works without touching the data
+    split.
+    """
+    if fake:
+        return FakeTestRunner()
+    from .docker_runner import DockerTestRunner
+
+    return DockerTestRunner(questions)
 
 
 def run_command(args: argparse.Namespace) -> int:
@@ -422,6 +488,47 @@ def run_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def screen_command(args: argparse.Namespace) -> int:
+    """Sample the base model and write the difficulty table."""
+    if args.samples < 1:
+        raise UsageError(f"--samples must be at least 1, got {args.samples}")
+
+    config = load_config(args.config if args.config is not None else default_config_path())
+    try:
+        questions = load_dataset(args.questions)
+    except DatasetError as error:
+        raise UsageError(f"cannot load the question set: {error}") from error
+    if not questions:
+        raise UsageError(f"the question set is empty: {args.questions}")
+
+    prompts = prompts_for_questions(questions)
+    generator = build_generator(config, fake=args.fake, trainable=False)
+    test_runner = build_screen_test_runner(questions, fake=args.fake)
+    try:
+        result = run_screen(
+            prompts,
+            samples=args.samples,
+            directory=args.output,
+            generator=generator,
+            test_runner=test_runner,
+            temperature=config.temperature,
+        )
+    except ScreenError as error:
+        raise UsageError(str(error)) from error
+    except OSError as error:
+        raise UsageError(f"cannot write the screen output: {error}") from error
+
+    summary = result.summary
+    print(
+        f"screen: questions={summary['questions']} samples={args.samples} "
+        f"resumed={result.resumed} zero_pass={summary['zero_pass']} "
+        f"partial_pass={summary['partial_pass']} full_pass={summary['full_pass']}"
+    )
+    print(f"rows: {result.directory / 'rows.jsonl'}")
+    print(f"summary: {result.directory / 'summary.json'}")
+    return 0
+
+
 def summary_command(args: argparse.Namespace) -> int:
     """Print the metric tables and write the report."""
     try:
@@ -483,6 +590,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "run":
             return run_command(args)
+        if args.command == "screen":
+            return screen_command(args)
         if args.command == "summary":
             return summary_command(args)
         if args.command == "dashboard":
