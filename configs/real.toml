@@ -28,7 +28,7 @@ test_size = 250
 [training]
 method = "grpo"
 # Rollout sampler: "hf" keeps the Hugging Face generate loop, "vllm" needs the vllm package.
-inference_engine = "hf"
+engine = "hf"
 generations_per_prompt = 8
 temperature = 0.9
 learning_rate = 1e-5
