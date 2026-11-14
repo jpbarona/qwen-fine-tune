@@ -79,7 +79,7 @@ def test_code_score_reward_never_uses_a_judge() -> None:
         ({"tests_passed": 1, "tests_total": 4}, 0.25),
         ({"tests_passed": 0, "tests_total": 4}, 0.0),
         # Fixed penalties for truncation and code that does not compile.
-        ({"tests_passed": 0, "tests_total": 4, "truncated": True}, -0.6),
+        ({"tests_passed": 0, "tests_total": 4, "truncated": True}, -1.0),
         (
             {"tests_passed": 0, "tests_total": 4, "error_class": "syntax_error"},
             -0.5,
@@ -103,7 +103,7 @@ def test_code_score_reward_never_uses_a_judge() -> None:
                 "truncated": True,
                 "completion_tokens": 1100,
             },
-            -0.8,
+            -1.0,
         ),
         (
             {
@@ -121,16 +121,29 @@ def test_the_code_arm_scores_each_case(kwargs: dict, expected: float) -> None:
     assert reward_code_score(**kwargs) == pytest.approx(expected)
 
 
+def test_a_truncated_rollout_stays_at_minus_one_after_the_length_term() -> None:
+    # Truncation is the worst outcome: the length term cannot push it lower
+    # than the clip, and its absence cannot lift it.
+    for tokens in (0, 900, 1100, 4096):
+        assert (
+            compose_reward(
+                "code-score",
+                tests_passed=0,
+                tests_total=4,
+                truncated=True,
+                completion_tokens=tokens,
+            )
+            == -1.0
+        )
+
+
 def test_the_code_arm_reward_is_clipped_to_the_range() -> None:
-    # 0.999 is the largest configured floor that keeps a perfect answer at or
-    # above 0.001 and still lets a truncated answer reach the lower clip.
     assert compose_reward(
         "code-score",
         tests_passed=0,
         tests_total=4,
         truncated=True,
         completion_tokens=4096,
-        length_penalty_floor=0.999,
     ) == -1.0
     assert compose_reward(
         "code-score",

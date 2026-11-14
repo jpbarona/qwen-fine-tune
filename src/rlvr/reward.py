@@ -10,7 +10,7 @@ The table comes from SPEC.md and is frozen:
 | gated-process  | 0                        | 0.5 * process + 0.5 * judge |
 
 The code arm now gives partial credit and penalties. Its base score is the
-fraction of tests passed, except that a truncated rollout scores -0.6 and a
+fraction of tests passed, except that a truncated rollout scores -1.0 and a
 rollout whose code does not compile scores -0.5. A length term of 0.001 per
 completion token above 900 is subtracted from that base, capped at 0.2, so a
 perfect answer keeps at least 0.8. The sum is clipped to -1 to 1. The other
@@ -64,7 +64,7 @@ DEFAULT_LENGTH_PENALTY_PER_TOKEN = 0.001
 DEFAULT_LENGTH_PENALTY_FLOOR = 0.2
 
 #: Fixed code-arm scores for outcomes that are not a test fraction.
-TRUNCATION_REWARD = -0.6
+TRUNCATION_REWARD = -1.0
 SYNTAX_ERROR_REWARD = -0.5
 
 #: The code arm clips its sum to this range.
@@ -199,7 +199,7 @@ def reward_code_score(
 ) -> float:
     """Code-score arm: the test fraction, with truncation, syntax and length terms.
 
-    A truncated rollout scores -0.6 and a rollout whose code did not compile
+    A truncated rollout scores -1.0 and a rollout whose code did not compile
     scores -0.5. Everything else starts at the fraction of tests passed. The
     length term is subtracted from that base and the sum is clipped to [-1, 1].
 

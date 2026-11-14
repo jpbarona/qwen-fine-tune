@@ -43,7 +43,7 @@ This is now decided, see D8.
 
 | Case | Reward |
 |---|---|
-| Truncated at the cap | -0.6 |
+| Truncated at the cap | -1.0 |
 | No code parsed, or syntax error | -0.5 |
 | Compiles, tests fail | 0.0 |
 | Partial tests | passed / total, from 0 to 1 |

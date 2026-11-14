@@ -418,6 +418,13 @@ switched provider cannot reuse the other one's scores.
 | `gated-judge` | 0 | `judge` |
 | `gated-process` | 0 | `0.5 * process + 0.5 * judge` |
 
+Fixed outcomes in `code-score`:
+
+| Outcome | Reward |
+|---|---|
+| truncated rollout | `-1.0` |
+| code that does not compile | `-0.5` |
+
 Any failed test closes the gate, so a gated arm makes no judge call. For the
 gated arms zero tests counts as a failure. For `code-score` zero tests is an
 error: a rollout with nothing to run must fail loudly, not score 0.
