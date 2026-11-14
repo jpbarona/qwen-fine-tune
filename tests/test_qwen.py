@@ -23,6 +23,7 @@ from rlvr.qwen import (
     seed_rngs,
     split_generated_rows,
     split_thinking_and_code,
+    thinking_marker_index,
     truncate_prompt,
 )
 
@@ -64,6 +65,22 @@ def test_split_thinking_without_a_marker_is_all_answer() -> None:
     reasoning, answer = split_thinking_and_code("def f():\n    return 1")
     assert reasoning == ""
     assert answer == "def f():\n    return 1"
+
+
+def test_thinking_marker_index_returns_the_position_past_the_marker() -> None:
+    assert thinking_marker_index([1, 2, 3], 2) == 2
+    assert thinking_marker_index([2, 5, 7], 2) == 1
+    assert thinking_marker_index([1, 2, 3], 3) == 3
+
+
+def test_thinking_marker_index_is_zero_when_the_marker_is_absent() -> None:
+    assert thinking_marker_index([1, 2, 3], 9) == 0
+    assert thinking_marker_index([], 9) == 0
+
+
+def test_thinking_marker_index_uses_the_last_marker() -> None:
+    assert thinking_marker_index([2, 5, 2, 7], 2) == 3
+    assert thinking_marker_index([2, 2], 2) == 2
 
 
 def test_categorical_entropy_of_uniform_two_values_is_ln2() -> None:

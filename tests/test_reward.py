@@ -12,6 +12,7 @@ import pytest
 from rlvr.reward import (
     ARM_REWARDS,
     ARMS,
+    CLOSE_BONUS,
     PENDING_ARMS,
     RewardError,
     all_tests_passed,
@@ -165,6 +166,73 @@ def test_the_length_term_uses_the_given_settings() -> None:
     ) == pytest.approx(0.95)
 
 
+def test_the_close_bonus_is_four_tenths() -> None:
+    assert CLOSE_BONUS == pytest.approx(0.4)
+
+
+def test_a_closed_rollout_gets_the_bonus_on_top_of_its_base() -> None:
+    assert compose_reward(
+        "code-score", tests_passed=0, tests_total=4, closed=True
+    ) == pytest.approx(0.4)
+    assert reward_code_score(
+        tests_passed=2, tests_total=4, closed=True
+    ) == pytest.approx(0.9)
+
+
+def test_a_closed_full_pass_is_clipped_at_one() -> None:
+    assert compose_reward(
+        "code-score", tests_passed=4, tests_total=4, closed=True
+    ) == 1.0
+    assert compose_reward(
+        "code-score",
+        tests_passed=4,
+        tests_total=4,
+        closed=True,
+        completion_tokens=4096,
+    ) == 1.0
+
+
+def test_a_closed_truncated_rollout_scores_minus_six_tenths() -> None:
+    assert compose_reward(
+        "code-score",
+        tests_passed=0,
+        tests_total=4,
+        truncated=True,
+        closed=True,
+    ) == pytest.approx(-0.6)
+
+
+def test_the_length_term_still_applies_to_a_closed_truncated_rollout() -> None:
+    assert compose_reward(
+        "code-score",
+        tests_passed=0,
+        tests_total=4,
+        truncated=True,
+        closed=True,
+        completion_tokens=4096,
+    ) == pytest.approx(-0.8)
+
+
+def test_a_closed_rollout_beats_an_unclosed_one_with_the_same_counts() -> None:
+    plain = compose_reward("code-score", tests_passed=1, tests_total=4)
+    closed = compose_reward(
+        "code-score", tests_passed=1, tests_total=4, closed=True
+    )
+    assert closed == pytest.approx(plain + CLOSE_BONUS)
+
+
+def test_the_other_arms_accept_closed_and_ignore_it() -> None:
+    for arm in ("hybrid", "gated-judge", "gated-process"):
+        scores = {"judge_score": 0.5}
+        if arm == "gated-process":
+            scores["process_score"] = 0.5
+        plain = compose_reward(arm, tests_passed=4, tests_total=4, **scores)
+        closed = compose_reward(
+            arm, tests_passed=4, tests_total=4, closed=True, **scores
+        )
+        assert closed == plain
+
+
 def test_any_correct_answer_beats_any_wrong_answer_at_every_length() -> None:
     correct = [
         compose_reward(
@@ -181,6 +249,29 @@ def test_any_correct_answer_beats_any_wrong_answer_at_every_length() -> None:
     assert min(correct) == pytest.approx(0.8)
     assert max(wrong) == pytest.approx(0.0)
     assert min(correct) > max(wrong)
+
+
+def test_any_correct_answer_beats_a_closed_wrong_answer_at_every_length() -> None:
+    # The bonus must not lift the worst wrong answer over the worst correct one.
+    correct = [
+        compose_reward(
+            "code-score", tests_passed=4, tests_total=4, completion_tokens=length
+        )
+        for length in range(0, 4097)
+    ]
+    wrong_closed = [
+        compose_reward(
+            "code-score",
+            tests_passed=0,
+            tests_total=4,
+            completion_tokens=length,
+            closed=True,
+        )
+        for length in range(0, 4097)
+    ]
+    assert min(correct) == pytest.approx(0.8)
+    assert max(wrong_closed) == pytest.approx(0.4)
+    assert min(correct) > max(wrong_closed)
 
 
 @pytest.mark.parametrize(

@@ -13,8 +13,10 @@ The code arm now gives partial credit and penalties. Its base score is the
 fraction of tests passed, except that a truncated rollout scores -1.0 and a
 rollout whose code does not compile scores -0.5. A length term of 0.001 per
 completion token above 900 is subtracted from that base, capped at 0.2, so a
-perfect answer keeps at least 0.8. The sum is clipped to -1 to 1. The other
-three arms are unchanged.
+perfect answer keeps at least 0.8. A rollout that writes the closing reasoning
+marker gets a bonus of 0.4, which is why the worst wrong answer scores 0.4 and
+stays below the 0.8 floor of a correct one. The sum is clipped to -1 to 1. The
+other three arms are unchanged.
 
 Each arm gets one small function, and `ARM_REWARDS` is the single dispatch
 point. All four arms are implemented. Adding an arm means adding one entry to
@@ -39,6 +41,7 @@ __all__ = [
     "ARM_REWARDS",
     "ARMS",
     "ArmNotImplemented",
+    "CLOSE_BONUS",
     "DEFAULT_LENGTH_PENALTY_FLOOR",
     "DEFAULT_LENGTH_PENALTY_PER_TOKEN",
     "DEFAULT_LENGTH_SOFT_LIMIT",
@@ -66,6 +69,10 @@ DEFAULT_LENGTH_PENALTY_FLOOR = 0.2
 #: Fixed code-arm scores for outcomes that are not a test fraction.
 TRUNCATION_REWARD = -1.0
 SYNTAX_ERROR_REWARD = -0.5
+
+#: Paid to a rollout that writes the closing reasoning marker, so the model has
+#: a reason to close the block instead of running into the token cap.
+CLOSE_BONUS = 0.4
 
 #: The code arm clips its sum to this range.
 MIN_REWARD = -1.0
@@ -191,6 +198,7 @@ def reward_code_score(
     judge_score: float | None = None,
     process_score: float | None = None,
     truncated: bool = False,
+    closed: bool = False,
     error_class: str | None = None,
     completion_tokens: int | None = None,
     length_soft_limit: int = DEFAULT_LENGTH_SOFT_LIMIT,
@@ -201,7 +209,8 @@ def reward_code_score(
 
     A truncated rollout scores -1.0 and a rollout whose code did not compile
     scores -0.5. Everything else starts at the fraction of tests passed. The
-    length term is subtracted from that base and the sum is clipped to [-1, 1].
+    length term is subtracted from that base, the close bonus is added, and the
+    sum is clipped to [-1, 1].
 
     The judge score arguments are accepted and ignored, so every arm function
     has the same call shape at the dispatch point.
@@ -219,7 +228,8 @@ def reward_code_score(
         per_token=length_penalty_per_token,
         floor=length_penalty_floor,
     )
-    return min(MAX_REWARD, max(MIN_REWARD, base - penalty))
+    bonus = CLOSE_BONUS if closed else 0.0
+    return min(MAX_REWARD, max(MIN_REWARD, base - penalty + bonus))
 
 
 def reward_hybrid(
@@ -229,6 +239,7 @@ def reward_hybrid(
     judge_score: float | None = None,
     process_score: float | None = None,
     truncated: bool = False,
+    closed: bool = False,
     error_class: str | None = None,
     completion_tokens: int | None = None,
     length_soft_limit: int = DEFAULT_LENGTH_SOFT_LIMIT,
@@ -253,6 +264,7 @@ def reward_gated_judge(
     judge_score: float | None = None,
     process_score: float | None = None,
     truncated: bool = False,
+    closed: bool = False,
     error_class: str | None = None,
     completion_tokens: int | None = None,
     length_soft_limit: int = DEFAULT_LENGTH_SOFT_LIMIT,
@@ -276,6 +288,7 @@ def reward_gated_process(
     judge_score: float | None = None,
     process_score: float | None = None,
     truncated: bool = False,
+    closed: bool = False,
     error_class: str | None = None,
     completion_tokens: int | None = None,
     length_soft_limit: int = DEFAULT_LENGTH_SOFT_LIMIT,
@@ -325,6 +338,7 @@ def compose_reward(
     judge_score: float | None = None,
     process_score: float | None = None,
     truncated: bool = False,
+    closed: bool = False,
     error_class: str | None = None,
     completion_tokens: int | None = None,
     length_soft_limit: int = DEFAULT_LENGTH_SOFT_LIMIT,
@@ -344,6 +358,7 @@ def compose_reward(
         judge_score=judge_score,
         process_score=process_score,
         truncated=truncated,
+        closed=closed,
         error_class=error_class,
         completion_tokens=completion_tokens,
         length_soft_limit=length_soft_limit,
