@@ -104,6 +104,58 @@ def test_collect_dashboard_reads_run_files(tmp_path) -> None:
     assert data["runs"][0]["evaluations"][1]["pass_at_1"] == pytest.approx(0.5)
 
 
+def test_dashboard_shows_the_active_stage_and_pass_rate_per_band(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "stage": "very easy",
+            "rollouts": 2,
+            "mean_reward": 0.75,
+            "pass_rate": 0.5,
+            "mean_completion_tokens": 40.0,
+            "cache_hits": 0,
+            "truncation_rate": 0.0,
+        },
+        {
+            "step": 2,
+            "arm": "code-score",
+            "stage": "medium",
+            "rollouts": 1,
+            "mean_reward": 1.0,
+            "pass_rate": 1.0,
+            "mean_completion_tokens": 30.0,
+            "cache_hits": 0,
+            "truncation_rate": 0.0,
+        },
+    ]
+    rollouts = [
+        {"step": 1, "stage": "very easy", "reward": 1.0, "tests_passed": 2, "tests_total": 2},
+        {"step": 1, "stage": "very easy", "reward": 0.5, "tests_passed": 1, "tests_total": 2},
+        {"step": 2, "stage": "medium", "reward": 1.0, "tests_passed": 2, "tests_total": 2},
+    ]
+    run_dir = write_run(tmp_path / "runs", "code-score", rows=rows, rollouts=rollouts)
+    data = collect_dashboard([run_dir])
+    run = data["runs"][0]
+
+    assert run["stage"] == "medium"
+    assert run["bands"] == [
+        {"band": "very easy", "rollouts": 2, "pass_rate": 0.5},
+        {"band": "medium", "rollouts": 1, "pass_rate": 1.0},
+    ]
+    html = render_html(data)
+    assert "pass rate per band" in html
+    assert "very easy" in html
+
+
+def test_a_waiting_run_has_no_stage(tmp_path) -> None:
+    runs_root = tmp_path / "runs"
+    (runs_root / "code-score").mkdir(parents=True)
+    data = collect_dashboard([runs_root])
+    assert data["runs"][0]["stage"] is None
+    assert data["runs"][0]["bands"] == []
+
+
 def test_collect_dashboard_ignores_a_truncated_final_metric_line(tmp_path) -> None:
     run_dir = write_run(tmp_path / "runs", "code-score", truncated=True)
     data = collect_dashboard([run_dir])

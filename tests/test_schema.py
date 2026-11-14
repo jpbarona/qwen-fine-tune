@@ -16,6 +16,7 @@ from rlvr.schema import FIELD_NAMES, FIELD_TYPES, RolloutRecord, SchemaError
 CONTRACT: list[tuple[str, tuple[str, ...]]] = [
     ("arm", ("str",)),
     ("step", ("int",)),
+    ("stage", ("str",)),
     ("prompt_id", ("str",)),
     ("reasoning", ("str",)),
     ("code", ("str",)),
@@ -36,6 +37,7 @@ def valid_record(arm: str = "code-score", step: int = 1) -> dict:
     return {
         "arm": arm,
         "step": step,
+        "stage": "very easy",
         "prompt_id": "mbpp-0001",
         "reasoning": "think",
         "code": "def f():\n    return 1",

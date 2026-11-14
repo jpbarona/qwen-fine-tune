@@ -41,6 +41,7 @@ def _record(step: int) -> RolloutRecord:
     return RolloutRecord(
         arm="code-score",
         step=step,
+        stage="very easy",
         prompt_id="mbpp-0000",
         reasoning="r",
         code="c",

@@ -39,6 +39,9 @@ Optional keys, with the defaults shown:
     [budget] max_steps = (unset: run all of fake.steps)
     [budget] max_judge_calls = (unset: no judge call cap)
 
+    [curriculum] stage = "very easy"
+    [curriculum] carry_over_ratio = 0.2
+
     [judge] provider = "openrouter"
     [judge] base_url = (unset: the provider default endpoint)
     [judge] api_key_env = (unset: the provider default variable)
@@ -49,6 +52,10 @@ the train/test cut.
 
 `entropy_every` sets how often the update pass measures entropy, in updates.
 Zero turns the measurement off. A negative value is rejected.
+
+`[curriculum] stage` is the band a run starts at and must be one of the four
+fixed bands. `[curriculum] carry_over_ratio` is the share of the previous band
+added to the next stage, at least 0 and below 1.
 
 Extra keys and tables are kept and ignored here. Later tasks add the training,
 data, and judge settings they need without changing this loader's contract.
@@ -72,6 +79,7 @@ from .reward import (
     DEFAULT_LENGTH_PENALTY_PER_TOKEN,
     DEFAULT_LENGTH_SOFT_LIMIT,
 )
+from .stages import BANDS, DEFAULT_CARRY_OVER_RATIO
 
 __all__ = ["Config", "ConfigError", "default_config_path", "load_config"]
 
@@ -102,6 +110,9 @@ DEFAULT_ENTROPY_EVERY = 500
 DEFAULT_CLIP_EPSILON = 0.2
 DEFAULT_KL_BETA = 0.0
 DEFAULT_SEED = 0
+
+#: The band a run starts at, and the default carry over share.
+DEFAULT_STAGE = BANDS[0]
 
 
 class ConfigError(ValueError):
@@ -137,6 +148,8 @@ class Config:
     length_penalty_per_token: float = DEFAULT_LENGTH_PENALTY_PER_TOKEN
     length_penalty_floor: float = DEFAULT_LENGTH_PENALTY_FLOOR
     seed: int = DEFAULT_SEED
+    stage: str = DEFAULT_STAGE
+    carry_over_ratio: float = DEFAULT_CARRY_OVER_RATIO
     max_steps: int | None = None
     max_judge_calls: int | None = None
 
@@ -231,6 +244,20 @@ def _optional_float(raw: dict[str, Any], dotted: str, default: float, *, positiv
     if not positive and number < 0.0:
         raise ConfigError(f"config: '{dotted}' must not be negative, got {value!r}")
     return number
+
+
+def _band(raw: dict[str, Any], dotted: str, default: str) -> str:
+    """A band name that must be one of the fixed ordered bands."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return default
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"config: '{dotted}' must be a non-empty string, got {_shown(value)}")
+    if value not in BANDS:
+        raise ConfigError(
+            f"config: '{dotted}' must be one of {', '.join(BANDS)}, got {value!r}"
+        )
+    return value
 
 
 def _optional_unit_float(raw: dict[str, Any], dotted: str, default: float) -> float:
@@ -337,6 +364,10 @@ def load_config(path: str | Path) -> Config:
             raw, "training.length_penalty_floor", DEFAULT_LENGTH_PENALTY_FLOOR
         ),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
+        stage=_band(raw, "curriculum.stage", DEFAULT_STAGE),
+        carry_over_ratio=_optional_unit_float(
+            raw, "curriculum.carry_over_ratio", DEFAULT_CARRY_OVER_RATIO
+        ),
         max_steps=_optional_int_none(raw, "budget.max_steps"),
         max_judge_calls=_optional_int_none(raw, "budget.max_judge_calls"),
     )

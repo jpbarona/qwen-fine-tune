@@ -17,6 +17,8 @@ Notes on the contract:
   judge cache. It is always false for the code-score arm, which never judges.
 * `reward` may be negative. The code arm clips it to [-1, 1], so the schema
   checks that range rather than [0, 1]. The three score fields stay in [0, 1].
+* `stage` is the curriculum band active when the rollout ran. Runs without a
+  curriculum use the fixed string `"unstaged"`.
 * Timestamps and truncation flags are deliberately not part of this record.
 * Entropy is not a rollout field. It is measured on the update pass, at the
   `entropy_every` cadence, so it belongs to the step metric row and may be
@@ -47,6 +49,7 @@ FLOAT_OR_NULL = ("float", "null")
 FIELD_NAMES: tuple[str, ...] = (
     "arm",
     "step",
+    "stage",
     "prompt_id",
     "reasoning",
     "code",
@@ -66,6 +69,7 @@ FIELD_NAMES: tuple[str, ...] = (
 FIELD_TYPES: dict[str, tuple[str, ...]] = {
     "arm": (STR,),
     "step": (INT,),
+    "stage": (STR,),
     "prompt_id": (STR,),
     "reasoning": (STR,),
     "code": (STR,),
@@ -172,6 +176,7 @@ class RolloutRecord:
 
     arm: str
     step: int
+    stage: str
     prompt_id: str
     reasoning: str
     code: str
