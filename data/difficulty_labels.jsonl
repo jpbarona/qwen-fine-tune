@@ -1,0 +1,714 @@
+{"prompt_id": "mbpp-464", "band": "medium"}
+{"prompt_id": "mbpp-280", "band": "medium"}
+{"prompt_id": "mbpp-120", "band": "medium"}
+{"prompt_id": "mbpp-195", "band": "medium"}
+{"prompt_id": "mbpp-893", "band": "very easy"}
+{"prompt_id": "mbpp-463", "band": "hard"}
+{"prompt_id": "mbpp-861", "band": "medium"}
+{"prompt_id": "mbpp-404", "band": "very easy"}
+{"prompt_id": "mbpp-510", "band": "hard"}
+{"prompt_id": "mbpp-67", "band": "hard"}
+{"prompt_id": "mbpp-351", "band": "medium"}
+{"prompt_id": "mbpp-240", "band": "very easy"}
+{"prompt_id": "mbpp-731", "band": "medium"}
+{"prompt_id": "mbpp-868", "band": "medium"}
+{"prompt_id": "mbpp-370", "band": "medium"}
+{"prompt_id": "mbpp-777", "band": "medium"}
+{"prompt_id": "mbpp-672", "band": "very easy"}
+{"prompt_id": "mbpp-300", "band": "very hard"}
+{"prompt_id": "mbpp-648", "band": "hard"}
+{"prompt_id": "mbpp-577", "band": "medium"}
+{"prompt_id": "mbpp-563", "band": "medium"}
+{"prompt_id": "mbpp-535", "band": "very easy"}
+{"prompt_id": "mbpp-17", "band": "very easy"}
+{"prompt_id": "mbpp-214", "band": "very easy"}
+{"prompt_id": "mbpp-776", "band": "medium"}
+{"prompt_id": "mbpp-135", "band": "medium"}
+{"prompt_id": "mbpp-131", "band": "hard"}
+{"prompt_id": "mbpp-737", "band": "medium"}
+{"prompt_id": "mbpp-757", "band": "hard"}
+{"prompt_id": "mbpp-617", "band": "hard"}
+{"prompt_id": "mbpp-394", "band": "very easy"}
+{"prompt_id": "mbpp-849", "band": "hard"}
+{"prompt_id": "mbpp-781", "band": "medium"}
+{"prompt_id": "mbpp-941", "band": "medium"}
+{"prompt_id": "mbpp-903", "band": "hard"}
+{"prompt_id": "mbpp-471", "band": "medium"}
+{"prompt_id": "mbpp-863", "band": "hard"}
+{"prompt_id": "mbpp-696", "band": "medium"}
+{"prompt_id": "mbpp-408", "band": "hard"}
+{"prompt_id": "mbpp-647", "band": "medium"}
+{"prompt_id": "mbpp-434", "band": "medium"}
+{"prompt_id": "mbpp-216", "band": "hard"}
+{"prompt_id": "mbpp-243", "band": "medium"}
+{"prompt_id": "mbpp-803", "band": "very easy"}
+{"prompt_id": "mbpp-724", "band": "medium"}
+{"prompt_id": "mbpp-759", "band": "medium"}
+{"prompt_id": "mbpp-330", "band": "medium"}
+{"prompt_id": "mbpp-193", "band": "very easy"}
+{"prompt_id": "mbpp-735", "band": "hard"}
+{"prompt_id": "mbpp-551", "band": "very easy"}
+{"prompt_id": "mbpp-520", "band": "medium"}
+{"prompt_id": "mbpp-275", "band": "hard"}
+{"prompt_id": "mbpp-37", "band": "medium"}
+{"prompt_id": "mbpp-679", "band": "very easy"}
+{"prompt_id": "mbpp-361", "band": "very easy"}
+{"prompt_id": "mbpp-328", "band": "medium"}
+{"prompt_id": "mbpp-729", "band": "very easy"}
+{"prompt_id": "mbpp-288", "band": "hard"}
+{"prompt_id": "mbpp-931", "band": "medium"}
+{"prompt_id": "mbpp-656", "band": "medium"}
+{"prompt_id": "mbpp-419", "band": "medium"}
+{"prompt_id": "mbpp-105", "band": "very easy"}
+{"prompt_id": "mbpp-554", "band": "medium"}
+{"prompt_id": "mbpp-957", "band": "medium"}
+{"prompt_id": "mbpp-109", "band": "hard"}
+{"prompt_id": "mbpp-746", "band": "medium"}
+{"prompt_id": "mbpp-914", "band": "medium"}
+{"prompt_id": "mbpp-140", "band": "hard"}
+{"prompt_id": "mbpp-637", "band": "very easy"}
+{"prompt_id": "mbpp-769", "band": "medium"}
+{"prompt_id": "mbpp-398", "band": "medium"}
+{"prompt_id": "mbpp-50", "band": "medium"}
+{"prompt_id": "mbpp-129", "band": "hard"}
+{"prompt_id": "mbpp-71", "band": "hard"}
+{"prompt_id": "mbpp-916", "band": "hard"}
+{"prompt_id": "mbpp-194", "band": "medium"}
+{"prompt_id": "mbpp-123", "band": "hard"}
+{"prompt_id": "mbpp-497", "band": "medium"}
+{"prompt_id": "mbpp-939", "band": "medium"}
+{"prompt_id": "mbpp-181", "band": "medium"}
+{"prompt_id": "mbpp-164", "band": "medium"}
+{"prompt_id": "mbpp-644", "band": "very easy"}
+{"prompt_id": "mbpp-220", "band": "medium"}
+{"prompt_id": "mbpp-968", "band": "hard"}
+{"prompt_id": "mbpp-247", "band": "very hard"}
+{"prompt_id": "mbpp-652", "band": "hard"}
+{"prompt_id": "mbpp-661", "band": "very hard"}
+{"prompt_id": "mbpp-749", "band": "very easy"}
+{"prompt_id": "mbpp-629", "band": "medium"}
+{"prompt_id": "mbpp-325", "band": "hard"}
+{"prompt_id": "mbpp-473", "band": "hard"}
+{"prompt_id": "mbpp-567", "band": "very easy"}
+{"prompt_id": "mbpp-453", "band": "medium"}
+{"prompt_id": "mbpp-923", "band": "very hard"}
+{"prompt_id": "mbpp-208", "band": "medium"}
+{"prompt_id": "mbpp-312", "band": "medium"}
+{"prompt_id": "mbpp-302", "band": "medium"}
+{"prompt_id": "mbpp-232", "band": "medium"}
+{"prompt_id": "mbpp-761", "band": "medium"}
+{"prompt_id": "mbpp-853", "band": "medium"}
+{"prompt_id": "mbpp-270", "band": "medium"}
+{"prompt_id": "mbpp-444", "band": "medium"}
+{"prompt_id": "mbpp-621", "band": "hard"}
+{"prompt_id": "mbpp-594", "band": "medium"}
+{"prompt_id": "mbpp-347", "band": "hard"}
+{"prompt_id": "mbpp-472", "band": "medium"}
+{"prompt_id": "mbpp-635", "band": "medium"}
+{"prompt_id": "mbpp-560", "band": "very easy"}
+{"prompt_id": "mbpp-789", "band": "medium"}
+{"prompt_id": "mbpp-851", "band": "medium"}
+{"prompt_id": "mbpp-536", "band": "very easy"}
+{"prompt_id": "mbpp-711", "band": "medium"}
+{"prompt_id": "mbpp-282", "band": "very easy"}
+{"prompt_id": "mbpp-831", "band": "medium"}
+{"prompt_id": "mbpp-634", "band": "medium"}
+{"prompt_id": "mbpp-743", "band": "medium"}
+{"prompt_id": "mbpp-512", "band": "hard"}
+{"prompt_id": "mbpp-410", "band": "hard"}
+{"prompt_id": "mbpp-517", "band": "medium"}
+{"prompt_id": "mbpp-402", "band": "medium"}
+{"prompt_id": "mbpp-866", "band": "medium"}
+{"prompt_id": "mbpp-583", "band": "medium"}
+{"prompt_id": "mbpp-254", "band": "medium"}
+{"prompt_id": "mbpp-197", "band": "medium"}
+{"prompt_id": "mbpp-264", "band": "medium"}
+{"prompt_id": "mbpp-22", "band": "medium"}
+{"prompt_id": "mbpp-69", "band": "medium"}
+{"prompt_id": "mbpp-962", "band": "medium"}
+{"prompt_id": "mbpp-545", "band": "medium"}
+{"prompt_id": "mbpp-825", "band": "very easy"}
+{"prompt_id": "mbpp-474", "band": "medium"}
+{"prompt_id": "mbpp-346", "band": "hard"}
+{"prompt_id": "mbpp-971", "band": "hard"}
+{"prompt_id": "mbpp-782", "band": "medium"}
+{"prompt_id": "mbpp-747", "band": "very hard"}
+{"prompt_id": "mbpp-317", "band": "hard"}
+{"prompt_id": "mbpp-571", "band": "hard"}
+{"prompt_id": "mbpp-541", "band": "medium"}
+{"prompt_id": "mbpp-269", "band": "very easy"}
+{"prompt_id": "mbpp-293", "band": "medium"}
+{"prompt_id": "mbpp-666", "band": "very easy"}
+{"prompt_id": "mbpp-521", "band": "medium"}
+{"prompt_id": "mbpp-820", "band": "medium"}
+{"prompt_id": "mbpp-149", "band": "hard"}
+{"prompt_id": "mbpp-499", "band": "medium"}
+{"prompt_id": "mbpp-548", "band": "very hard"}
+{"prompt_id": "mbpp-887", "band": "very easy"}
+{"prompt_id": "mbpp-338", "band": "hard"}
+{"prompt_id": "mbpp-139", "band": "medium"}
+{"prompt_id": "mbpp-449", "band": "hard"}
+{"prompt_id": "mbpp-869", "band": "medium"}
+{"prompt_id": "mbpp-416", "band": "hard"}
+{"prompt_id": "mbpp-595", "band": "hard"}
+{"prompt_id": "mbpp-152", "band": "hard"}
+{"prompt_id": "mbpp-256", "band": "medium"}
+{"prompt_id": "mbpp-202", "band": "medium"}
+{"prompt_id": "mbpp-949", "band": "medium"}
+{"prompt_id": "mbpp-438", "band": "medium"}
+{"prompt_id": "mbpp-579", "band": "medium"}
+{"prompt_id": "mbpp-209", "band": "medium"}
+{"prompt_id": "mbpp-940", "band": "hard"}
+{"prompt_id": "mbpp-245", "band": "hard"}
+{"prompt_id": "mbpp-953", "band": "medium"}
+{"prompt_id": "mbpp-126", "band": "medium"}
+{"prompt_id": "mbpp-828", "band": "medium"}
+{"prompt_id": "mbpp-662", "band": "medium"}
+{"prompt_id": "mbpp-909", "band": "hard"}
+{"prompt_id": "mbpp-902", "band": "medium"}
+{"prompt_id": "mbpp-653", "band": "medium"}
+{"prompt_id": "mbpp-814", "band": "very easy"}
+{"prompt_id": "mbpp-744", "band": "very easy"}
+{"prompt_id": "mbpp-427", "band": "medium"}
+{"prompt_id": "mbpp-719", "band": "medium"}
+{"prompt_id": "mbpp-848", "band": "very easy"}
+{"prompt_id": "mbpp-489", "band": "medium"}
+{"prompt_id": "mbpp-655", "band": "medium"}
+{"prompt_id": "mbpp-511", "band": "hard"}
+{"prompt_id": "mbpp-92", "band": "medium"}
+{"prompt_id": "mbpp-33", "band": "medium"}
+{"prompt_id": "mbpp-687", "band": "medium"}
+{"prompt_id": "mbpp-36", "band": "hard"}
+{"prompt_id": "mbpp-477", "band": "very easy"}
+{"prompt_id": "mbpp-460", "band": "very easy"}
+{"prompt_id": "mbpp-826", "band": "medium"}
+{"prompt_id": "mbpp-491", "band": "medium"}
+{"prompt_id": "mbpp-369", "band": "medium"}
+{"prompt_id": "mbpp-504", "band": "medium"}
+{"prompt_id": "mbpp-619", "band": "medium"}
+{"prompt_id": "mbpp-693", "band": "medium"}
+{"prompt_id": "mbpp-787", "band": "medium"}
+{"prompt_id": "mbpp-355", "band": "hard"}
+{"prompt_id": "mbpp-915", "band": "medium"}
+{"prompt_id": "mbpp-792", "band": "medium"}
+{"prompt_id": "mbpp-925", "band": "very easy"}
+{"prompt_id": "mbpp-767", "band": "hard"}
+{"prompt_id": "mbpp-886", "band": "medium"}
+{"prompt_id": "mbpp-115", "band": "medium"}
+{"prompt_id": "mbpp-623", "band": "medium"}
+{"prompt_id": "mbpp-829", "band": "hard"}
+{"prompt_id": "mbpp-936", "band": "medium"}
+{"prompt_id": "mbpp-407", "band": "hard"}
+{"prompt_id": "mbpp-584", "band": "hard"}
+{"prompt_id": "mbpp-740", "band": "medium"}
+{"prompt_id": "mbpp-441", "band": "very easy"}
+{"prompt_id": "mbpp-668", "band": "medium"}
+{"prompt_id": "mbpp-946", "band": "medium"}
+{"prompt_id": "mbpp-363", "band": "medium"}
+{"prompt_id": "mbpp-31", "band": "hard"}
+{"prompt_id": "mbpp-35", "band": "medium"}
+{"prompt_id": "mbpp-372", "band": "medium"}
+{"prompt_id": "mbpp-639", "band": "medium"}
+{"prompt_id": "mbpp-700", "band": "medium"}
+{"prompt_id": "mbpp-456", "band": "medium"}
+{"prompt_id": "mbpp-657", "band": "medium"}
+{"prompt_id": "mbpp-492", "band": "medium"}
+{"prompt_id": "mbpp-334", "band": "medium"}
+{"prompt_id": "mbpp-445", "band": "medium"}
+{"prompt_id": "mbpp-582", "band": "very easy"}
+{"prompt_id": "mbpp-390", "band": "medium"}
+{"prompt_id": "mbpp-562", "band": "medium"}
+{"prompt_id": "mbpp-354", "band": "medium"}
+{"prompt_id": "mbpp-897", "band": "medium"}
+{"prompt_id": "mbpp-241", "band": "medium"}
+{"prompt_id": "mbpp-728", "band": "medium"}
+{"prompt_id": "mbpp-190", "band": "medium"}
+{"prompt_id": "mbpp-927", "band": "hard"}
+{"prompt_id": "mbpp-63", "band": "medium"}
+{"prompt_id": "mbpp-948", "band": "very easy"}
+{"prompt_id": "mbpp-965", "band": "medium"}
+{"prompt_id": "mbpp-414", "band": "medium"}
+{"prompt_id": "mbpp-383", "band": "hard"}
+{"prompt_id": "mbpp-537", "band": "medium"}
+{"prompt_id": "mbpp-802", "band": "medium"}
+{"prompt_id": "mbpp-688", "band": "medium"}
+{"prompt_id": "mbpp-709", "band": "medium"}
+{"prompt_id": "mbpp-308", "band": "hard"}
+{"prompt_id": "mbpp-458", "band": "very easy"}
+{"prompt_id": "mbpp-606", "band": "medium"}
+{"prompt_id": "mbpp-200", "band": "medium"}
+{"prompt_id": "mbpp-175", "band": "medium"}
+{"prompt_id": "mbpp-830", "band": "medium"}
+{"prompt_id": "mbpp-600", "band": "medium"}
+{"prompt_id": "mbpp-514", "band": "medium"}
+{"prompt_id": "mbpp-55", "band": "medium"}
+{"prompt_id": "mbpp-285", "band": "medium"}
+{"prompt_id": "mbpp-710", "band": "medium"}
+{"prompt_id": "mbpp-754", "band": "medium"}
+{"prompt_id": "mbpp-439", "band": "medium"}
+{"prompt_id": "mbpp-239", "band": "hard"}
+{"prompt_id": "mbpp-268", "band": "medium"}
+{"prompt_id": "mbpp-336", "band": "medium"}
+{"prompt_id": "mbpp-843", "band": "very hard"}
+{"prompt_id": "mbpp-170", "band": "medium"}
+{"prompt_id": "mbpp-229", "band": "medium"}
+{"prompt_id": "mbpp-70", "band": "medium"}
+{"prompt_id": "mbpp-947", "band": "medium"}
+{"prompt_id": "mbpp-890", "band": "medium"}
+{"prompt_id": "mbpp-601", "band": "very hard"}
+{"prompt_id": "mbpp-257", "band": "medium"}
+{"prompt_id": "mbpp-651", "band": "medium"}
+{"prompt_id": "mbpp-715", "band": "medium"}
+{"prompt_id": "mbpp-433", "band": "medium"}
+{"prompt_id": "mbpp-817", "band": "medium"}
+{"prompt_id": "mbpp-576", "band": "medium"}
+{"prompt_id": "mbpp-564", "band": "medium"}
+{"prompt_id": "mbpp-187", "band": "very hard"}
+{"prompt_id": "mbpp-942", "band": "medium"}
+{"prompt_id": "mbpp-636", "band": "medium"}
+{"prompt_id": "mbpp-425", "band": "medium"}
+{"prompt_id": "mbpp-76", "band": "hard"}
+{"prompt_id": "mbpp-955", "band": "medium"}
+{"prompt_id": "mbpp-597", "band": "very hard"}
+{"prompt_id": "mbpp-384", "band": "medium"}
+{"prompt_id": "mbpp-377", "band": "medium"}
+{"prompt_id": "mbpp-622", "band": "medium"}
+{"prompt_id": "mbpp-98", "band": "medium"}
+{"prompt_id": "mbpp-546", "band": "medium"}
+{"prompt_id": "mbpp-48", "band": "hard"}
+{"prompt_id": "mbpp-752", "band": "medium"}
+{"prompt_id": "mbpp-930", "band": "medium"}
+{"prompt_id": "mbpp-552", "band": "medium"}
+{"prompt_id": "mbpp-68", "band": "medium"}
+{"prompt_id": "mbpp-423", "band": "very hard"}
+{"prompt_id": "mbpp-357", "band": "medium"}
+{"prompt_id": "mbpp-32", "band": "medium"}
+{"prompt_id": "mbpp-118", "band": "medium"}
+{"prompt_id": "mbpp-225", "band": "medium"}
+{"prompt_id": "mbpp-446", "band": "medium"}
+{"prompt_id": "mbpp-393", "band": "medium"}
+{"prompt_id": "mbpp-785", "band": "medium"}
+{"prompt_id": "mbpp-74", "band": "hard"}
+{"prompt_id": "mbpp-301", "band": "medium"}
+{"prompt_id": "mbpp-677", "band": "medium"}
+{"prompt_id": "mbpp-21", "band": "medium"}
+{"prompt_id": "mbpp-324", "band": "medium"}
+{"prompt_id": "mbpp-895", "band": "hard"}
+{"prompt_id": "mbpp-773", "band": "medium"}
+{"prompt_id": "mbpp-547", "band": "very hard"}
+{"prompt_id": "mbpp-883", "band": "medium"}
+{"prompt_id": "mbpp-409", "band": "medium"}
+{"prompt_id": "mbpp-379", "band": "medium"}
+{"prompt_id": "mbpp-329", "band": "medium"}
+{"prompt_id": "mbpp-309", "band": "medium"}
+{"prompt_id": "mbpp-736", "band": "medium"}
+{"prompt_id": "mbpp-226", "band": "medium"}
+{"prompt_id": "mbpp-265", "band": "medium"}
+{"prompt_id": "mbpp-227", "band": "medium"}
+{"prompt_id": "mbpp-745", "band": "medium"}
+{"prompt_id": "mbpp-906", "band": "medium"}
+{"prompt_id": "mbpp-615", "band": "medium"}
+{"prompt_id": "mbpp-236", "band": "hard"}
+{"prompt_id": "mbpp-196", "band": "medium"}
+{"prompt_id": "mbpp-20", "band": "very hard"}
+{"prompt_id": "mbpp-834", "band": "very hard"}
+{"prompt_id": "mbpp-726", "band": "medium"}
+{"prompt_id": "mbpp-125", "band": "hard"}
+{"prompt_id": "mbpp-108", "band": "medium"}
+{"prompt_id": "mbpp-188", "band": "very hard"}
+{"prompt_id": "mbpp-760", "band": "medium"}
+{"prompt_id": "mbpp-11", "band": "medium"}
+{"prompt_id": "mbpp-691", "band": "medium"}
+{"prompt_id": "mbpp-327", "band": "medium"}
+{"prompt_id": "mbpp-758", "band": "medium"}
+{"prompt_id": "mbpp-119", "band": "medium"}
+{"prompt_id": "mbpp-525", "band": "medium"}
+{"prompt_id": "mbpp-483", "band": "medium"}
+{"prompt_id": "mbpp-742", "band": "medium"}
+{"prompt_id": "mbpp-919", "band": "medium"}
+{"prompt_id": "mbpp-122", "band": "hard"}
+{"prompt_id": "mbpp-568", "band": "medium"}
+{"prompt_id": "mbpp-753", "band": "medium"}
+{"prompt_id": "mbpp-645", "band": "medium"}
+{"prompt_id": "mbpp-298", "band": "medium"}
+{"prompt_id": "mbpp-333", "band": "medium"}
+{"prompt_id": "mbpp-440", "band": "hard"}
+{"prompt_id": "mbpp-844", "band": "medium"}
+{"prompt_id": "mbpp-45", "band": "medium"}
+{"prompt_id": "mbpp-436", "band": "medium"}
+{"prompt_id": "mbpp-934", "band": "very hard"}
+{"prompt_id": "mbpp-944", "band": "medium"}
+{"prompt_id": "mbpp-628", "band": "medium"}
+{"prompt_id": "mbpp-44", "band": "medium"}
+{"prompt_id": "mbpp-680", "band": "medium"}
+{"prompt_id": "mbpp-718", "band": "medium"}
+{"prompt_id": "mbpp-768", "band": "medium"}
+{"prompt_id": "mbpp-786", "band": "medium"}
+{"prompt_id": "mbpp-403", "band": "medium"}
+{"prompt_id": "mbpp-147", "band": "very hard"}
+{"prompt_id": "mbpp-79", "band": "medium"}
+{"prompt_id": "mbpp-871", "band": "medium"}
+{"prompt_id": "mbpp-913", "band": "medium"}
+{"prompt_id": "mbpp-484", "band": "medium"}
+{"prompt_id": "mbpp-261", "band": "medium"}
+{"prompt_id": "mbpp-809", "band": "medium"}
+{"prompt_id": "mbpp-385", "band": "very hard"}
+{"prompt_id": "mbpp-598", "band": "medium"}
+{"prompt_id": "mbpp-281", "band": "medium"}
+{"prompt_id": "mbpp-540", "band": "medium"}
+{"prompt_id": "mbpp-721", "band": "very hard"}
+{"prompt_id": "mbpp-892", "band": "medium"}
+{"prompt_id": "mbpp-708", "band": "medium"}
+{"prompt_id": "mbpp-84", "band": "very hard"}
+{"prompt_id": "mbpp-970", "band": "medium"}
+{"prompt_id": "mbpp-663", "band": "medium"}
+{"prompt_id": "mbpp-24", "band": "medium"}
+{"prompt_id": "mbpp-734", "band": "hard"}
+{"prompt_id": "mbpp-723", "band": "medium"}
+{"prompt_id": "mbpp-860", "band": "medium"}
+{"prompt_id": "mbpp-348", "band": "very hard"}
+{"prompt_id": "mbpp-432", "band": "medium"}
+{"prompt_id": "mbpp-543", "band": "medium"}
+{"prompt_id": "mbpp-276", "band": "medium"}
+{"prompt_id": "mbpp-894", "band": "medium"}
+{"prompt_id": "mbpp-273", "band": "medium"}
+{"prompt_id": "mbpp-165", "band": "medium"}
+{"prompt_id": "mbpp-928", "band": "medium"}
+{"prompt_id": "mbpp-132", "band": "medium"}
+{"prompt_id": "mbpp-205", "band": "hard"}
+{"prompt_id": "mbpp-259", "band": "medium"}
+{"prompt_id": "mbpp-451", "band": "medium"}
+{"prompt_id": "mbpp-206", "band": "medium"}
+{"prompt_id": "mbpp-341", "band": "medium"}
+{"prompt_id": "mbpp-136", "band": "medium"}
+{"prompt_id": "mbpp-779", "band": "medium"}
+{"prompt_id": "mbpp-43", "band": "medium"}
+{"prompt_id": "mbpp-900", "band": "medium"}
+{"prompt_id": "mbpp-378", "band": "medium"}
+{"prompt_id": "mbpp-966", "band": "medium"}
+{"prompt_id": "mbpp-505", "band": "medium"}
+{"prompt_id": "mbpp-842", "band": "medium"}
+{"prompt_id": "mbpp-23", "band": "medium"}
+{"prompt_id": "mbpp-530", "band": "medium"}
+{"prompt_id": "mbpp-891", "band": "medium"}
+{"prompt_id": "mbpp-566", "band": "medium"}
+{"prompt_id": "mbpp-873", "band": "medium"}
+{"prompt_id": "mbpp-593", "band": "medium"}
+{"prompt_id": "mbpp-501", "band": "medium"}
+{"prompt_id": "mbpp-516", "band": "hard"}
+{"prompt_id": "mbpp-704", "band": "medium"}
+{"prompt_id": "mbpp-972", "band": "medium"}
+{"prompt_id": "mbpp-958", "band": "hard"}
+{"prompt_id": "mbpp-643", "band": "medium"}
+{"prompt_id": "mbpp-784", "band": "medium"}
+{"prompt_id": "mbpp-94", "band": "medium"}
+{"prompt_id": "mbpp-467", "band": "medium"}
+{"prompt_id": "mbpp-157", "band": "hard"}
+{"prompt_id": "mbpp-841", "band": "hard"}
+{"prompt_id": "mbpp-534", "band": "medium"}
+{"prompt_id": "mbpp-263", "band": "medium"}
+{"prompt_id": "mbpp-305", "band": "medium"}
+{"prompt_id": "mbpp-362", "band": "medium"}
+{"prompt_id": "mbpp-821", "band": "medium"}
+{"prompt_id": "mbpp-951", "band": "medium"}
+{"prompt_id": "mbpp-452", "band": "medium"}
+{"prompt_id": "mbpp-148", "band": "hard"}
+{"prompt_id": "mbpp-932", "band": "medium"}
+{"prompt_id": "mbpp-183", "band": "medium"}
+{"prompt_id": "mbpp-267", "band": "medium"}
+{"prompt_id": "mbpp-640", "band": "medium"}
+{"prompt_id": "mbpp-238", "band": "medium"}
+{"prompt_id": "mbpp-686", "band": "medium"}
+{"prompt_id": "mbpp-242", "band": "medium"}
+{"prompt_id": "mbpp-838", "band": "medium"}
+{"prompt_id": "mbpp-110", "band": "medium"}
+{"prompt_id": "mbpp-90", "band": "medium"}
+{"prompt_id": "mbpp-138", "band": "very hard"}
+{"prompt_id": "mbpp-632", "band": "medium"}
+{"prompt_id": "mbpp-173", "band": "medium"}
+{"prompt_id": "mbpp-775", "band": "medium"}
+{"prompt_id": "mbpp-771", "band": "hard"}
+{"prompt_id": "mbpp-156", "band": "medium"}
+{"prompt_id": "mbpp-964", "band": "medium"}
+{"prompt_id": "mbpp-673", "band": "medium"}
+{"prompt_id": "mbpp-763", "band": "medium"}
+{"prompt_id": "mbpp-15", "band": "medium"}
+{"prompt_id": "mbpp-591", "band": "medium"}
+{"prompt_id": "mbpp-203", "band": "medium"}
+{"prompt_id": "mbpp-963", "band": "medium"}
+{"prompt_id": "mbpp-924", "band": "medium"}
+{"prompt_id": "mbpp-559", "band": "medium"}
+{"prompt_id": "mbpp-575", "band": "medium"}
+{"prompt_id": "mbpp-750", "band": "medium"}
+{"prompt_id": "mbpp-314", "band": "very hard"}
+{"prompt_id": "mbpp-168", "band": "medium"}
+{"prompt_id": "mbpp-850", "band": "medium"}
+{"prompt_id": "mbpp-176", "band": "medium"}
+{"prompt_id": "mbpp-569", "band": "medium"}
+{"prompt_id": "mbpp-144", "band": "medium"}
+{"prompt_id": "mbpp-660", "band": "medium"}
+{"prompt_id": "mbpp-713", "band": "medium"}
+{"prompt_id": "mbpp-685", "band": "medium"}
+{"prompt_id": "mbpp-34", "band": "medium"}
+{"prompt_id": "mbpp-62", "band": "medium"}
+{"prompt_id": "mbpp-319", "band": "medium"}
+{"prompt_id": "mbpp-172", "band": "medium"}
+{"prompt_id": "mbpp-922", "band": "medium"}
+{"prompt_id": "mbpp-854", "band": "medium"}
+{"prompt_id": "mbpp-26", "band": "medium"}
+{"prompt_id": "mbpp-935", "band": "medium"}
+{"prompt_id": "mbpp-113", "band": "medium"}
+{"prompt_id": "mbpp-366", "band": "medium"}
+{"prompt_id": "mbpp-150", "band": "hard"}
+{"prompt_id": "mbpp-204", "band": "medium"}
+{"prompt_id": "mbpp-99", "band": "medium"}
+{"prompt_id": "mbpp-832", "band": "medium"}
+{"prompt_id": "mbpp-470", "band": "medium"}
+{"prompt_id": "mbpp-739", "band": "medium"}
+{"prompt_id": "mbpp-101", "band": "medium"}
+{"prompt_id": "mbpp-112", "band": "medium"}
+{"prompt_id": "mbpp-642", "band": "medium"}
+{"prompt_id": "mbpp-54", "band": "hard"}
+{"prompt_id": "mbpp-248", "band": "medium"}
+{"prompt_id": "mbpp-426", "band": "medium"}
+{"prompt_id": "mbpp-926", "band": "very hard"}
+{"prompt_id": "mbpp-898", "band": "medium"}
+{"prompt_id": "mbpp-279", "band": "medium"}
+{"prompt_id": "mbpp-788", "band": "medium"}
+{"prompt_id": "mbpp-237", "band": "medium"}
+{"prompt_id": "mbpp-174", "band": "medium"}
+{"prompt_id": "mbpp-714", "band": "hard"}
+{"prompt_id": "mbpp-867", "band": "medium"}
+{"prompt_id": "mbpp-770", "band": "medium"}
+{"prompt_id": "mbpp-487", "band": "medium"}
+{"prompt_id": "mbpp-356", "band": "medium"}
+{"prompt_id": "mbpp-959", "band": "medium"}
+{"prompt_id": "mbpp-321", "band": "medium"}
+{"prompt_id": "mbpp-107", "band": "medium"}
+{"prompt_id": "mbpp-448", "band": "hard"}
+{"prompt_id": "mbpp-722", "band": "medium"}
+{"prompt_id": "mbpp-218", "band": "hard"}
+{"prompt_id": "mbpp-874", "band": "medium"}
+{"prompt_id": "mbpp-631", "band": "medium"}
+{"prompt_id": "mbpp-375", "band": "medium"}
+{"prompt_id": "mbpp-161", "band": "medium"}
+{"prompt_id": "mbpp-618", "band": "medium"}
+{"prompt_id": "mbpp-211", "band": "very hard"}
+{"prompt_id": "mbpp-899", "band": "very hard"}
+{"prompt_id": "mbpp-725", "band": "medium"}
+{"prompt_id": "mbpp-675", "band": "medium"}
+{"prompt_id": "mbpp-952", "band": "medium"}
+{"prompt_id": "mbpp-142", "band": "medium"}
+{"prompt_id": "mbpp-405", "band": "medium"}
+{"prompt_id": "mbpp-424", "band": "medium"}
+{"prompt_id": "mbpp-799", "band": "hard"}
+{"prompt_id": "mbpp-665", "band": "medium"}
+{"prompt_id": "mbpp-659", "band": "medium"}
+{"prompt_id": "mbpp-766", "band": "medium"}
+{"prompt_id": "mbpp-611", "band": "medium"}
+{"prompt_id": "mbpp-251", "band": "medium"}
+{"prompt_id": "mbpp-412", "band": "medium"}
+{"prompt_id": "mbpp-65", "band": "medium"}
+{"prompt_id": "mbpp-141", "band": "very hard"}
+{"prompt_id": "mbpp-422", "band": "medium"}
+{"prompt_id": "mbpp-833", "band": "medium"}
+{"prompt_id": "mbpp-392", "band": "very hard"}
+{"prompt_id": "mbpp-466", "band": "medium"}
+{"prompt_id": "mbpp-703", "band": "medium"}
+{"prompt_id": "mbpp-920", "band": "medium"}
+{"prompt_id": "mbpp-578", "band": "medium"}
+{"prompt_id": "mbpp-430", "band": "medium"}
+{"prompt_id": "mbpp-373", "band": "medium"}
+{"prompt_id": "mbpp-765", "band": "hard"}
+{"prompt_id": "mbpp-877", "band": "medium"}
+{"prompt_id": "mbpp-465", "band": "medium"}
+{"prompt_id": "mbpp-827", "band": "medium"}
+{"prompt_id": "mbpp-255", "band": "medium"}
+{"prompt_id": "mbpp-596", "band": "medium"}
+{"prompt_id": "mbpp-14", "band": "medium"}
+{"prompt_id": "mbpp-690", "band": "medium"}
+{"prompt_id": "mbpp-478", "band": "medium"}
+{"prompt_id": "mbpp-191", "band": "medium"}
+{"prompt_id": "mbpp-290", "band": "medium"}
+{"prompt_id": "mbpp-382", "band": "medium"}
+{"prompt_id": "mbpp-310", "band": "medium"}
+{"prompt_id": "mbpp-340", "band": "medium"}
+{"prompt_id": "mbpp-199", "band": "medium"}
+{"prompt_id": "mbpp-756", "band": "medium"}
+{"prompt_id": "mbpp-234", "band": "medium"}
+{"prompt_id": "mbpp-47", "band": "hard"}
+{"prompt_id": "mbpp-134", "band": "medium"}
+{"prompt_id": "mbpp-917", "band": "medium"}
+{"prompt_id": "mbpp-638", "band": "medium"}
+{"prompt_id": "mbpp-19", "band": "medium"}
+{"prompt_id": "mbpp-303", "band": "hard"}
+{"prompt_id": "mbpp-250", "band": "medium"}
+{"prompt_id": "mbpp-387", "band": "medium"}
+{"prompt_id": "mbpp-428", "band": "very hard"}
+{"prompt_id": "mbpp-791", "band": "medium"}
+{"prompt_id": "mbpp-306", "band": "very hard"}
+{"prompt_id": "mbpp-574", "band": "medium"}
+{"prompt_id": "mbpp-381", "band": "medium"}
+{"prompt_id": "mbpp-901", "band": "medium"}
+{"prompt_id": "mbpp-61", "band": "hard"}
+{"prompt_id": "mbpp-271", "band": "medium"}
+{"prompt_id": "mbpp-146", "band": "medium"}
+{"prompt_id": "mbpp-524", "band": "very hard"}
+{"prompt_id": "mbpp-884", "band": "medium"}
+{"prompt_id": "mbpp-212", "band": "medium"}
+{"prompt_id": "mbpp-228", "band": "medium"}
+{"prompt_id": "mbpp-624", "band": "medium"}
+{"prompt_id": "mbpp-87", "band": "medium"}
+{"prompt_id": "mbpp-780", "band": "medium"}
+{"prompt_id": "mbpp-435", "band": "medium"}
+{"prompt_id": "mbpp-599", "band": "medium"}
+{"prompt_id": "mbpp-376", "band": "medium"}
+{"prompt_id": "mbpp-585", "band": "medium"}
+{"prompt_id": "mbpp-258", "band": "medium"}
+{"prompt_id": "mbpp-630", "band": "medium"}
+{"prompt_id": "mbpp-751", "band": "medium"}
+{"prompt_id": "mbpp-359", "band": "hard"}
+{"prompt_id": "mbpp-794", "band": "medium"}
+{"prompt_id": "mbpp-669", "band": "medium"}
+{"prompt_id": "mbpp-93", "band": "medium"}
+{"prompt_id": "mbpp-469", "band": "very hard"}
+{"prompt_id": "mbpp-41", "band": "medium"}
+{"prompt_id": "mbpp-717", "band": "medium"}
+{"prompt_id": "mbpp-515", "band": "very hard"}
+{"prompt_id": "mbpp-399", "band": "medium"}
+{"prompt_id": "mbpp-544", "band": "medium"}
+{"prompt_id": "mbpp-910", "band": "medium"}
+{"prompt_id": "mbpp-213", "band": "medium"}
+{"prompt_id": "mbpp-244", "band": "medium"}
+{"prompt_id": "mbpp-332", "band": "medium"}
+{"prompt_id": "mbpp-813", "band": "medium"}
+{"prompt_id": "mbpp-950", "band": "medium"}
+{"prompt_id": "mbpp-429", "band": "medium"}
+{"prompt_id": "mbpp-388", "band": "medium"}
+{"prompt_id": "mbpp-633", "band": "very hard"}
+{"prompt_id": "mbpp-646", "band": "medium"}
+{"prompt_id": "mbpp-875", "band": "medium"}
+{"prompt_id": "mbpp-815", "band": "hard"}
+{"prompt_id": "mbpp-774", "band": "medium"}
+{"prompt_id": "mbpp-590", "band": "medium"}
+{"prompt_id": "mbpp-586", "band": "medium"}
+{"prompt_id": "mbpp-143", "band": "medium"}
+{"prompt_id": "mbpp-345", "band": "medium"}
+{"prompt_id": "mbpp-413", "band": "medium"}
+{"prompt_id": "mbpp-528", "band": "medium"}
+{"prompt_id": "mbpp-805", "band": "medium"}
+{"prompt_id": "mbpp-179", "band": "very hard"}
+{"prompt_id": "mbpp-260", "band": "very hard"}
+{"prompt_id": "mbpp-555", "band": "medium"}
+{"prompt_id": "mbpp-160", "band": "hard"}
+{"prompt_id": "mbpp-80", "band": "medium"}
+{"prompt_id": "mbpp-733", "band": "medium"}
+{"prompt_id": "mbpp-678", "band": "medium"}
+{"prompt_id": "mbpp-772", "band": "medium"}
+{"prompt_id": "mbpp-699", "band": "medium"}
+{"prompt_id": "mbpp-177", "band": "medium"}
+{"prompt_id": "mbpp-246", "band": "medium"}
+{"prompt_id": "mbpp-588", "band": "medium"}
+{"prompt_id": "mbpp-676", "band": "medium"}
+{"prompt_id": "mbpp-969", "band": "medium"}
+{"prompt_id": "mbpp-29", "band": "medium"}
+{"prompt_id": "mbpp-95", "band": "medium"}
+{"prompt_id": "mbpp-527", "band": "medium"}
+{"prompt_id": "mbpp-367", "band": "hard"}
+{"prompt_id": "mbpp-806", "band": "medium"}
+{"prompt_id": "mbpp-604", "band": "medium"}
+{"prompt_id": "mbpp-508", "band": "medium"}
+{"prompt_id": "mbpp-278", "band": "medium"}
+{"prompt_id": "mbpp-801", "band": "medium"}
+{"prompt_id": "mbpp-933", "band": "medium"}
+{"prompt_id": "mbpp-783", "band": "hard"}
+{"prompt_id": "mbpp-455", "band": "medium"}
+{"prompt_id": "mbpp-918", "band": "very hard"}
+{"prompt_id": "mbpp-539", "band": "medium"}
+{"prompt_id": "mbpp-331", "band": "medium"}
+{"prompt_id": "mbpp-819", "band": "medium"}
+{"prompt_id": "mbpp-224", "band": "medium"}
+{"prompt_id": "mbpp-56", "band": "medium"}
+{"prompt_id": "mbpp-840", "band": "medium"}
+{"prompt_id": "mbpp-706", "band": "medium"}
+{"prompt_id": "mbpp-40", "band": "medium"}
+{"prompt_id": "mbpp-151", "band": "medium"}
+{"prompt_id": "mbpp-391", "band": "medium"}
+{"prompt_id": "mbpp-797", "band": "medium"}
+{"prompt_id": "mbpp-262", "band": "medium"}
+{"prompt_id": "mbpp-835", "band": "medium"}
+{"prompt_id": "mbpp-572", "band": "medium"}
+{"prompt_id": "mbpp-859", "band": "medium"}
+{"prompt_id": "mbpp-614", "band": "medium"}
+{"prompt_id": "mbpp-550", "band": "medium"}
+{"prompt_id": "mbpp-97", "band": "medium"}
+{"prompt_id": "mbpp-284", "band": "medium"}
+{"prompt_id": "mbpp-480", "band": "medium"}
+{"prompt_id": "mbpp-339", "band": "hard"}
+{"prompt_id": "mbpp-353", "band": "medium"}
+{"prompt_id": "mbpp-533", "band": "medium"}
+{"prompt_id": "mbpp-358", "band": "medium"}
+{"prompt_id": "mbpp-778", "band": "medium"}
+{"prompt_id": "mbpp-627", "band": "medium"}
+{"prompt_id": "mbpp-557", "band": "medium"}
+{"prompt_id": "mbpp-796", "band": "medium"}
+{"prompt_id": "mbpp-296", "band": "hard"}
+{"prompt_id": "mbpp-532", "band": "medium"}
+{"prompt_id": "mbpp-790", "band": "medium"}
+{"prompt_id": "mbpp-670", "band": "medium"}
+{"prompt_id": "mbpp-311", "band": "hard"}
+{"prompt_id": "mbpp-865", "band": "medium"}
+{"prompt_id": "mbpp-349", "band": "medium"}
+{"prompt_id": "mbpp-608", "band": "very hard"}
+{"prompt_id": "mbpp-705", "band": "medium"}
+{"prompt_id": "mbpp-307", "band": "medium"}
+{"prompt_id": "mbpp-961", "band": "hard"}
+{"prompt_id": "mbpp-350", "band": "medium"}
+{"prompt_id": "mbpp-613", "band": "medium"}
+{"prompt_id": "mbpp-154", "band": "medium"}
+{"prompt_id": "mbpp-937", "band": "medium"}
+{"prompt_id": "mbpp-856", "band": "hard"}
+{"prompt_id": "mbpp-386", "band": "very hard"}
+{"prompt_id": "mbpp-889", "band": "medium"}
+{"prompt_id": "mbpp-117", "band": "medium"}
+{"prompt_id": "mbpp-857", "band": "medium"}
+{"prompt_id": "mbpp-39", "band": "hard"}
+{"prompt_id": "mbpp-496", "band": "medium"}
+{"prompt_id": "mbpp-479", "band": "medium"}
+{"prompt_id": "mbpp-592", "band": "very hard"}
+{"prompt_id": "mbpp-846", "band": "hard"}
+{"prompt_id": "mbpp-184", "band": "medium"}
+{"prompt_id": "mbpp-222", "band": "medium"}
+{"prompt_id": "mbpp-888", "band": "medium"}
+{"prompt_id": "mbpp-625", "band": "medium"}
+{"prompt_id": "mbpp-681", "band": "medium"}
+{"prompt_id": "mbpp-389", "band": "medium"}
+{"prompt_id": "mbpp-616", "band": "medium"}
+{"prompt_id": "mbpp-299", "band": "medium"}
+{"prompt_id": "mbpp-822", "band": "medium"}
+{"prompt_id": "mbpp-500", "band": "medium"}
+{"prompt_id": "mbpp-654", "band": "medium"}
+{"prompt_id": "mbpp-421", "band": "medium"}
+{"prompt_id": "mbpp-839", "band": "medium"}
+{"prompt_id": "mbpp-707", "band": "very hard"}
+{"prompt_id": "mbpp-450", "band": "medium"}
+{"prompt_id": "mbpp-316", "band": "medium"}
+{"prompt_id": "mbpp-811", "band": "medium"}
+{"prompt_id": "mbpp-502", "band": "medium"}
+{"prompt_id": "mbpp-86", "band": "medium"}
+{"prompt_id": "mbpp-13", "band": "medium"}
+{"prompt_id": "mbpp-326", "band": "medium"}
+{"prompt_id": "mbpp-400", "band": "medium"}
+{"prompt_id": "mbpp-764", "band": "medium"}
+{"prompt_id": "mbpp-513", "band": "medium"}
+{"prompt_id": "mbpp-249", "band": "medium"}
+{"prompt_id": "mbpp-973", "band": "medium"}
+{"prompt_id": "mbpp-862", "band": "medium"}
+{"prompt_id": "mbpp-64", "band": "medium"}
+{"prompt_id": "mbpp-418", "band": "medium"}
+{"prompt_id": "mbpp-896", "band": "medium"}
+{"prompt_id": "mbpp-315", "band": "medium"}
+{"prompt_id": "mbpp-852", "band": "medium"}
+{"prompt_id": "mbpp-291", "band": "very hard"}
+{"prompt_id": "mbpp-395", "band": "medium"}
+{"prompt_id": "mbpp-127", "band": "hard"}
