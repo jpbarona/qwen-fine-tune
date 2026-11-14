@@ -496,7 +496,7 @@ def test_no_code_scores_minus_half(tmp_path, code: str) -> None:
     assert {r.reward for r in store.rollouts} == {-0.5}
 
 
-def test_a_truncated_generation_scores_minus_six_tenths(tmp_path) -> None:
+def test_a_truncated_generation_scores_minus_one(tmp_path) -> None:
     class TruncatedGenerator(StubGenerator):
         def generate(self, prompt: Prompt, *, n: int, temperature: float):
             return [
@@ -512,7 +512,7 @@ def test_a_truncated_generation_scores_minus_six_tenths(tmp_path) -> None:
 
     store = RecordingStore()
     build("code-score", tmp_path, generator=TruncatedGenerator(), store=store).run()
-    assert {r.reward for r in store.rollouts} == {-0.6}
+    assert {r.reward for r in store.rollouts} == {-1.0}
 
 
 def test_a_zero_test_rollout_fails_loudly(tmp_path) -> None:
