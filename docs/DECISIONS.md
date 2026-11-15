@@ -309,3 +309,20 @@ test would have caught each one before a run started.
 The rule for new environment code: if a bug can be found by reading the data and
 the prompt, a test must exist for it. A live run is not the place to discover a
 data defect.
+
+## D18. The prompt states the argument count, and one row is renamed
+
+Status: implemented. `data.expected_call_arity` reads the first test call with
+`ast` and counts positional and keyword arguments. `format_prompt` writes
+"takes 1 argument" or "takes 2 arguments" into the first line. Rows whose call
+cannot be parsed keep the older prompt.
+
+Row 644 is renamed. The MBPP tests called `reverse_Array_Upto_K`, the model
+kept writing `reverse_array_up_to_k`, and the run saw 23 passes in 120 rollouts.
+The tests now use the lowercase name the model writes. 202 other MBPP rows still
+carry mixed case names and were left alone.
+
+Reason: with the name but not the arity, the model wrote `union_elements(one)`
+where the tests pass two tuples, and `topbottom_surfacearea(radius, height)`
+where the tests pass one number. Four prompts failed every rollout that way, and
+the stage pool ended up holding only them.

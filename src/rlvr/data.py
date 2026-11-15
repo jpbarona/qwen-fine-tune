@@ -20,6 +20,7 @@ never go into the prompt.
 
 from __future__ import annotations
 
+import ast
 import json
 import random
 import re
@@ -40,6 +41,7 @@ __all__ = [
     "DatasetError",
     "DatasetSplit",
     "MBPPQuestion",
+    "expected_call_arity",
     "expected_function_name",
     "format_prompt",
     "load_dataset",
@@ -75,6 +77,16 @@ PROMPT_TEMPLATE = (
 #: model invents one and every test fails with `NameError`.
 NAMED_PROMPT_TEMPLATE = (
     "Write a Python function named `{name}` that solves the problem below.\n\n"
+    "Problem: {text}\n\n"
+    "Return only the Python code for the function."
+)
+
+#: The same prompt, with the name and the argument count. A missing count made
+#: the model write one parameter where the tests pass two, which fails every
+#: test with `TypeError`.
+ARITY_PROMPT_TEMPLATE = (
+    "Write a Python function named `{name}` that takes {arity} {noun} and solves "
+    "the problem below.\n\n"
     "Problem: {text}\n\n"
     "Return only the Python code for the function."
 )
@@ -353,6 +365,31 @@ def prompt_id_for(question: MBPPQuestion) -> str:
     return f"mbpp-{question.task_id}"
 
 
+def expected_call_arity(question: MBPPQuestion) -> int | None:
+    """How many arguments the first test passes to the function under test.
+
+    Counts positional and keyword arguments. Returns None when the first test
+    does not call the function, when the call cannot be parsed, or when the
+    call uses a starred argument whose size is only known at run time.
+    """
+    name = expected_function_name(question)
+    if name is None or not question.test_list:
+        return None
+    try:
+        tree = ast.parse(question.test_list[0])
+    except SyntaxError:
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != name:
+            continue
+        if any(isinstance(argument, ast.Starred) for argument in node.args):
+            return None
+        return len(node.args) + len(node.keywords)
+    return None
+
+
 def expected_function_name(question: MBPPQuestion) -> str | None:
     """The function name the hidden tests call, or None when no test calls one.
 
@@ -403,7 +440,13 @@ def format_prompt(question: MBPPQuestion) -> str:
     name = expected_function_name(question)
     if name is None:
         return PROMPT_TEMPLATE.format(text=question.text)
-    return NAMED_PROMPT_TEMPLATE.format(name=name, text=question.text)
+    arity = expected_call_arity(question)
+    if arity is None:
+        return NAMED_PROMPT_TEMPLATE.format(name=name, text=question.text)
+    noun = "argument" if arity == 1 else "arguments"
+    return ARITY_PROMPT_TEMPLATE.format(
+        name=name, arity=arity, noun=noun, text=question.text
+    )
 
 
 def prompt_for_question(question: MBPPQuestion) -> Prompt:
