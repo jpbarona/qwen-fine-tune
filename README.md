@@ -163,7 +163,12 @@ cleanly at the cap, writes the final evaluation, and records the reason
 .venv/bin/pytest
 ```
 
-CPU only. No network, no GPU.
+CPU only. No network, no GPU. Docker is used by two files and those tests skip
+when the image is missing. The suite runs in about 35 seconds.
+
+`tests/test_environment_solvable.py` is the cold check on the environment: it
+runs every synthetic reference solution through the real container harness, so a
+prompt that names the wrong function fails here instead of during a run.
 
 ## Run folder layout
 

@@ -256,3 +256,56 @@ only the identifier was wrong.
 Not in the prompt: test bodies, expected values, or the number of tests. The
 name alone is enough to fix the failure and does not let a model hardcode an
 answer.
+
+## D16. A prompt is solved only when every rollout passes
+
+Status: implemented in `experiment._prompt_group`. A group counts as solved when
+all of its generations pass. One pass in eight no longer removes the prompt from
+the stage pool. The docstring on the method says so.
+
+Reason: on 2026-11-15 the very easy pool went from 69 prompts to 5 by step 12,
+because a single lucky pass retired each prompt. What stayed behind was exactly
+the set the model could not solve, so every later step trained on five
+impossible prompts, the reward went negative, and the run could never leave the
+band. The plotted collapse was that selection effect, not the model getting
+worse.
+
+Consequence, not yet decided: a stage ends when its pool is empty, and a strict
+rule makes the pool empty much later. The stage needs a second exit. Options are
+an attempt cap per prompt, or a step cap per band. Decide before the next full
+run.
+
+## D17. The RL environment needs cold tests, not live-run discovery
+
+Status: implemented. 830 tests, 9 of them cold checks over the committed data.
+The prompt contract reads every one of the 964 MBPP rows and the 50 synthetic
+rows:
+
+- every row resolves to a function name, and the name is not a keyword,
+- the name appears in the prompt and in every test of the row,
+- no test calls a helper the row does not provide (`KNOWN_MISSING_HELPERS` in
+  `tests/test_data.py` records the row that currently fails this),
+- every test string compiles,
+- no test is blank, and only `KNOWN_DUPLICATE_TESTS` repeats one,
+- the prompt never contains a test body or an expected value,
+- prompt ids are unique across both sets.
+
+The synthetic set gets the stricter check, because it is the first stage and it
+was written by an agent:
+
+- the prompt name is the name the reference solution defines,
+- every reference solution passes its own tests in-process,
+- every reference solution passes in the real container harness
+  (`tests/test_environment_solvable.py`),
+- a candidate that uses the wrong name is reported as a runtime error.
+
+Stage pools are checked for duplicates and for train/held-out overlap.
+
+Reason: three environment bugs were found only by burning GPU hours. The prompt
+never named the function, `abs` was mistaken for the function under test in a
+wrap-around assert, and `assert (` was parsed as a call named `assert`. A cold
+test would have caught each one before a run started.
+
+The rule for new environment code: if a bug can be found by reading the data and
+the prompt, a test must exist for it. A live run is not the place to discover a
+data defect.

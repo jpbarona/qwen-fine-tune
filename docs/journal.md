@@ -62,3 +62,11 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 56. Run 17 died with 92 percent runtime errors, all name mismatches
 57. Prompt now states the function name the hidden tests call
 58. Twenty local replays: renaming the function passed ten of sixteen
+59. A prompt counts as solved only when all eight rollouts pass
+60. One lucky pass used to retire a prompt, leaving only unsolvable leftovers
+61. Cold tests now read every row before a run can start
+62. Prompt name extractor skips builtins, keywords and module attributes
+63. Cold tests cover all 1014 rows before a GPU run starts
+64. Synthetic reference solutions run through the real container harness
+65. Prompt may never carry a test body or an expected value
+66. Stage pools checked for repeats and train overlap

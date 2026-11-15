@@ -819,7 +819,8 @@ class Experiment:
         calls, one for output scores and one for process scores, so the judge
         concurrency is used. A failed rollout still costs no judge call. The
         group's rewards are accumulated once, with the entropy flag the step
-        asked for. A full pass is what removes the question from a stage pool.
+        asked for. Only a group where every generation passes removes the question
+        from a stage pool.
         """
         outcomes = [
             self.test_runner.run(prompt, generation.code) for generation in generations
@@ -829,6 +830,12 @@ class Experiment:
             for index, outcome in enumerate(outcomes)
             if all_tests_passed(outcome.tests_passed, outcome.tests_total)
         ]
+
+        # A prompt counts as solved only when every generation passed. One pass
+        # in eight says the prompt is winnable by luck, not that the policy
+        # holds the skill, and a prompt removed on one lucky pass shrinks the
+        # stage pool to its unsolvable leftovers.
+        solved = bool(outcomes) and len(passing) == len(outcomes)
 
         judge_scores: list[float | None] = [None] * len(generations)
         process_scores: list[float | None] = [None] * len(generations)
@@ -870,7 +877,7 @@ class Experiment:
         prompt_truncated = sum(
             1 for generation in generations if generation.prompt_truncated
         )
-        return records, truncated, prompt_truncated, entropy, bool(passing)
+        return records, truncated, prompt_truncated, entropy, solved
 
     def _measures_entropy(self, step: int) -> bool:
         """Whether this step is an entropy measurement step.

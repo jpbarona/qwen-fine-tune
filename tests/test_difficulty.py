@@ -18,6 +18,8 @@ from rlvr.data import (
     TRAIN_SIZE,
     DatasetError,
     DatasetSplit,
+    expected_function_name,
+    format_prompt,
     MBPPQuestion,
     load_dataset,
     load_difficulty_labels,
@@ -296,3 +298,23 @@ def test_the_synthetic_loader_rejects_an_id_inside_the_mbpp_range(
 def test_the_synthetic_loader_rejects_a_missing_file(tmp_path: Path) -> None:
     with pytest.raises(SyntheticError, match="not found"):
         load_synthetic_questions(tmp_path / "absent.jsonl")
+
+
+def test_the_prompt_names_the_function_the_reference_defines() -> None:
+    """The synthetic set is the first stage, so its prompt must be solvable.
+
+    Task 10032 used to tell the model to write `abs` because the extractor read
+    the builtin in `assert abs(circle_area(1) - 3.14) < 1e-9`. The reference
+    solution defines `circle_area`, and that is the only name the prompt may use.
+    """
+    for question in load_synthetic_questions():
+        backing = question.as_question()
+        defined = [
+            node.name
+            for node in ast.walk(ast.parse(question.code))
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+        ]
+        assert defined, question.task_id
+        name = expected_function_name(backing)
+        assert name in defined, (question.task_id, name, defined)
+        assert f"`{name}`" in format_prompt(backing), question.task_id

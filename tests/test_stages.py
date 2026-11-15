@@ -430,3 +430,11 @@ def test_the_stage_field_round_trips_through_jsonl(tmp_path: Path) -> None:
     line = store.rollouts[0].to_json()
     assert json.loads(line)["stage"] == "hard"
     assert RolloutRecord.from_json(line).stage == "hard"
+
+
+def test_a_stage_pool_never_repeats_a_question() -> None:
+    rows = rows_for("very easy", 20, "ve") + rows_for("medium", 20, "med")
+    for stage in build_stages(rows, seed=11):
+        assert len(stage.train) == len(set(stage.train)), stage.name
+        assert len(stage.held_out) == len(set(stage.held_out)), stage.name
+        assert set(stage.train).isdisjoint(stage.held_out), stage.name
