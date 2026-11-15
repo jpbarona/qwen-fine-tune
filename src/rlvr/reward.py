@@ -13,12 +13,12 @@ The code arm now gives partial credit and penalties. Its base score is the
 fraction of tests passed, except that a truncated rollout scores -1.0 and a
 rollout whose code does not compile scores -0.5. A length term of 0.001 per
 completion token above 900 is subtracted from that base, capped at 0.2, so a
-perfect answer keeps at least 0.8. A compiling rollout that writes the closing
-reasoning marker is raised to a floor of 0.4 if it scored less, so the best
-zero-test wrong answer becomes 0.4 and stays below the 0.8 floor of a correct
-one. The floor never adds to a partial score, so closing cannot lift a 3-of-4
-answer above a 4-of-4 one. The sum is clipped to -1 to 1. The other three arms
-are unchanged.
+perfect answer keeps at least 0.8. A rollout that passes no test but writes the
+closing reasoning marker gets up to 0.4, capped below one test's worth, so
+passing one test always beats closing alone. With three tests the reward is 0.3
+against 0.333 for one test. Partial answers are unchanged, so closing cannot
+lift a 3-of-4 answer above a 4-of-4 one. The sum is clipped to -1 to 1. The
+other three arms are unchanged.
 
 Each arm gets one small function, and `ARM_REWARDS` is the single dispatch
 point. All four arms are implemented. Adding an arm means adding one entry to
@@ -43,7 +43,8 @@ __all__ = [
     "ARM_REWARDS",
     "ARMS",
     "ArmNotImplemented",
-    "CLOSE_REWARD_FLOOR",
+    "CLOSE_REWARD",
+    "close_reward",
     "DEFAULT_LENGTH_PENALTY_FLOOR",
     "DEFAULT_LENGTH_PENALTY_PER_TOKEN",
     "DEFAULT_LENGTH_SOFT_LIMIT",
@@ -72,11 +73,15 @@ DEFAULT_LENGTH_PENALTY_FLOOR = 0.2
 TRUNCATION_REWARD = -1.0
 SYNTAX_ERROR_REWARD = -0.5
 
-#: The floor a compiling rollout earns when it writes the closing reasoning
-#: marker. A floor, not an addition, so closing cannot lift a partial answer
-#: above a full pass. The model still has a reason to close while it solves
-#: nothing, which is when the collapse used to happen.
-CLOSE_REWARD_FLOOR = 0.4
+#: The most a rollout can earn for writing the closing reasoning marker when it
+#: passed no tests. It is capped below one test's worth in `close_reward`, so
+#: passing one test always beats closing alone. The model still has a reason to
+#: close while it solves nothing, which is when the collapse used to happen.
+CLOSE_REWARD = 0.4
+
+#: The close reward may never reach this share of one test. Keeps the ordering
+#: strict: no tests < one test < two tests < a full pass.
+CLOSE_REWARD_TEST_SHARE = 0.9
 
 #: The code arm clips its sum to this range.
 MIN_REWARD = -1.0
@@ -164,6 +169,20 @@ def all_tests_passed(tests_passed: int, tests_total: int) -> bool:
     return tests_total > 0 and tests_passed == tests_total
 
 
+def close_reward(tests_total: int) -> float:
+    """The reward for closing when no test passed, capped below one test.
+
+    With three tests the reward is 0.3, below one test at 0.333. With two tests
+    it is 0.4, below one test at 0.5. So a closed zero-test answer can never
+    outrank an answer that passed a test, and one test can never outrank two.
+    """
+    if isinstance(tests_total, bool) or not isinstance(tests_total, int):
+        raise TypeError(f"tests_total must be an integer, got {tests_total!r}")
+    if tests_total < 1:
+        raise RewardError(f"tests_total must be positive, got {tests_total}")
+    return min(CLOSE_REWARD, CLOSE_REWARD_TEST_SHARE / tests_total)
+
+
 def code_score(tests_passed: int, tests_total: int) -> float:
     """The fraction of the task tests that passed.
 
@@ -226,8 +245,8 @@ def reward_code_score(
         base = SYNTAX_ERROR_REWARD
     else:
         base = code_score(tests_passed, tests_total)
-        if closed:
-            base = max(base, CLOSE_REWARD_FLOOR)
+        if closed and tests_passed == 0:
+            base = close_reward(tests_total)
     penalty = _length_penalty(
         completion_tokens,
         soft_limit=length_soft_limit,

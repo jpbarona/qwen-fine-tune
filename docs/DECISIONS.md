@@ -62,13 +62,11 @@ answer, at any length:
 - Worst correct answer is 1.0 less the 0.2 floor, which is 0.8.
 - 0.8 is greater than 0.0, so this holds.
 
-Closing raises a compiling rollout to a floor of 0.4 only when it scored less.
-It is not an addition, so a 3-of-4 answer stays 0.75 and a full pass keeps at
-least 0.8. Closing cannot lift a partial answer above a full pass.
-
-A closed 0-of-4 and a closed 1-of-4 both score 0.4, so those two outcomes are
-not distinguishable. Accepted, to keep closing worthwhile while the model
-solves nothing.
+Closing pays only when no test passed. The reward is 0.4, capped at 0.9 of one
+test, so with three tests it is 0.3 against 0.333 for one test. The order is
+strict: zero tests is below one test is below two, up to a full pass. Closing
+does not touch a partial score, so a 3-of-4 answer stays 0.75 and a full pass
+keeps at least 0.8.
 
 Why partial credit carries the early training: a group of 8 all-zero rollouts
 gives zero advantage, so no penalty helps. Fraction of tests passed creates the
@@ -200,9 +198,9 @@ doubles at each curriculum stage, capped at `max_completion_tokens`, so the
 four bands get 768, 1536, 2048, 2048. A rollout that reaches the budget without
 closing is ended there and scores as truncated.
 
-Closing the block raises a compiling rollout to a floor of 0.4. The floor never
-adds to a partial score. The worst correct answer is 0.8, so a zero-test answer
-that closes scores 0.4 and stays below it.
+Closing the block pays up to 0.4 when no test passed, capped below one test so
+one pass always beats closing alone. With three tests it pays 0.3. It does not
+touch a partial score.
 
 Reason: while every rollout fails to close, every reward is identical and no
 shaping term can help. A short budget makes closing reachable and creates the
