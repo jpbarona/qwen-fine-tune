@@ -212,9 +212,9 @@ def reward_code_score(
     """Code-score arm: the test fraction, with truncation, syntax and length terms.
 
     A truncated rollout scores -1.0 and a rollout whose code did not compile
-    scores -0.5. Everything else starts at the fraction of tests passed. The
-    length term is subtracted from that base, the close bonus is added, and the
-    sum is clipped to [-1, 1].
+    scores -0.5. Everything else starts at the fraction of tests passed, raised
+    to the close floor when the rollout closed and scored less. The length term
+    is subtracted from that base, and the sum is clipped to [-1, 1].
 
     The judge score arguments are accepted and ignored, so every arm function
     has the same call shape at the dispatch point.
