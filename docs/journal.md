@@ -77,3 +77,6 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 71. Dashboard rebuilt in React and Tailwind, one file, no CDN
 72. Percent axes were 100x low, negative rewards binned wrongly
 73. Stage completion reads every rollout, not the last four megabytes
+74. Prompt now states how many arguments the first test passes
+75. Four prompts failed every rollout for a missing argument count
+76. Row 644 renamed to the lowercase function name the model writes

@@ -272,9 +272,11 @@ The prompt names the function the hidden tests call. MBPP problem text often
 leaves the name out, so the model used to invent one and every test failed with
 `NameError`. `data.expected_function_name` takes every call in every test,
 drops keywords and module attributes, and keeps the one name all tests share.
-`format_prompt` puts it in the first line:
-``Write a Python function named `topbottom_surfacearea` ...``. All 1014 rows get
-a name. Test bodies and expected values never enter the prompt.
+`format_prompt` puts it in the first line, with the number of arguments the
+first test passes:
+``Write a Python function named `topbottom_surfacearea` that takes 1 argument ...``.
+All 1014 rows get a name and an argument count. Test bodies and expected values
+never enter the prompt.
 
 ## Completion length and sampled entropy
 

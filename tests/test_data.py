@@ -9,6 +9,7 @@ import pytest
 
 from rlvr.data import (
     DEFAULT_DATA_PATH,
+    ARITY_PROMPT_TEMPLATE,
     NAMED_PROMPT_TEMPLATE,
     PROMPT_TEMPLATE,
     TOTAL_QUESTIONS,
@@ -16,6 +17,7 @@ from rlvr.data import (
     TEST_SIZE,
     DatasetError,
     MBPPQuestion,
+    expected_call_arity,
     expected_function_name,
     format_prompt,
     load_dataset,
@@ -147,7 +149,11 @@ def test_prompt_format_is_fixed_and_contains_the_problem() -> None:
     question = questions[0]
     prompt = format_prompt(question)
     name = expected_function_name(question)
-    assert prompt == NAMED_PROMPT_TEMPLATE.format(name=name, text=question.text)
+    arity = expected_call_arity(question)
+    noun = "argument" if arity == 1 else "arguments"
+    assert prompt == ARITY_PROMPT_TEMPLATE.format(
+        name=name, arity=arity, noun=noun, text=question.text
+    )
     assert question.text in prompt
     assert "Python function" in prompt
 
@@ -362,3 +368,60 @@ def test_prompt_ids_are_unique_across_both_sets() -> None:
         for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows())
     ]
     assert len(set(ids)) == len(ids)
+
+
+def test_the_prompt_says_how_many_arguments_the_tests_pass() -> None:
+    question = MBPPQuestion(
+        task_id=9009,
+        text="Write a function to find the top or bottom surface area of a cylinder.",
+        test_list=("assert topbottom_surfacearea(10) == 314.15",),
+    )
+    prompt = format_prompt(question)
+    assert "takes 1 argument" in prompt, prompt
+
+
+def test_the_arity_counts_keyword_arguments() -> None:
+    question = MBPPQuestion(
+        task_id=9010,
+        text="Write a function to do a thing.",
+        test_list=("assert do_thing(1, scale=2) == 3",),
+    )
+    assert expected_call_arity(question) == 2
+
+
+def test_the_arity_is_none_when_the_test_does_not_call_the_function() -> None:
+    question = MBPPQuestion(
+        task_id=9011,
+        text="Write a function to do a thing.",
+        test_list=("assert 1 == 1",),
+    )
+    assert expected_call_arity(question) is None
+
+
+def test_every_row_states_the_arity_of_its_first_test_call() -> None:
+    import ast as _ast
+
+    from rlvr.cli import load_synthetic_rows
+
+    for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
+        name = expected_function_name(question)
+        arity = expected_call_arity(question)
+        assert arity is not None, question.task_id
+        assert f"takes {arity} argument" in format_prompt(question), question.task_id
+        tree = _ast.parse(question.test_list[0])
+        calls = [
+            node
+            for node in _ast.walk(tree)
+            if isinstance(node, _ast.Call)
+            and isinstance(node.func, _ast.Name)
+            and node.func.id == name
+        ]
+        assert calls, question.task_id
+        assert len(calls[0].args) + len(calls[0].keywords) == arity, question.task_id
+
+
+def test_row_644_uses_the_name_the_model_writes() -> None:
+    rows = {question.task_id: question for question in load_dataset(DEFAULT_DATA_PATH)}
+    question = rows[644]
+    assert all("reverse_array_up_to_k(" in test for test in question.test_list)
+    assert expected_function_name(question) == "reverse_array_up_to_k"
