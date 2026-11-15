@@ -54,8 +54,8 @@ Clip the sum to the range -1 to 1.
 
 The length penalty applies to the whole output, thinking included.
 
-Invariant, a correct answer scores above an unclosed wrong answer, at any
-length:
+Invariant, a correct answer that finishes scores above an unclosed wrong
+answer, at any length:
 
 - Best unclosed wrong answer is 0.0, compiles and fails every test, and the
   length floor only pushes it lower.

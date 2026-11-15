@@ -58,22 +58,22 @@ code, on a curriculum that starts at the easiest questions.
 15. As a researcher, I want the completion cap raised to 2,048, so that thinking and code both fit.
 16. As a researcher, I want per-token logits no longer stored, so that 2,048 fits in memory.
 17. As a researcher, I want entropy measured every 500 updates, configurable, so that the health signal survives without the cost.
-19. As a researcher, I want several prompts batched per step, so that the GPU is busy instead of waiting on one Python thread.
-20. As a researcher, I want the batch size chosen per step, so that utilisation is as high as the card allows.
-21. As a researcher, I want the chosen batch size logged per step, so that I can see where more batching stops helping.
-22. As a researcher, I want the dashboard to show the stage and pass rate per band, so that I can see whether the curriculum is working.
-23. As a researcher, I want a screening run over all 714 questions before training, so that bands come from data.
-24. As a researcher, I want the four arms left in the code and marked deferred, so that the study can resume later.
-25. As an implementing agent, I want a pure reward function with a table of cases, so that the reward is testable without a GPU.
-26. As an implementing agent, I want the curriculum pool builder to be a pure function, so that staging is testable without a model.
+18. As a researcher, I want several prompts batched per step, so that the GPU is busy instead of waiting on one Python thread.
+19. As a researcher, I want the batch size chosen per step, so that utilisation is as high as the card allows.
+20. As a researcher, I want the chosen batch size logged per step, so that I can see where more batching stops helping.
+21. As a researcher, I want the dashboard to show the stage and pass rate per band, so that I can see whether the curriculum is working.
+22. As a researcher, I want a screening run over all 714 questions before training, so that bands come from data.
+23. As a researcher, I want the four arms left in the code and marked deferred, so that the study can resume later.
+24. As an implementing agent, I want a pure reward function with a table of cases, so that the reward is testable without a GPU.
+25. As an implementing agent, I want the curriculum pool builder to be a pure function, so that staging is testable without a model.
 
 ## Implementation Decisions
 
 - One arm runs for now. The arm dispatch table stays, the code arm is the default, and the other three remain implemented but unused. `../docs/SPEC.md` gets a note that the four-arm comparison is deferred, and `../docs/DECISIONS.md` remains the record of why.
 - The completion cap becomes 2,048, counted over reasoning plus code.
 - `output_scores` is removed from generation. Entropy is computed during the update pass, every `entropy_every` updates, default 500, zero disables. The entropy chart becomes sparse points rather than one per step.
-- The reward is one pure function of a rollout outcome plus token count. Cases: truncated -0.6, syntax error or no code -0.5, compiles but fails every test 0.0, partial passed over total, all passed 1.0. Length term is 0.001 per token above 900, floor 0.2. The sum is clipped to -1 to 1.
-- The invariant that any correct answer beats any wrong answer is enforced by the numbers, worst correct 0.8 against best wrong 0.0, and is covered by a test.
+- The reward is one pure function of a rollout outcome plus token count. Cases: truncated -1.0, syntax error or no code -0.5, compiles but fails every test 0.0, partial passed over total, all passed 1.0. A closed reasoning block adds 0.4. Length term is 0.001 per token above 900, floor 0.2. The sum is clipped to -1 to 1.
+- The invariant that a finishing correct answer beats an unclosed wrong answer is enforced by the numbers, worst correct 0.8 against best unclosed wrong 0.0, and is covered by a test. The close bonus sits outside this ordering on purpose.
 - Penalties and length terms act only on within-group differences. Partial credit is what creates the variance, and the spec states that plainly so nobody re-tightens it into a binary.
 - Generation takes a list of prompts per step instead of one. Each prompt keeps its own group of 8 samples. Advantage is normalised inside each group.
 - Backward runs per generation, so only one autograd graph is alive at a time. Gradients accumulate across the group. This is what makes the larger batch fit at 2,048 tokens.

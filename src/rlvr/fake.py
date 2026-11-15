@@ -180,7 +180,7 @@ class FakeGenerator:
         """One group per prompt, in prompt order, as one call would return.
 
         `thinking_budget` is accepted for the protocol and ignored. The fake
-        never generates a reasoning block, so there is nothing to budget.
+        never reaches a thinking budget, so there is nothing to enforce.
 
         The fake has no batched tensor path, so it samples each prompt with the
         same deterministic rule the single prompt call uses. Grouping is what
