@@ -6,6 +6,7 @@ import pytest
 
 from rlvr.budget import (
     DEFAULT_THINKING_BUDGET_START,
+    budget_stop_is_truncation,
     row_should_force_end,
     thinking_budget_for_stage,
 )
@@ -43,6 +44,20 @@ def test_a_row_is_forced_to_end_only_when_the_budget_is_spent_unclosed() -> None
 def test_a_closed_row_is_never_forced() -> None:
     assert row_should_force_end(768, 768, has_marker=True) is False
     assert row_should_force_end(2000, 768, has_marker=True) is False
+
+
+def test_a_budget_stop_counts_as_truncated() -> None:
+    assert budget_stop_is_truncation(767, 768, has_marker=False) is False
+    assert budget_stop_is_truncation(768, 768, has_marker=False) is True
+    assert budget_stop_is_truncation(900, 768, has_marker=False) is True
+
+
+def test_a_closed_or_naturally_truncated_row_keeps_its_own_answer() -> None:
+    assert budget_stop_is_truncation(768, 768, has_marker=True) is False
+    assert (
+        budget_stop_is_truncation(10, 768, has_marker=False, already_truncated=True)
+        is True
+    )
 
 
 def test_the_forced_end_check_rejects_bad_inputs() -> None:

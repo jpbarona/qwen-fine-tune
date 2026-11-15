@@ -16,6 +16,7 @@ Repo items, relative to this folder:
 
 - `../issues/09-spec-single-arm-curriculum.md` — current spec, single arm.
 - `../issues/10` to `../issues/17` — the implemented tickets.
+- `../issues/18-reward-and-checkpoint-fixes.md` — the reward and checkpoint fix plan.
 - `../README.md` — install, run, and test commands.
 - `../configs/` — `real.toml` and `smoke.toml`.
 - `../data/mbpp_full.jsonl` — 964 MBPP rows, fixed 714 and 250 split.

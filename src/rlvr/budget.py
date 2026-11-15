@@ -14,6 +14,7 @@ from __future__ import annotations
 
 __all__ = [
     "DEFAULT_THINKING_BUDGET_START",
+    "budget_stop_is_truncation",
     "row_should_force_end",
     "thinking_budget_for_stage",
 ]
@@ -37,6 +38,23 @@ def thinking_budget_for_stage(start: int, stage_index: int, cap: int) -> int:
     if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
         raise ValueError(f"cap must be a positive integer, got {cap!r}")
     return min(cap, start * 2**stage_index)
+
+
+def budget_stop_is_truncation(
+    generated_len: int,
+    budget: int,
+    has_marker: bool,
+    already_truncated: bool = False,
+) -> bool:
+    """Whether a completion is scored as truncated because of the budget.
+
+    A natural stop at the completion cap is already truncated. Otherwise a
+    completion that reached the thinking budget without closing is a budget
+    stop, and it takes the truncation penalty.
+    """
+    if already_truncated:
+        return True
+    return row_should_force_end(generated_len, budget, has_marker)
 
 
 def row_should_force_end(generated_len: int, budget: int, has_marker: bool) -> bool:

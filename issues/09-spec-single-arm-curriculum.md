@@ -49,15 +49,15 @@ code, on a curriculum that starts at the easiest questions.
 6. As a researcher, I want each stage to carry over about 20 percent of the previous band, so that the model does not forget what it learned.
 7. As a researcher, I want an 80/20 train and eval split inside each stage, so that progress can be measured on unseen questions from the same band.
 8. As a researcher, I want a question to leave the pool once it has been fully passed, so that mastered questions stop wasting steps.
-10. As a researcher, I want always-failed questions handled by the band design rather than a separate rule, so that the pool logic stays simple.
-11. As a researcher, I want partial credit for tests passed, so that a group of failures still produces a gradient.
-12. As a researcher, I want a penalty for truncation, so that overrunning the cap is worse than finishing.
-13. As a researcher, I want a penalty for code that does not compile, so that prose in the answer slot is discouraged.
-14. As a researcher, I want a length penalty over the whole output, so that thinking stays concise.
-15. As a researcher, I want any correct answer to beat any wrong answer at any length, so that length never rewards being wrong.
-16. As a researcher, I want the completion cap raised to 2,048, so that thinking and code both fit.
-17. As a researcher, I want per-token logits no longer stored, so that 2,048 fits in memory.
-18. As a researcher, I want entropy measured every 500 updates, configurable, so that the health signal survives without the cost.
+9. As a researcher, I want always-failed questions handled by the band design rather than a separate rule, so that the pool logic stays simple.
+10. As a researcher, I want partial credit for tests passed, so that a group of failures still produces a gradient.
+11. As a researcher, I want a penalty for truncation, so that overrunning the cap is worse than finishing.
+12. As a researcher, I want a penalty for code that does not compile, so that prose in the answer slot is discouraged.
+13. As a researcher, I want a length penalty over the whole output, so that thinking stays concise.
+14. As a researcher, I want a correct answer to beat an unclosed wrong answer at any length, so that length never rewards being wrong.
+15. As a researcher, I want the completion cap raised to 2,048, so that thinking and code both fit.
+16. As a researcher, I want per-token logits no longer stored, so that 2,048 fits in memory.
+17. As a researcher, I want entropy measured every 500 updates, configurable, so that the health signal survives without the cost.
 19. As a researcher, I want several prompts batched per step, so that the GPU is busy instead of waiting on one Python thread.
 20. As a researcher, I want the batch size chosen per step, so that utilisation is as high as the card allows.
 21. As a researcher, I want the chosen batch size logged per step, so that I can see where more batching stops helping.
