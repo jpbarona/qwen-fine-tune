@@ -769,3 +769,32 @@ def test_gpu_tiles_are_reported_in_gib_not_mib(tmp_path) -> None:
     assert "gpu memory per step (GiB)" in html
     assert "MiB" not in html
     assert "function gib(" in html
+
+
+def test_a_slow_step_is_still_running(tmp_path) -> None:
+    """A step takes minutes, so a metrics file a few minutes old is live."""
+    import os
+    import time
+
+    run_dir = write_run(tmp_path / "runs", "code-score")
+    metrics = run_dir / "metrics.jsonl"
+    old = time.time() - 300
+    os.utime(metrics, (old, old))
+    (run_dir / "eval.json").unlink()
+
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["status"] == "running"
+
+
+def test_an_abandoned_run_is_stopped(tmp_path) -> None:
+    import os
+    import time
+
+    run_dir = write_run(tmp_path / "runs", "code-score")
+    metrics = run_dir / "metrics.jsonl"
+    old = time.time() - 7200
+    os.utime(metrics, (old, old))
+    (run_dir / "eval.json").unlink()
+
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["status"] == "stopped"

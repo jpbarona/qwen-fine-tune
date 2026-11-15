@@ -44,8 +44,10 @@ META_NAME = "meta.json"
 ROLLOUTS_NAME = "rollouts.jsonl"
 
 #: A metrics file not touched in this many seconds counts as stopped, unless a
-#: final evaluation is already on disk.
-STALE_SECONDS = 60.0
+#: final evaluation is already on disk. One step is a vLLM batch plus a test run
+#: per rollout, which took about a minute on the 3090 and longer on wide batches,
+#: so a one minute window reported finished runs as stopped.
+STALE_SECONDS = 900.0
 
 #: How many bytes of rollouts.jsonl to read from the tail for distributions.
 ROLLOUT_TAIL_BYTES = 4 * 1024 * 1024
