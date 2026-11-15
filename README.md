@@ -17,12 +17,14 @@ The real training path needs the `train` extra, pinned for a CUDA 12, Python
 
 ```bash
 .venv/bin/pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu126
-.venv/bin/pip install -e ".[train]"
+.venv/bin/pip install -e ".[train,vllm]"
 ```
 
 The CUDA 12.4 index keeps the torch build compatible with a 3090 driver. The
 `train` extra pins `transformers==4.57.1`, `peft==0.17.1`,
-`accelerate==1.8.1`, and `safetensors==0.5.3`.
+`accelerate==1.8.1`, and `safetensors==0.5.3`. The `vllm` extra pins
+`vllm==0.10.1`, the release built against `torch==2.7.1+cu126`. The real config
+samples with vLLM. Set `engine = "hf"` to use the Hugging Face loop instead.
 
 ## Run the fake pipeline
 
@@ -91,9 +93,10 @@ OPENROUTER_API_KEY=... ./run.sh code-score
 
 `run.sh` reads the judge key from the environment, passes every extra argument
 to `rlvr run`, and defaults to `configs/real.toml`. The four arms are
-`code-score`, `hybrid`, `gated-judge`, `gated-process`. The real path uses the
-Qwen generator (`src/rlvr/qwen.py`), the Docker test runner, and the judge
-client, all behind the same `Experiment` seam.
+`code-score`, `hybrid`, `gated-judge`, `gated-process`. The real path trains in
+`src/rlvr/qwen.py` and samples with vLLM through `src/rlvr/vllm_backend.py`,
+behind the same `Experiment` seam. The Docker test runner and the judge client
+sit behind their own seams.
 
 A smoke run validates a fresh GPU in minutes:
 
