@@ -73,7 +73,8 @@ Four bands, in order: very easy, medium, hard, very hard.
 
 - Very easy: 50 synthetic questions, each with its own tests. Written by an
   agent. Start here.
-- Medium and hard: cut from the 714 MBPP training rows by measured pass rate.
+- Medium and hard: cut from the 714 MBPP training rows by the committed
+  difficulty labels.
 - Very hard: last stage only.
 
 Each stage keeps about 20 percent of the previous band, so the model does not
@@ -85,8 +86,8 @@ evaluation.
 ## D5. Difficulty labels
 
 Labels come from subagents, in batches of 20 questions. Labels are accepted as
-imperfect. They are a prior. The measured pass rate is the truth, and the band
-assignment follows the measurement.
+imperfect. The screening command measures pass rates, but it does not re-band
+anything. Band assignment stays on the committed label file.
 
 ## D6. Skip mastered questions
 
@@ -147,9 +148,8 @@ steps once at the end. Reason: per prompt updates multiply the learning rate by
 the batch size and caused the collapse. The step counter now matches the number
 of weight updates.
 
-The accumulated gradient is divided by the prompt group count before the step,
-so the update is the mean over the batch instead of a sum that grows with it.
-Advantage normalisation stays inside one prompt group.
+Advantage normalisation stays inside one prompt group. The optimizer is left
+alone.
 
 ## D10. Several prompts in one generate call
 
@@ -182,16 +182,23 @@ recomputes old logprobs on the training model, so engine logprobs are not used.
 
 ## D12. Thinking budget schedule
 
-The thinking budget starts short, around 512 to 768 tokens, so that closing the
-reasoning block is reachable. Closing pays 0.25, which is below the worst
-correct answer of 0.8, so closing never beats correct code. The budget grows in
-stages as the close rate rises.
+Status: implemented. `[training] thinking_budget_start` defaults to 768 and
+doubles at each curriculum stage, capped at `max_completion_tokens`, so the
+four bands get 768, 1536, 2048, 2048. A rollout that reaches the budget without
+closing is ended there and scores as truncated.
+
+Closing the block pays 0.4. The worst correct answer is 0.8, so a zero-test
+answer that closes scores 0.4 and stays below it.
 
 Reason: while every rollout fails to close, every reward is identical and no
 shaping term can help. A short budget makes closing reachable and creates the
 variance the bonus needs.
 
 ## D13. Checkpoint and eval every 20 steps
+
+Status: implemented. `configs/real.toml` and the defaults set 20 and 20. Ten
+checkpoints are kept per run, the five newest consecutive plus older ones at
+doubling gaps, so an early collapse still has a state to resume from.
 
 Reason: the collapse arrived at step 22 and the first checkpoint was at 50.
 

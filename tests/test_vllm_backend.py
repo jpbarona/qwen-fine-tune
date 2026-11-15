@@ -230,10 +230,12 @@ def test_engine_accepts_the_inference_engine_spelling(write_config) -> None:
     assert load_config(path).engine == "vllm"
 
 
-def test_shipped_real_config_uses_vllm() -> None:
+def test_shipped_real_config_uses_hf() -> None:
+    # vLLM stays opt-in on purpose: its weight copy is not proven yet, and the
+    # documented install does not include the package.
     path = Path(__file__).resolve().parents[1] / "configs" / "real.toml"
 
-    assert load_config(path).engine == "vllm"
+    assert load_config(path).engine == "hf"
 
 
 def test_the_engine_defaults_to_hf_when_the_key_is_absent() -> None:

@@ -45,11 +45,10 @@ code, on a curriculum that starts at the easiest questions.
 2. As a researcher, I want 50 synthetic very easy questions with their own tests, so that the first stage is solvable.
 3. As a researcher, I want the 714 MBPP training rows labelled by difficulty, so that the medium and hard stages exist.
 4. As a researcher, I want labels assigned in batches of 20, so that labelling is cheap and reviewable.
-5. As a researcher, I want band assignment to follow measured pass rate, so that labels cannot mislead the curriculum.
-6. As a researcher, I want a very hard band held for the end, so that the model is not thrown at impossible questions early.
-7. As a researcher, I want each stage to carry over about 20 percent of the previous band, so that the model does not forget what it learned.
-8. As a researcher, I want an 80/20 train and eval split inside each stage, so that progress can be measured on unseen questions from the same band.
-9. As a researcher, I want a question to leave the pool once it has been fully passed, so that mastered questions stop wasting steps.
+5. As a researcher, I want a very hard band held for the end, so that the model is not thrown at impossible questions early.
+6. As a researcher, I want each stage to carry over about 20 percent of the previous band, so that the model does not forget what it learned.
+7. As a researcher, I want an 80/20 train and eval split inside each stage, so that progress can be measured on unseen questions from the same band.
+8. As a researcher, I want a question to leave the pool once it has been fully passed, so that mastered questions stop wasting steps.
 10. As a researcher, I want always-failed questions handled by the band design rather than a separate rule, so that the pool logic stays simple.
 11. As a researcher, I want partial credit for tests passed, so that a group of failures still produces a gradient.
 12. As a researcher, I want a penalty for truncation, so that overrunning the cap is worse than finishing.

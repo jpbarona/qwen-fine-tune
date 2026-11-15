@@ -14,8 +14,8 @@ fraction of tests passed, except that a truncated rollout scores -1.0 and a
 rollout whose code does not compile scores -0.5. A length term of 0.001 per
 completion token above 900 is subtracted from that base, capped at 0.2, so a
 perfect answer keeps at least 0.8. A rollout that writes the closing reasoning
-marker gets a bonus of 0.4, which is why the worst wrong answer scores 0.4 and
-stays below the 0.8 floor of a correct one. The sum is clipped to -1 to 1. The
+marker gets a bonus of 0.4, which is why the best zero-test wrong answer scores
+0.4 and stays below the 0.8 floor of a correct one. The sum is clipped to -1 to 1. The
 other three arms are unchanged.
 
 Each arm gets one small function, and `ARM_REWARDS` is the single dispatch
