@@ -196,6 +196,19 @@ subset of the test pool with greedy decoding. The subset is
 split seed, and the subset is a seeded sample, not the first questions in file
 order. The subset keeps the pool order.
 
+## Curriculum
+
+Training runs band by band: very easy, medium, hard, very hard. Each band is
+split 80 percent train and 20 percent held out, and 20 percent of the previous
+band's training pool is carried to the front of the next one.
+
+A prompt stays in its stage pool until every one of its 8 rollouts passes. One
+pass in eight does not retire it, because that is luck rather than skill, and
+retiring on a lucky pass shrinks the pool to whatever the model cannot do. A
+stage moves to the next band only when its pool is empty, which with this rule
+is rare. That is the accepted cost: the run would rather keep sampling the same
+band than train on five impossible prompts.
+
 Each curriculum stage also evaluates its own held-out slice. That entry has
 `kind` `"stage"` and carries the band name in `stage`, so `eval.json` holds the
 pass rate per band. The dashboard shows the band beside the evaluation. A run

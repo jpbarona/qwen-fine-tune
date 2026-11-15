@@ -70,3 +70,4 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 64. Synthetic reference solutions run through the real container harness
 65. Prompt may never carry a test body or an expected value
 66. Stage pools checked for repeats and train overlap
+67. README now states the mastery rule and the stage exit cost
