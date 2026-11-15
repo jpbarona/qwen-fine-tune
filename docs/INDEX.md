@@ -19,11 +19,13 @@ Repo items, relative to this folder:
 - `../issues/18-reward-and-checkpoint-fixes.md` — the reward and checkpoint fix plan.
 - `../README.md` — install, run, and test commands.
 - `../configs/` — `real.toml` and `smoke.toml`.
+- `../dashboard/` — React and Tailwind source for the live dashboard.
+- `../src/rlvr/web/index.html` — the committed single file build.
 - `../data/mbpp_full.jsonl` — 964 MBPP rows, fixed 714 and 250 split.
 - `../data/difficulty_labels.jsonl` — one band per training row.
 - `../data/synthetic_easy.jsonl` — 50 very easy rows for the first stage.
 - `../src/rlvr/` — package source.
-- `../tests/` — 833 tests, no GPU tests.
+- `../tests/` — 840 tests, no GPU tests.
 - `../runs/` — run folders, kept as study data.
 
 Pulled run data lives outside this repo, in

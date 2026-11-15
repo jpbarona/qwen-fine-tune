@@ -207,6 +207,14 @@ length, truncation, and memory. Two things worth knowing:
   denominator is the band's starting pool from `meta.json`, so the line shows
   progress that does not move backwards.
 
+The page is a React and Tailwind app in `dashboard/`. The build is committed as
+`src/rlvr/web/index.html`, a single file with the bundle inlined, so serving it
+needs no network. Rebuild after changing the UI:
+
+```bash
+cd dashboard && npm install && npm run build
+```
+
 ## Curriculum
 
 Training runs band by band: very easy, medium, hard, very hard. Each band is
