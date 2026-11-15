@@ -1020,12 +1020,14 @@ class Experiment:
         )
         existing: list[int] = []
         for child in self.store.checkpoints_dir.iterdir():
-            if not child.is_dir():
+            if child.is_symlink() or not child.is_dir():
                 continue
             parsed = parse_checkpoint_step(child.name)
             if parsed is not None:
                 existing.append(parsed)
-        keep = select_checkpoints_to_keep([*existing, step])
+        # Keep the checkpoint just written even if a reused folder already
+        # holds higher step numbers.
+        keep = set(select_checkpoints_to_keep([*existing, step])) | {step}
         prune_checkpoints(self.store.checkpoints_dir, keep)
 
     @staticmethod

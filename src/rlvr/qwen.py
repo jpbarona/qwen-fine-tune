@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from .budget import row_should_force_end
+from .budget import budget_stop_is_truncation, row_should_force_end
 from .experiment import Generation, Prompt
 
 __all__ = [
@@ -683,6 +683,7 @@ class QwenGenerator:
                 prompt_truncated=prompt_truncated[index],
                 completion_rows=groups[index],
                 caching=caching,
+                thinking_budget=thinking_budget,
             )
             generations.append(group)
             cached_groups.append(entries)
@@ -800,6 +801,7 @@ class QwenGenerator:
         prompt_truncated: bool,
         completion_rows: Sequence[Sequence[int]],
         caching: bool,
+        thinking_budget: int | None = None,
     ) -> tuple[list[Generation], list[_GroupEntry]]:
         """Decode one prompt's completion rows and cache its update data.
 
@@ -817,6 +819,10 @@ class QwenGenerator:
             if not truncated:
                 generated_ids = generated_ids[: generated_ids.index(eos) + 1]
             split = self._split_at_think_end(generated_ids)
+            if thinking_budget is not None:
+                truncated = budget_stop_is_truncation(
+                    len(generated_ids), thinking_budget, split > 0, truncated
+                )
             reasoning = self.tokenizer.decode(
                 generated_ids[:split], skip_special_tokens=True
             ).strip()

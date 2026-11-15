@@ -251,7 +251,7 @@ def test_any_correct_answer_beats_any_wrong_answer_at_every_length() -> None:
     assert min(correct) > max(wrong)
 
 
-def test_any_correct_answer_beats_a_closed_wrong_answer_at_every_length() -> None:
+def test_any_correct_answer_beats_a_closed_zero_test_answer_at_every_length() -> None:
     # The bonus must not lift the worst wrong answer over the worst correct one.
     correct = [
         compose_reward(

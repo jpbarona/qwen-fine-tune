@@ -29,6 +29,7 @@ Optional keys, with the defaults shown:
     [training] lora_alpha = 64
     [training] max_prompt_tokens = 512
     [training] max_completion_tokens = 2048
+    [training] thinking_budget_start = 768
     [training] entropy_every_steps = 500
     [training] clip_epsilon = 0.2
     [training] kl_beta = 0.0
