@@ -66,6 +66,10 @@ Closing raises a compiling rollout to a floor of 0.4 only when it scored less.
 It is not an addition, so a 3-of-4 answer stays 0.75 and a full pass keeps at
 least 0.8. Closing cannot lift a partial answer above a full pass.
 
+A closed 0-of-4 and a closed 1-of-4 both score 0.4, so those two outcomes are
+not distinguishable. Accepted, to keep closing worthwhile while the model
+solves nothing.
+
 Why partial credit carries the early training: a group of 8 all-zero rollouts
 gives zero advantage, so no penalty helps. Fraction of tests passed creates the
 variance that GRPO needs.

@@ -16,15 +16,16 @@ The real training path needs the `train` extra, pinned for a CUDA 12, Python
 3.12 host:
 
 ```bash
-.venv/bin/pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu126
+.venv/bin/pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 .venv/bin/pip install -e ".[train,vllm]"
 ```
 
-The CUDA 12.4 index keeps the torch build compatible with a 3090 driver. The
-`train` extra pins `transformers==4.57.1`, `peft==0.17.1`,
-`accelerate==1.8.1`, and `safetensors==0.5.3`. The `vllm` extra pins
-`vllm==0.10.1`, the release built against `torch==2.7.1+cu126`. The real config
-samples with vLLM. Set `engine = "hf"` to use the Hugging Face loop instead.
+vLLM 0.10.1 ships CUDA 12.8 binaries, so torch must come from the cu128 index.
+The driver must support CUDA 12.8. The `train` extra pins
+`transformers==4.57.1`, `peft==0.17.1`, `accelerate==1.8.1`, and
+`safetensors==0.5.3`. The `vllm` extra pins `vllm==0.10.1`. The real config
+samples with vLLM. Set `engine = "hf"` to use the Hugging Face loop instead,
+which works on the cu126 build.
 
 ## Run the fake pipeline
 

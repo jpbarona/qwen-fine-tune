@@ -22,8 +22,8 @@ train = [
     "safetensors==0.5.3",
 ]
 
-# The rollout engine. Pinned to the release built against torch 2.7.1+cu126.
-# Install after the train extra, on a CUDA 12 host.
+# The rollout engine. vLLM 0.10.1 ships CUDA 12.8 binaries, so install torch
+# from the cu128 index. Install after the train extra, on a CUDA 12 host.
 vllm = ["vllm==0.10.1"]
 
 [project.scripts]

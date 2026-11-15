@@ -7,9 +7,9 @@ protocol as `QwenGenerator`, samples token ids with the engine, and hands those
 ids back to the trainer to build the same `Generation` objects and cache the
 same group data the update pass needs.
 
-Weight sync is the risk. The engine exposes one documented method, `sync`, and
-the trainer exposes one documented view, `engine_state_dict`. A future vLLM
-version only changes `VLLMEngine`, never the training loop.
+Weights move as a LoRA adapter. The trainer writes the adapter to disk after
+each optimizer step and the engine gets a new `LoRARequest` for it. A future
+vLLM version only changes `VLLMEngine`, never the training loop.
 
 vLLM is optional. The import is inside `VLLMEngine.__init__`, so importing this
 module on a CPU box is safe. Selecting the engine without the package installed
@@ -123,7 +123,9 @@ class VLLMEngine:
 
         previous = self._adapter_id
         self._adapter_id += 1
-        request = LoRARequest("rlvr-policy", self._adapter_id, str(path))
+        request = LoRARequest(
+            f"rlvr-policy-{self._adapter_id}", self._adapter_id, str(path)
+        )
         if previous:
             remove = getattr(engine, "remove_lora", None)
             if remove is not None:
@@ -264,5 +266,10 @@ class VLLMGenerator:
         self._trainer.save_checkpoint(directory)
 
     def load_checkpoint(self, directory) -> None:
-        """Delegate the checkpoint load to the trainer."""
+        """Delegate the checkpoint load to the trainer, then resync the engine.
+
+        A resume must not sample the first group with the adapter from before
+        the checkpoint, or the ratios would use different weights.
+        """
         self._trainer.load_checkpoint(directory)
+        self._sync_adapter()
