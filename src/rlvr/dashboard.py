@@ -58,6 +58,11 @@ ROLLOUT_TAIL_BYTES = 4 * 1024 * 1024
 #: Number of bins for the reward histogram.
 REWARD_BINS = 20
 
+#: The reward is clipped to this range in the trainer, so the histogram covers
+#: it. Negative rewards are common: a truncated answer scores -1.0.
+REWARD_MIN = -1.0
+REWARD_MAX = 1.0
+
 #: A GPU sample younger than this many seconds is reused instead of sampled
 #: again, so a page that polls fast does not spawn nvidia-smi every request.
 GPU_SAMPLE_SECONDS = 2.0
@@ -195,6 +200,29 @@ def _rollout_records(path: Path) -> Iterator[dict[str, Any]]:
             continue
         if isinstance(record, dict):
             yield record
+
+
+def _all_rollout_records(path: Path) -> Iterator[dict[str, Any]]:
+    """Yield every rollout record, one line at a time.
+
+    Used by the panels that report totals over the whole run. The file is read
+    as a stream, so a long run costs one line of memory at a time, not the
+    whole file. A line still being written is skipped as a JSON error.
+    """
+    try:
+        handle = path.open("r", encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    with handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                yield record
 
 
 def _looks_like_run(path: Path) -> bool:
@@ -389,11 +417,14 @@ def _pass_at_1_series(eval_payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _reward_histogram(rewards: list[float]) -> dict[str, Any]:
+    """Count rewards into fixed bins spanning -1 to 1, both edges inclusive."""
+    span = REWARD_MAX - REWARD_MIN
     counts = [0] * REWARD_BINS
     for reward in rewards:
-        index = min(int(reward * REWARD_BINS), REWARD_BINS - 1)
+        bounded = min(max(reward, REWARD_MIN), REWARD_MAX)
+        index = min(int((bounded - REWARD_MIN) / span * REWARD_BINS), REWARD_BINS - 1)
         counts[index] += 1
-    bins = [index / REWARD_BINS for index in range(REWARD_BINS)]
+    bins = [REWARD_MIN + index * span / REWARD_BINS for index in range(REWARD_BINS)]
     return {"bins": bins, "counts": counts}
 
 
@@ -408,7 +439,7 @@ def _tests_passed_histogram(passed_counts: list[int]) -> dict[str, Any]:
 
 
 def _band_pass_rates(run_dir: Path) -> list[dict[str, Any]]:
-    """Full pass rate per curriculum band, from the rollout tail.
+    """Full pass rate per curriculum band, over the whole rollout file.
 
     A rollout counts as passed only when every test passed, matching the
     training pool rule. Bands appear in the fixed order first, then any band
@@ -416,7 +447,7 @@ def _band_pass_rates(run_dir: Path) -> list[dict[str, Any]]:
     """
     counts: dict[str, int] = {}
     passed: dict[str, int] = {}
-    for record in _rollout_records(run_dir / ROLLOUTS_NAME):
+    for record in _all_rollout_records(run_dir / ROLLOUTS_NAME):
         band = _string(record.get("stage"))
         if band is None:
             continue
@@ -451,8 +482,9 @@ def _stage_progress(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
     is its starting training pool from `meta.json`, so the percentage is stable
     even though the pool shrinks.
 
-    The series keeps one point per training step, and carries the band with it,
-    because a run that moves to a new band restarts at zero.
+    The whole rollout file is streamed, because a solved prompt can sit far
+    before the tail. The series keeps one point per training step, and carries
+    the band with it, because a run that moves to a new band restarts at zero.
     """
     curriculum = meta.get("curriculum")
     totals: dict[str, int] = {}
@@ -467,8 +499,32 @@ def _stage_progress(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
                 if name is not None and count:
                     totals[name] = count
 
-    by_step: dict[int, dict[str, dict[str, list[bool]]]] = {}
-    for record in _rollout_records(run_dir / ROLLOUTS_NAME):
+    solved: dict[str, set[str]] = {}
+    points: list[dict[str, Any]] = []
+
+    def close_step(step: int, band: str, prompts: dict[str, list[bool]]) -> None:
+        for prompt_id, outcomes in prompts.items():
+            if outcomes and all(outcomes):
+                solved.setdefault(band, set()).add(prompt_id)
+        total = totals.get(band)
+        if not total:
+            return
+        count = len(solved.get(band, ()))
+        points.append(
+            {
+                "step": step,
+                "band": band,
+                "solved": count,
+                "total": total,
+                "percent": count / total,
+            }
+        )
+
+    # Rollouts are appended step by step, so one step of prompt outcomes is
+    # enough memory. The solved sets hold prompt ids only, one entry per prompt.
+    current: tuple[int, str] | None = None
+    prompts: dict[str, list[bool]] = {}
+    for record in _all_rollout_records(run_dir / ROLLOUTS_NAME):
         step = _integer(record.get("step"))
         band = _string(record.get("stage"))
         prompt_id = _string(record.get("prompt_id"))
@@ -477,28 +533,16 @@ def _stage_progress(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
         passed = _integer(record.get("tests_passed"))
         total = _integer(record.get("tests_total"))
         full = passed is not None and total is not None and total > 0 and passed == total
-        step_band = by_step.setdefault(step, {}).setdefault(band, {})
-        step_band.setdefault(prompt_id, []).append(full)
+        key = (step, band)
+        if key != current:
+            if current is not None:
+                close_step(current[0], current[1], prompts)
+            current = key
+            prompts = {}
+        prompts.setdefault(prompt_id, []).append(full)
 
-    solved: dict[str, set[str]] = {}
-    points: list[dict[str, Any]] = []
-    for step in sorted(by_step):
-        for band, prompts in by_step[step].items():
-            for prompt_id, outcomes in prompts.items():
-                if outcomes and all(outcomes):
-                    solved.setdefault(band, set()).add(prompt_id)
-            total = totals.get(band)
-            if not total:
-                continue
-            points.append(
-                {
-                    "step": step,
-                    "band": band,
-                    "solved": len(solved.get(band, ())),
-                    "total": total,
-                    "percent": len(solved.get(band, ())) / total,
-                }
-            )
+    if current is not None:
+        close_step(current[0], current[1], prompts)
 
     latest = points[-1] if points else None
     return {
