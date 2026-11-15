@@ -43,3 +43,15 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 37. Left padding keeps every completion at one fixed column
 38. Attention mask stored with each group and reused on update
 39. Step counter now equals the number of weight updates
+40. Truncation now scores minus one, a full point below syntax error
+41. Closing pays 0.3 only when no test passes, capped below one
+42. Partial credit runs from 0.45 at one test to 0.75
+43. Thinking budget starts at 768 and doubles per stage to 2048
+44. An unclosed rollout is ended at the budget and scored truncated
+45. Checkpoints and evals run every 20 steps, not 50 and 100
+46. Ten checkpoints kept: five recent, older ones at doubling gaps
+47. vLLM samples from the LoRA adapter written after each update
+48. Each adapter handoff uses a new id and drops the previous
+49. vLLM 0.10.1 needs CUDA 12.8, so torch uses cu128
+50. Removed the false claim that bands come from measured pass rate
+51. Removed the false claim that gradient division fixes update size

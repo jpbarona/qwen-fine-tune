@@ -31,11 +31,11 @@ RTX A6000 with one command per arm.
 7. As a researcher, I want token entropy per rollout, so I can study entropy change.
 8. As a researcher, I want completion length per rollout, so I can study the length effect.
 9. As a researcher, I want per-test results, so I can classify failures.
-10. As a researcher, I want checkpoints every 50 steps, so a crash costs minutes.
+10. As a researcher, I want checkpoints every 20 steps, so a crash costs minutes.
 11. As a researcher, I want to resume from a checkpoint.
 12. As a researcher, I want a smoke mode, so I can validate a new GPU in minutes.
 13. As a researcher, I want budget guards on steps and judge calls.
-14. As a researcher, I want evaluation every 100 steps, so I can plot a curve.
+14. As a researcher, I want evaluation every 20 steps, so I can plot a curve.
 15. As a researcher, I want pass@1 on 250 held-out questions, so I can compare arms.
 16. As a researcher, I want run metadata in plain text.
 17. As a researcher, I want rollouts in JSONL.
@@ -94,7 +94,7 @@ environment. Per-test results and an error class are recorded.
 token counts, mean token entropy, tests passed, tests total, error class, code
 score, judge score, process score, reward, and cache hit.
 
-**Evaluation.** Every 100 steps, evaluate 100 fixed test questions greedily. At
+**Evaluation.** Every 20 steps, evaluate 100 fixed test questions greedily. At
 the end, evaluate all 250 test questions. Report pass@1 only.
 
 **Reporting.** `summary` builds reward, pass@1, entropy, and length per step. It

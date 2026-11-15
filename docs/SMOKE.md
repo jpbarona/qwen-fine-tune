@@ -2,6 +2,10 @@
 
 Status: passing.
 
+Historical note: this run predates batched generation, the thinking budget and
+the 20-step cadence. The suite is now 802 tests, up from 464. The run folder was
+on the terminated instance and is not in this repo.
+
 ## What was run
 
 Synced the local `main` tree to the Massed Compute instance and ran the smoke arm:
