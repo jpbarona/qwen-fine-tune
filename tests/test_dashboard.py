@@ -124,6 +124,70 @@ def test_dashboard_shows_the_prompt_and_sequence_counts_per_step(tmp_path) -> No
     assert "prompts and sequences per step" in html
 
 
+def test_reward_histogram_covers_negative_rewards(tmp_path) -> None:
+    rollouts = [
+        {"step": 1, "reward": -1.0, "tests_passed": 0, "tests_total": 4},
+        {"step": 1, "reward": -0.2, "tests_passed": 0, "tests_total": 4},
+        {"step": 1, "reward": 1.0, "tests_passed": 4, "tests_total": 4},
+    ]
+    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=rollouts)
+    histogram = collect_dashboard([run_dir])["runs"][0]["distributions"]["reward"]
+
+    assert histogram["bins"][0] == pytest.approx(-1.0)
+    assert histogram["bins"][-1] == pytest.approx(0.9)
+    assert len(histogram["counts"]) == 20
+    assert histogram["counts"][0] == 1
+    assert histogram["counts"][8] == 1
+    assert histogram["counts"][19] == 1
+    assert sum(histogram["counts"]) == 3
+
+
+def test_stage_progress_and_band_rates_read_the_whole_rollout_file(tmp_path) -> None:
+    """A prompt solved at the top of a long file still counts."""
+    from rlvr.dashboard import ROLLOUT_TAIL_BYTES
+
+    solved = [
+        {
+            "step": 1,
+            "stage": "very easy",
+            "prompt_id": "early-solved",
+            "tests_passed": 4,
+            "tests_total": 4,
+            "reward": 1.0,
+        }
+        for _ in range(8)
+    ]
+    filler = [
+        {
+            "step": 2,
+            "stage": "very easy",
+            "prompt_id": "still-failing",
+            "tests_passed": 0,
+            "tests_total": 4,
+            "reward": 0.0,
+            "pad": "x" * 200,
+        }
+        for _ in range(20000)
+    ]
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        meta_extra={"curriculum": {"stages": [{"name": "very easy", "train": 4}]}},
+        rollouts=solved + filler,
+    )
+    assert (run_dir / "rollouts.jsonl").stat().st_size > ROLLOUT_TAIL_BYTES
+
+    run = collect_dashboard([run_dir])["runs"][0]
+    progress = run["stage_progress"]
+
+    assert progress["solved"] == 1
+    assert progress["total"] == 4
+    assert progress["percent"] == pytest.approx(0.25)
+    assert run["bands"] == [
+        {"band": "very easy", "rollouts": 20008, "pass_rate": pytest.approx(8 / 20008)}
+    ]
+
+
 def test_a_stage_evaluation_is_surfaced_with_its_band(tmp_path) -> None:
     evaluations = [
         {
