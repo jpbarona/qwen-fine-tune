@@ -43,11 +43,14 @@ length term because of the clip.
 
 Files: `src/rlvr/qwen.py`, `src/rlvr/reward.py`, `src/rlvr/experiment.py`.
 
-- In `reward.py`, add `CLOSE_BONUS = 0.4`.
+- In `reward.py`, add `CLOSE_REWARD_FLOOR = 0.4`.
 - Add a keyword-only parameter `closed: bool = False` to
   `reward_code_score` and to `compose_reward`. Forward it unchanged.
-- In `reward_code_score`, compute `bonus = CLOSE_BONUS if closed else 0.0`,
-  return `min(MAX_REWARD, max(MIN_REWARD, base - penalty + bonus))`.
+- In `reward_code_score`, a compiling closed rollout is raised to the floor:
+  `base = max(base, CLOSE_REWARD_FLOOR)`. The floor is applied before the
+  length term and never adds to a partial score. Truncated and syntax-error
+  rollouts get no floor.
+- Return `min(MAX_REWARD, max(MIN_REWARD, base - penalty))`.
 - The other three arm functions accept `closed` and ignore it, so every arm
   keeps one call shape.
 - In `qwen.py`, find the `Generation` dataclass and add `closed: bool = False`.
@@ -60,9 +63,10 @@ Files: `src/rlvr/qwen.py`, `src/rlvr/reward.py`, `src/rlvr/experiment.py`.
 - `FakeGenerator` leaves `closed` at its default, so fake-run rewards do not
   change.
 
-Tests: with `closed=True`, a full pass clips at `1.0`, a zero-test failure
-scores `0.4`, and a truncated rollout scores `-0.6`. The ordering invariant
-must hold with the worst wrong answer counted as closed, so `0.8 > 0.4`.
+Tests: with `closed=True`, a full pass clips at `1.0`, a zero-test failure is
+raised to `0.4`, a 3-of-4 answer stays `0.75`, and a truncated rollout stays
+`-1.0` because the floor does not apply. A closed partial answer never beats a
+full pass, so `0.75` against `0.8`.
 Add a pure test for `thinking_marker_index` covering present, absent and
 repeated markers.
 

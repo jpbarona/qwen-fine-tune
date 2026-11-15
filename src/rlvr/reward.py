@@ -13,10 +13,12 @@ The code arm now gives partial credit and penalties. Its base score is the
 fraction of tests passed, except that a truncated rollout scores -1.0 and a
 rollout whose code does not compile scores -0.5. A length term of 0.001 per
 completion token above 900 is subtracted from that base, capped at 0.2, so a
-perfect answer keeps at least 0.8. A rollout that writes the closing reasoning
-marker gets a bonus of 0.4, which is why the best zero-test wrong answer scores
-0.4 and stays below the 0.8 floor of a correct one. The sum is clipped to -1 to 1. The
-other three arms are unchanged.
+perfect answer keeps at least 0.8. A compiling rollout that writes the closing
+reasoning marker is raised to a floor of 0.4 if it scored less, so the best
+zero-test wrong answer becomes 0.4 and stays below the 0.8 floor of a correct
+one. The floor never adds to a partial score, so closing cannot lift a 3-of-4
+answer above a 4-of-4 one. The sum is clipped to -1 to 1. The other three arms
+are unchanged.
 
 Each arm gets one small function, and `ARM_REWARDS` is the single dispatch
 point. All four arms are implemented. Adding an arm means adding one entry to
@@ -41,7 +43,7 @@ __all__ = [
     "ARM_REWARDS",
     "ARMS",
     "ArmNotImplemented",
-    "CLOSE_BONUS",
+    "CLOSE_REWARD_FLOOR",
     "DEFAULT_LENGTH_PENALTY_FLOOR",
     "DEFAULT_LENGTH_PENALTY_PER_TOKEN",
     "DEFAULT_LENGTH_SOFT_LIMIT",
@@ -70,9 +72,11 @@ DEFAULT_LENGTH_PENALTY_FLOOR = 0.2
 TRUNCATION_REWARD = -1.0
 SYNTAX_ERROR_REWARD = -0.5
 
-#: Paid to a rollout that writes the closing reasoning marker, so the model has
-#: a reason to close the block instead of running into the token cap.
-CLOSE_BONUS = 0.4
+#: The floor a compiling rollout earns when it writes the closing reasoning
+#: marker. A floor, not an addition, so closing cannot lift a partial answer
+#: above a full pass. The model still has a reason to close while it solves
+#: nothing, which is when the collapse used to happen.
+CLOSE_REWARD_FLOOR = 0.4
 
 #: The code arm clips its sum to this range.
 MIN_REWARD = -1.0
@@ -222,14 +226,15 @@ def reward_code_score(
         base = SYNTAX_ERROR_REWARD
     else:
         base = code_score(tests_passed, tests_total)
+        if closed:
+            base = max(base, CLOSE_REWARD_FLOOR)
     penalty = _length_penalty(
         completion_tokens,
         soft_limit=length_soft_limit,
         per_token=length_penalty_per_token,
         floor=length_penalty_floor,
     )
-    bonus = CLOSE_BONUS if closed else 0.0
-    return min(MAX_REWARD, max(MIN_REWARD, base - penalty + bonus))
+    return min(MAX_REWARD, max(MIN_REWARD, base - penalty))
 
 
 def reward_hybrid(

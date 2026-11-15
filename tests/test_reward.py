@@ -12,7 +12,7 @@ import pytest
 from rlvr.reward import (
     ARM_REWARDS,
     ARMS,
-    CLOSE_BONUS,
+    CLOSE_REWARD_FLOOR,
     PENDING_ARMS,
     RewardError,
     all_tests_passed,
@@ -166,17 +166,23 @@ def test_the_length_term_uses_the_given_settings() -> None:
     ) == pytest.approx(0.95)
 
 
-def test_the_close_bonus_is_four_tenths() -> None:
-    assert CLOSE_BONUS == pytest.approx(0.4)
+def test_the_close_floor_is_four_tenths() -> None:
+    assert CLOSE_REWARD_FLOOR == pytest.approx(0.4)
 
 
-def test_a_closed_rollout_gets_the_bonus_on_top_of_its_base() -> None:
+def test_a_closed_rollout_is_raised_to_the_floor_not_above_it() -> None:
     assert compose_reward(
         "code-score", tests_passed=0, tests_total=4, closed=True
     ) == pytest.approx(0.4)
     assert reward_code_score(
+        tests_passed=1, tests_total=4, closed=True
+    ) == pytest.approx(0.4)
+    assert reward_code_score(
         tests_passed=2, tests_total=4, closed=True
-    ) == pytest.approx(0.9)
+    ) == pytest.approx(0.5)
+    assert reward_code_score(
+        tests_passed=3, tests_total=4, closed=True
+    ) == pytest.approx(0.75)
 
 
 def test_a_closed_full_pass_is_clipped_at_one() -> None:
@@ -189,17 +195,17 @@ def test_a_closed_full_pass_is_clipped_at_one() -> None:
         tests_total=4,
         closed=True,
         completion_tokens=4096,
-    ) == 1.0
+    ) == pytest.approx(0.8)
 
 
-def test_a_closed_truncated_rollout_scores_minus_six_tenths() -> None:
+def test_a_closed_truncated_rollout_gets_no_floor() -> None:
     assert compose_reward(
         "code-score",
         tests_passed=0,
         tests_total=4,
         truncated=True,
         closed=True,
-    ) == pytest.approx(-0.6)
+    ) == pytest.approx(-1.0)
 
 
 def test_the_length_term_still_applies_to_a_closed_truncated_rollout() -> None:
@@ -210,7 +216,17 @@ def test_the_length_term_still_applies_to_a_closed_truncated_rollout() -> None:
         truncated=True,
         closed=True,
         completion_tokens=4096,
-    ) == pytest.approx(-0.8)
+    ) == pytest.approx(-1.0)
+
+
+def test_a_closed_syntax_error_gets_no_floor() -> None:
+    assert compose_reward(
+        "code-score",
+        tests_passed=0,
+        tests_total=4,
+        error_class="syntax_error",
+        closed=True,
+    ) == pytest.approx(-0.5)
 
 
 def test_a_closed_rollout_beats_an_unclosed_one_with_the_same_counts() -> None:
@@ -218,7 +234,19 @@ def test_a_closed_rollout_beats_an_unclosed_one_with_the_same_counts() -> None:
     closed = compose_reward(
         "code-score", tests_passed=1, tests_total=4, closed=True
     )
-    assert closed == pytest.approx(plain + CLOSE_BONUS)
+    assert closed > plain
+
+
+def test_closing_never_lifts_a_partial_above_a_full_pass() -> None:
+    partial_closed = compose_reward(
+        "code-score", tests_passed=3, tests_total=4, closed=True
+    )
+    full_unclosed = compose_reward(
+        "code-score", tests_passed=4, tests_total=4, completion_tokens=4096
+    )
+    assert partial_closed == pytest.approx(0.75)
+    assert full_unclosed == pytest.approx(0.8)
+    assert full_unclosed > partial_closed
 
 
 def test_the_other_arms_accept_closed_and_ignore_it() -> None:
