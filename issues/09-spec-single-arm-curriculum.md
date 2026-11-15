@@ -113,6 +113,6 @@ code, on a curriculum that starts at the easiest questions.
 - At 32 sequences and 2,048 tokens the KV cache alone is about 7 GB, so the dynamic batch should start at 2 prompts and grow from measurement.
 - The screening run is expected to take about 8 hours and 5 dollars. It sets the bands, it does not train.
 - The previous instance is terminated. Code and run data are backed up locally at
-  `/home/opencode/Work/rl-grpo-instance/home-Ubuntu/`.
+  `/home/opencode/Work/rl-grpo-data/`.
 - Cost reference from the last run: 73 seconds per step at 768 tokens, so any
   long run needs the batching change first.

@@ -26,8 +26,8 @@ Repo items, relative to this folder:
 - `../tests/` — 814 tests, no GPU tests.
 - `../runs/` — run folders, kept as study data.
 
-The dead GPU instance data is backed up at
-`/home/opencode/Work/rl-grpo-instance/`.
+Pulled run data lives outside this repo, in
+`/home/opencode/Work/rl-grpo-data/`, one folder per pull.
 
 To update the docs, say "go and update the docs". That means: bring
 `DECISIONS.md` and `journal.md` up to date, keep this index accurate, and leave
