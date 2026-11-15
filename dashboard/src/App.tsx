@@ -20,6 +20,10 @@ function scaled(points: [number, number | null][], factor: number): [number, num
   return points.map(([x, y]) => [x, y === null ? null : y * factor])
 }
 
+function hasValues(points: [number, number | null][]): boolean {
+  return points.some(([, y]) => y !== null && Number.isFinite(y))
+}
+
 function stageSegments(points: StagePoint[]): ChartSeries[] {
   const segments: StagePoint[][] = []
   let current: StagePoint[] = []
@@ -41,7 +45,10 @@ function stageSegments(points: StagePoint[]): ChartSeries[] {
 }
 
 function percentTick(value: number): string {
-  return `${value.toFixed(value !== 0 && Math.abs(value) < 1 ? 2 : 1)}%`
+  const percent = value * 100
+  if (percent === 0) return '0%'
+  const digits = Math.abs(percent) < 1 ? 2 : 1
+  return `${percent.toFixed(digits)}%`
 }
 
 function Status({ status }: { status: string }) {
@@ -58,8 +65,8 @@ function Status({ status }: { status: string }) {
 function Stat({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="bg-[#0b0b0d] px-3 py-[7px]">
-      <div className="text-[9.5px] uppercase leading-[1.5] tracking-[0.09em] text-[#5f5f68]">{label}</div>
-      <div className="font-mono text-[12.5px] tabular-nums leading-[1.45] text-[#d9d9de]">{children}</div>
+      <div className="text-[10.5px] uppercase leading-[1.5] tracking-[0.09em] text-[#5f5f68]">{label}</div>
+      <div className="font-mono text-[13px] tabular-nums leading-[1.45] text-[#d9d9de]">{children}</div>
     </div>
   )
 }
@@ -73,30 +80,24 @@ function Strip({ children }: { children: ReactNode }) {
 }
 
 function StepProgress({ run }: { run: Run }) {
-  const target = run.target_steps
-  const percent = target ? Math.min((run.steps_done / target) * 100, 100) : null
+  // The target counts one step per starting batch. The trainer grows the batch
+  // as memory allows, so the finished step count is lower and unknowable from
+  // here. Show the step count and name the target for what it is.
   return (
-    <div className="mt-2.5 flex items-center gap-3">
-      <div className="whitespace-nowrap font-mono text-[10.5px] tabular-nums text-[#6b6b73]">
-        <span className="text-[13px] text-[#e7e7ea]">{whole(run.steps_done)}</span>
-        {target ? <span className="text-[#6b6b73]"> / {whole(target)}</span> : null} steps
-      </div>
-      <div className="h-[3px] flex-1 bg-white/[0.06]">
-        {percent !== null ? <div className="h-full" style={{ width: `${percent}%`, background: ACCENT }} /> : null}
-      </div>
-      {percent !== null ? (
-        <div className="w-10 text-right font-mono text-[10px] tabular-nums text-[#6b6b73]">{percent.toFixed(1)}%</div>
-      ) : null}
+    <div className="mt-2.5 flex flex-wrap items-baseline gap-x-2 font-mono text-[11px] tabular-nums text-[#6b6b73]">
+      <span className="text-[15px] text-[#e7e7ea]">{whole(run.steps_done)}</span>
+      <span>steps</span>
+      {run.target_steps ? <span className="text-[#55555d]">planned {whole(run.target_steps)} at the starting batch</span> : null}
     </div>
   )
 }
 
 function EvaluationTable({ evaluations }: { evaluations: Evaluation[] }) {
   return (
-    <Panel title="evaluations" className="px-0 py-0">
-      <table className="w-full table-fixed border-collapse text-[11px]">
+    <Panel title="evaluations" flush>
+      <table className="w-full table-fixed border-collapse text-[11.5px]">
         <thead>
-          <tr className="text-[9.5px] uppercase tracking-[0.08em] text-[#5f5f68]">
+          <tr className="border-t border-white/[0.06] text-[10.5px] uppercase tracking-[0.08em] text-[#5f5f68]">
             <th className="w-14 px-3 py-1.5 text-left font-normal">step</th>
             <th className="px-3 py-1.5 text-left font-normal">kind</th>
             <th className="px-3 py-1.5 text-left font-normal">stage</th>
@@ -107,7 +108,7 @@ function EvaluationTable({ evaluations }: { evaluations: Evaluation[] }) {
         <tbody>
           {evaluations.length === 0 ? (
             <tr>
-              <td colSpan={5} className="border-t border-white/[0.06] px-3 py-3 font-mono text-[10.5px] text-[#4f4f57]">
+              <td colSpan={5} className="border-t border-white/[0.06] px-3 py-3 font-mono text-[11px] text-[#4f4f57]">
                 no evaluation recorded
               </td>
             </tr>
@@ -133,7 +134,7 @@ function BandTable({ run }: { run: Run }) {
   return (
     <Panel
       title="pass rate per band"
-      className="px-0 py-0"
+      flush
       right={
         progress.band ? (
           <>
@@ -146,22 +147,28 @@ function BandTable({ run }: { run: Run }) {
       }
     >
       <div className="px-3 pb-2">
+        <div className="flex items-center gap-3 border-t border-white/[0.06] pb-1 pt-1.5 text-[10.5px] uppercase tracking-[0.08em] text-[#5f5f68]">
+          <span className="w-20 shrink-0">band</span>
+          <span className="flex-1">pass rate</span>
+          <span className="w-12 shrink-0" />
+          <span className="w-16 shrink-0 text-right">rollouts</span>
+        </div>
         {run.bands.length === 0 ? (
-          <div className="py-3 font-mono text-[10.5px] text-[#4f4f57]">no stage records</div>
+          <div className="py-3 font-mono text-[11px] text-[#4f4f57]">no stage records</div>
         ) : (
           run.bands.map((band, index) => (
             <div
               key={band.band}
               className={`flex items-center gap-3 py-[6px] ${index === 0 ? '' : 'border-t border-white/[0.05]'}`}
             >
-              <span className="w-20 shrink-0 truncate text-[11.5px] text-[#c7c7cc]">{band.band}</span>
+              <span className="w-20 shrink-0 truncate text-[12px] text-[#c7c7cc]">{band.band}</span>
               <span className="h-[3px] flex-1 bg-white/[0.06]">
                 <span className="block h-full" style={{ width: `${Math.min(band.pass_rate * 100, 100)}%`, background: ACCENT }} />
               </span>
-              <span className="w-12 shrink-0 text-right font-mono text-[10.5px] tabular-nums text-[#d9d9de]">
+              <span className="w-12 shrink-0 text-right font-mono text-[11px] tabular-nums text-[#d9d9de]">
                 {rate(band.pass_rate)}
               </span>
-              <span className="w-16 shrink-0 text-right font-mono text-[10px] tabular-nums text-[#55555d]">
+              <span className="w-16 shrink-0 text-right font-mono text-[11px] tabular-nums text-[#55555d]">
                 {whole(band.rollouts)}
               </span>
             </div>
@@ -187,15 +194,23 @@ function RunSection({ run }: { run: Run }) {
     { label: 'device total', color: TRACE, dash: true, points: scaled(pairs(steps, run.series.gpu_total_mib), 1 / 1024) },
   ]
   const stageDone = run.stage_progress.percent
+  const entropyPoints = pairs(steps, run.series.mean_entropy)
+  const checkpointPoints = pairs(run.pass_at_1.checkpoint.steps, run.pass_at_1.checkpoint.values)
+  const finalPoints = pairs(run.pass_at_1.final.steps, run.pass_at_1.final.values)
+  const hasPassAtOne = hasValues(checkpointPoints) || hasValues(finalPoints)
+  const hasEntropy = hasValues(entropyPoints)
+  const missingPanels: string[] = []
+  if (!hasEntropy) missingPanels.push('entropy per step')
+  if (!hasPassAtOne) missingPanels.push('pass@1')
 
   return (
     <section className="mb-10">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-1 border-b border-white/[0.08] pb-2">
         <div className="flex min-w-0 items-baseline gap-2.5">
           <h2 className="text-[15px] font-medium tracking-[-0.01em] text-[#f0f0f2]">{run.arm}</h2>
-          <span className="truncate font-mono text-[10.5px] text-[#55555d]">{run.run_name}</span>
+          <span className="truncate font-mono text-[11px] text-[#55555d]">{run.run_name}</span>
         </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[10.5px] tabular-nums text-[#7b7b84]">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] tabular-nums text-[#7b7b84]">
           <Status status={run.status} />
           <span>
             stage <span className="text-[#d9d9de]">{run.stage ?? '-'}</span>
@@ -209,7 +224,7 @@ function RunSection({ run }: { run: Run }) {
       <StepProgress run={run} />
 
       {slow ? (
-        <div className="mt-2 border-l-2 border-[#e9b153] px-2 py-1 font-mono text-[10.5px] tabular-nums text-[#e9b153]">
+        <div className="mt-2 border-l-2 border-[#e9b153] px-2 py-1 font-mono text-[11px] tabular-nums text-[#e9b153]">
           no metrics write for {elapsed(ageSeconds)}
         </div>
       ) : null}
@@ -217,7 +232,6 @@ function RunSection({ run }: { run: Run }) {
       <Strip>
         <Stat label="steps">
           {whole(run.steps_done)}
-          {run.target_steps ? <span className="text-[#6b6b73]"> / {whole(run.target_steps)}</span> : null}
         </Stat>
         <Stat label="mean reward">{num(latest.mean_reward)}</Stat>
         <Stat label="pass rate">{rate(latest.pass_rate)}</Stat>
@@ -241,34 +255,38 @@ function RunSection({ run }: { run: Run }) {
         <Stat label="gpu total GiB">{gib(latest.gpu_total_mib)}</Stat>
       </Strip>
 
-      <div className="mt-3 grid grid-cols-1 gap-px border border-white/[0.07] bg-white/[0.07] sm:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
         <Panel title="reward per step" right={num(latest.mean_reward)}>
           <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.mean_reward) }]} />
         </Panel>
         <Panel title="pass rate per step" right={rate(latest.pass_rate)}>
           <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.pass_rate) }]} yMin={0} format={percentTick} />
         </Panel>
-        <Panel
-          title="pass@1"
-          right={
-            <>
-              <Swatch color={MUTED} label="checkpoint" />
-              <Swatch color={ACCENT} label="final" />
-            </>
-          }
-        >
-          <LineChart
-            series={[
-              { color: MUTED, dots: true, points: pairs(run.pass_at_1.checkpoint.steps, run.pass_at_1.checkpoint.values) },
-              { color: ACCENT, dots: true, points: pairs(run.pass_at_1.final.steps, run.pass_at_1.final.values) },
-            ]}
-            yMin={0}
-            format={percentTick}
-          />
-        </Panel>
-        <Panel title="entropy per step" right={num(latest.mean_entropy)}>
-          <LineChart series={[{ color: ACCENT, dots: true, points: pairs(steps, run.series.mean_entropy) }]} />
-        </Panel>
+        {hasPassAtOne ? (
+          <Panel
+            title="pass@1"
+            right={
+              <>
+                <Swatch color={MUTED} label="checkpoint" />
+                <Swatch color={ACCENT} label="final" />
+              </>
+            }
+          >
+            <LineChart
+              series={[
+                { color: MUTED, dots: true, points: checkpointPoints },
+                { color: ACCENT, dots: true, points: finalPoints },
+              ]}
+              yMin={0}
+              format={percentTick}
+            />
+          </Panel>
+        ) : null}
+        {hasEntropy ? (
+          <Panel title="entropy per step" right={num(latest.mean_entropy)}>
+            <LineChart series={[{ color: ACCENT, dots: true, points: entropyPoints }]} />
+          </Panel>
+        ) : null}
         <Panel title="completion tokens per step" right={num(latest.mean_completion_tokens, 0)}>
           <LineChart
             series={[{ color: ACCENT, points: pairs(steps, run.series.mean_completion_tokens) }]}
@@ -317,12 +335,19 @@ function RunSection({ run }: { run: Run }) {
         <Panel title="reward distribution">
           <BarChart bins={run.distributions.reward.bins} counts={run.distributions.reward.counts} format={(value) => value.toFixed(2)} />
         </Panel>
-        <Panel title="tests passed distribution" className="sm:col-span-2">
+        <Panel
+          title="tests passed distribution"
+          className={hasEntropy ? 'sm:col-span-2' : 'sm:col-span-2 xl:col-span-3'}
+        >
           <BarChart bins={run.distributions.tests_passed.bins} counts={run.distributions.tests_passed.counts} format={(value) => String(value)} />
         </Panel>
       </div>
 
-      <div className="mt-3 grid grid-cols-1 gap-px border border-white/[0.07] bg-white/[0.07] lg:grid-cols-2">
+      {missingPanels.length ? (
+        <div className="mt-2 font-mono text-[10.5px] text-[#4f4f57]">not measured yet: {missingPanels.join(', ')}</div>
+      ) : null}
+
+      <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
         <BandTable run={run} />
         <EvaluationTable evaluations={evaluations} />
       </div>
@@ -334,8 +359,8 @@ function SystemStrip({ gpu }: { gpu: Dashboard['gpu'] }) {
   const current = gpu.current
   if (!current) return null
   return (
-    <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-1 border border-white/[0.07] bg-[#0b0b0d] px-3 py-[7px] font-mono text-[10.5px] tabular-nums text-[#7b7b84]">
-      <span className="text-[9.5px] uppercase tracking-[0.12em] text-[#5f5f68]">system</span>
+    <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-1 border border-white/[0.07] bg-[#0b0b0d] px-3 py-[7px] font-mono text-[11px] tabular-nums text-[#7b7b84]">
+      <span className="text-[10.5px] uppercase tracking-[0.12em] text-[#5f5f68]">system</span>
       <span>
         gpu util <span className="text-[#d9d9de]">{num(current.utilization, 0)}%</span>
       </span>
@@ -385,9 +410,9 @@ export default function App({ initial }: { initial: Dashboard }) {
         <div className="mx-auto flex h-11 max-w-[1560px] items-center justify-between gap-3 px-5">
           <div className="flex items-baseline gap-3 whitespace-nowrap">
             <span className="text-[13px] font-semibold tracking-[0.01em] text-[#ededf0]">RLVR</span>
-            <span className="hidden text-[9.5px] uppercase tracking-[0.14em] text-[#5f5f68] sm:inline">training monitor</span>
+            <span className="hidden text-[10.5px] uppercase tracking-[0.14em] text-[#5f5f68] sm:inline">training monitor</span>
           </div>
-          <div className="flex items-center gap-4 whitespace-nowrap font-mono text-[10.5px] tabular-nums text-[#6b6b73]">
+          <div className="flex items-center gap-4 whitespace-nowrap font-mono text-[11px] tabular-nums text-[#6b6b73]">
             <span className="hidden md:inline">updated {data.generated_at || '-'}</span>
             <button
               type="button"
@@ -418,7 +443,7 @@ export default function App({ initial }: { initial: Dashboard }) {
                 <div className="flex items-baseline justify-between border-b border-white/[0.08] pb-2">
                   <div className="flex items-baseline gap-2.5">
                     <h2 className="text-[15px] font-medium text-[#f0f0f2]">{run.arm}</h2>
-                    <span className="font-mono text-[10.5px] text-[#55555d]">no run folder</span>
+                    <span className="font-mono text-[11px] text-[#55555d]">{run.run_dir ? 'no metrics yet' : 'no run folder'}</span>
                   </div>
                   <Status status="waiting" />
                 </div>
@@ -429,7 +454,7 @@ export default function App({ initial }: { initial: Dashboard }) {
             ),
           )
         )}
-        <footer className="mt-2 flex flex-wrap gap-x-6 gap-y-1 border-t border-white/[0.06] pt-3 font-mono text-[9.5px] text-[#45454c]">
+        <footer className="mt-2 flex flex-wrap gap-x-6 gap-y-1 border-t border-white/[0.06] pt-3 font-mono text-[10.5px] text-[#45454c]">
           {runs.map((run) => (
             <span key={run.arm}>{run.run_dir ?? run.arm}</span>
           ))}
