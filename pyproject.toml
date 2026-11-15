@@ -33,7 +33,7 @@ rlvr = "rlvr.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-rlvr = ["resources/*.toml"]
+rlvr = ["resources/*.toml", "web/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

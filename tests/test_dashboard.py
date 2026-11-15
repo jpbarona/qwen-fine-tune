@@ -542,13 +542,51 @@ def test_render_html_escapes_an_arm_name_with_a_script_tag() -> None:
     assert "\\u003cscript\\u003e" in html
 
 
-def test_render_html_is_self_contained_and_cdn_backed() -> None:
+def test_render_html_is_self_contained_and_has_no_cdn() -> None:
     html = render_html({"generated_at": "now", "runs": [], "gpu": {"current": None, "history": []}})
 
     assert html.startswith("<!DOCTYPE html>")
-    assert "cdn.tailwindcss.com" in html
-    assert "chart.js" in html
-    assert "tailwind.config" in html
+    assert "cdn.tailwindcss.com" not in html
+    assert "chart.umd" not in html
+    assert "<script src=" not in html
+    assert "<link" not in html
+    assert '<div id="root"></div>' in html
+    # The bundle is inlined, so the page draws without a second request.
+    assert '<script type="module">' in html
+    assert html.count('id="initial-data"') == 1
+
+
+def test_the_page_carries_the_payload_as_parseable_json(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs", "code-score")
+    html = render_html(collect_dashboard([run_dir]))
+
+    start = html.index('id="initial-data">') + len('id="initial-data">')
+    end = html.index("</script>", start)
+    payload = json.loads(html[start:end])
+
+    assert payload["runs"][0]["arm"] == "code-score"
+    assert payload["runs"][0]["latest"]["mean_reward"] == pytest.approx(0.75)
+
+
+def test_the_built_page_ships_in_the_package() -> None:
+    from rlvr import dashboard as dashboard_module
+
+    page = dashboard_module.WEB_DIR / dashboard_module.PAGE_NAME
+    assert page.is_file()
+    assert "__RLVR_INITIAL_DATA__" in page.read_text(encoding="utf-8")
+
+
+def test_the_metrics_age_is_reported_in_seconds(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs", "code-score")
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["metrics_age_seconds"] is not None
+    assert run["metrics_age_seconds"] >= 0
+
+    waiting_root = tmp_path / "waiting"
+    (waiting_root / "code-score").mkdir(parents=True)
+    waiting = collect_dashboard([waiting_root])["runs"][0]
+    assert waiting["metrics_age_seconds"] is None
 
 
 def test_dashboard_data_is_json_serializable(tmp_path) -> None:
@@ -623,9 +661,8 @@ def test_sparse_entropy_points_are_kept_as_gaps_not_zero(tmp_path) -> None:
     assert run["latest"]["mean_entropy"] == pytest.approx(0.7)
 
     html = render_html(data)
-    # The entropy chart drops the gaps and keeps a visible point per measurement.
-    assert "xyPresent" in html
-    assert "pointRadius: 2" in html
+    # The entropy chart keeps the sampled series and drops the gaps.
+    assert "entropy per step" in html
 
 
 def test_latest_entropy_falls_back_to_the_last_measured_step(tmp_path) -> None:
@@ -768,7 +805,7 @@ def test_gpu_tiles_are_reported_in_gib_not_mib(tmp_path) -> None:
     assert "gpu total GiB" in html
     assert "gpu memory per step (GiB)" in html
     assert "MiB" not in html
-    assert "function gib(" in html
+    assert "gpu unaccounted GiB" in html
 
 
 def test_a_slow_step_is_still_running(tmp_path) -> None:
