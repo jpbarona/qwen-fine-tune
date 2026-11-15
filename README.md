@@ -427,8 +427,10 @@ Fixed outcomes in `code-score`:
 | Outcome | Reward |
 |---|---|
 | truncated rollout | `-1.0` |
-| code that does not compile | `-0.5` |
-| closing marker, zero tests passed | up to `0.4`, capped below one test |
+| code that does not compile | `-0.3` |
+| code that raises while it runs | `0.0` |
+| closing marker, zero tests passed | flat `0.05` |
+| clean failure, not closed | `0.0` |
 | length above 900 tokens | `-0.001` per token, capped at `-0.2` |
 
 The sum is clipped to `-1` and `1`. The thinking budget starts at 768 tokens and

@@ -44,29 +44,38 @@ This is now decided, see D8.
 | Case | Reward |
 |---|---|
 | Truncated at the cap | -1.0 |
-| No code parsed, or syntax error | -0.5 |
-| Compiles, tests fail | 0.0 |
+| No code parsed, or syntax error | -0.3 |
+| Runtime error | 0.0 |
+| Compiles, tests fail, closed | 0.05 |
+| Compiles, tests fail, not closed | 0.0 |
 | Partial tests | 0.45 at one test, rising to 0.75 just below a full pass |
 | All tests pass | 1.0 |
 | Length above 900 tokens | -0.001 per token above 900, floor -0.2 |
 
 Clip the sum to the range -1 to 1.
 
-The length penalty applies to the whole output, thinking included.
+The length penalty applies to answers that passed a test, over the whole
+output, thinking included. It does not touch the failure tiers, so a long clean
+failure cannot fall below a crash.
 
 Invariant, a correct answer that finishes scores above an unclosed wrong
 answer, at any length:
 
-- Best unclosed wrong answer is 0.0, compiles and fails every test, and the
-  length floor only pushes it lower.
+- Best unclosed wrong answer is 0.0, compiles and fails every test.
 - Worst correct answer is 1.0 less the 0.2 floor, which is 0.8.
 - 0.8 is greater than 0.0, so this holds.
 
-Closing pays only when no test passed. The reward is 0.4, capped at 0.9 of one
-test, so with three tests it is 0.3 against 0.45 for one test. The order is
-strict: zero tests is below one test is below two, up to a full pass. Closing
-does not touch a partial score, so a 3-of-4 answer stays 0.75 and a full pass
-keeps at least 0.8.
+The failure tiers are flat and ordered: truncated -1.0, syntax error -0.3,
+runtime error 0.0, clean failure that closed 0.05. Closing pays a flat 0.05
+when no test passed. It buys termination, not proximity, so one passing test at
+0.45 beats it by a wide margin and a crash can never collect it. Closing does
+not touch a partial score, so a 3-of-4 answer stays 0.75 and a full pass keeps
+at least 0.8.
+
+Why the close payment is small: run 16 paid 0.3 for a closed answer that passed
+nothing. By step 67 the model had 203 of 208 rollouts crashing at runtime and
+zero passes, with reward stuck at 0.297. The payment was farmed, so it is now
+0.05 and crashes score 0.0.
 
 Why partial credit carries the early training: a group of 8 all-zero rollouts
 gives zero advantage, so no penalty helps. Partial credit creates the

@@ -167,7 +167,7 @@ def test_fake_code_score_run_never_judges(run_fake) -> None:
     assert all(record["cache_hit"] is False for record in records)
     for record in records:
         if record["error_class"] == "syntax_error":
-            assert record["reward"] == pytest.approx(-0.5)
+            assert record["reward"] == pytest.approx(-0.3)
         else:
             assert record["reward"] == pytest.approx(record["code_score"])
 
@@ -230,7 +230,7 @@ def test_fake_code_score_run_writes_a_syntax_penalty(tmp_path) -> None:
         for line in (store.run_dir / "rollouts.jsonl").read_text().splitlines()
     ]
     assert {record["error_class"] for record in records} == {"syntax_error"}
-    assert all(record["reward"] == pytest.approx(-0.5) for record in records)
+    assert all(record["reward"] == pytest.approx(-0.3) for record in records)
 
 
 def test_judge_scores_are_deterministic_and_bounded() -> None:
