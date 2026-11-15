@@ -9,11 +9,14 @@ import pytest
 
 from rlvr.data import (
     DEFAULT_DATA_PATH,
+    NAMED_PROMPT_TEMPLATE,
     PROMPT_TEMPLATE,
     TOTAL_QUESTIONS,
     TRAIN_SIZE,
     TEST_SIZE,
     DatasetError,
+    MBPPQuestion,
+    expected_function_name,
     format_prompt,
     load_dataset,
     load_split,
@@ -142,7 +145,8 @@ def test_prompt_format_is_fixed_and_contains_the_problem() -> None:
     questions = load_dataset(DEFAULT_DATA_PATH)
     question = questions[0]
     prompt = format_prompt(question)
-    assert prompt == PROMPT_TEMPLATE.format(text=question.text)
+    name = expected_function_name(question)
+    assert prompt == NAMED_PROMPT_TEMPLATE.format(name=name, text=question.text)
     assert question.text in prompt
     assert "Python function" in prompt
 
@@ -163,3 +167,50 @@ def test_prompts_for_questions_is_the_one_formatting_path() -> None:
     assert [prompt.problem for prompt in prompts] == [
         format_prompt(question) for question in questions
     ]
+
+
+def test_expected_function_name_comes_from_the_first_test() -> None:
+    question = MBPPQuestion(
+        task_id=9001,
+        text="Write a function to do a thing.",
+        test_list=("assert do_thing(1) == 2", "assert do_thing(3) == 4"),
+    )
+    assert expected_function_name(question) == "do_thing"
+
+
+def test_expected_function_name_is_none_when_no_test_calls_a_function() -> None:
+    question = MBPPQuestion(
+        task_id=9002,
+        text="Write a function to do a thing.",
+        test_list=("assert 1 == 1",),
+    )
+    assert expected_function_name(question) is None
+
+
+def test_prompt_names_the_function_that_the_tests_call() -> None:
+    question = MBPPQuestion(
+        task_id=9003,
+        text="Write a function to do a thing.",
+        test_list=("assert do_thing(1) == 2",),
+    )
+    prompt = format_prompt(question)
+    assert "`do_thing`" in prompt
+    assert question.text in prompt
+    assert "only the Python code" in prompt
+
+
+def test_prompt_omits_a_name_when_the_tests_name_nothing() -> None:
+    question = MBPPQuestion(
+        task_id=9004,
+        text="Write a function to do a thing.",
+        test_list=("assert 1 == 1",),
+    )
+    assert format_prompt(question) == PROMPT_TEMPLATE.format(text=question.text)
+
+
+def test_almost_every_committed_question_prompt_names_its_function() -> None:
+    questions = load_dataset(DEFAULT_DATA_PATH)
+    named = [q for q in questions if expected_function_name(q) is not None]
+    assert len(named) >= 960
+    for question in named:
+        assert expected_function_name(question) in format_prompt(question)

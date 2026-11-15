@@ -231,6 +231,13 @@ evaluates held-out questions and never evaluates a training question. The
 `Experiment` itself has no fallback. It refuses to run when `eval_prompts` is
 empty. A wrong or empty split stops the command before a run folder is made.
 
+The prompt names the function the hidden tests call. MBPP problem text often
+leaves the name out, so the model used to invent one and every test failed with
+`NameError`. `data.expected_function_name` reads the name from the first
+`assert name(` in the test list, and `format_prompt` puts it in the first line:
+``Write a Python function named `topbottom_surfacearea` ...``. 962 of the 964
+rows get a name. Test bodies and expected values never enter the prompt.
+
 ## Completion length and sampled entropy
 
 `completion_tokens` is the completion length. It feeds the length penalty.
