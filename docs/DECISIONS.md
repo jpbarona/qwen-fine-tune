@@ -238,3 +238,21 @@ The length term is implemented and on by default: soft limit 900 tokens, 0.001
 per token above it, floor 0.2. It is covered by tests. The three keys now sit in
 `configs/real.toml` under `[training]`, so the term is visible and tunable.
 
+
+## D15. The prompt names the function the tests call
+
+Status: implemented. `data.expected_function_name` reads the name from the first
+`assert name(` in the test list. `format_prompt` puts it in the first line of
+the prompt. When no test calls an identifier, the old template is used, which is
+2 rows out of 964.
+
+Reason: run 17 collapsed with a 92 percent `runtime_error` rate. 540 of 544
+sampled failing rollouts defined a function with a different name than the test
+called, so every test raised `NameError`. The model was never shown the name. A
+local docker replay of 16 distinct failing tasks passed 10 of 16 after renaming
+the candidate function to the expected name, so the code was mostly right and
+only the identifier was wrong.
+
+Not in the prompt: test bodies, expected values, or the number of tests. The
+name alone is enough to fix the failure and does not let a model hardcode an
+answer.

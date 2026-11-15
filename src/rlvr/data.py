@@ -11,14 +11,18 @@ first, so the caller's row order cannot change the result. Every arm calls
 sees the same 714 train and 250 test questions.
 
 The prompt format is one function, `format_prompt`, used by every arm through
-`prompt_for_question`. It is deliberately short: the problem text and a request
-for a Python function. The tests never go into the prompt.
+`prompt_for_question`. It is deliberately short: the problem text, the name of
+the function the hidden tests call, and a request for a Python function. The
+name comes from the first test, because the MBPP problem text often omits it and
+a wrong name fails every test with `NameError`. Test bodies and expected values
+never go into the prompt.
 """
 
 from __future__ import annotations
 
 import json
 import random
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -36,6 +40,7 @@ __all__ = [
     "DatasetError",
     "DatasetSplit",
     "MBPPQuestion",
+    "expected_function_name",
     "format_prompt",
     "load_dataset",
     "load_difficulty_labels",
@@ -65,6 +70,17 @@ PROMPT_TEMPLATE = (
     "Problem: {text}\n\n"
     "Return only the Python code for the function."
 )
+
+#: The same prompt, with the name the hidden tests call. Without the name the
+#: model invents one and every test fails with `NameError`.
+NAMED_PROMPT_TEMPLATE = (
+    "Write a Python function named `{name}` that solves the problem below.\n\n"
+    "Problem: {text}\n\n"
+    "Return only the Python code for the function."
+)
+
+#: The first call in a test, for example `assert do_thing(1) == 2`.
+_ASSERT_CALL = re.compile(r"assert\s+([A-Za-z_]\w*)\s*\(")
 
 
 class DatasetError(ValueError):
@@ -310,9 +326,25 @@ def prompt_id_for(question: MBPPQuestion) -> str:
     return f"mbpp-{question.task_id}"
 
 
+def expected_function_name(question: MBPPQuestion) -> str | None:
+    """The function name the hidden tests call, or None when no test calls one.
+
+    Read from the first test only. Every committed MBPP row calls one function
+    across all of its tests, so the first test speaks for the whole task.
+    """
+    for test in question.test_list:
+        match = _ASSERT_CALL.search(test)
+        if match:
+            return match.group(1)
+    return None
+
+
 def format_prompt(question: MBPPQuestion) -> str:
     """The exact text sent to the model. One format for every arm."""
-    return PROMPT_TEMPLATE.format(text=question.text)
+    name = expected_function_name(question)
+    if name is None:
+        return PROMPT_TEMPLATE.format(text=question.text)
+    return NAMED_PROMPT_TEMPLATE.format(name=name, text=question.text)
 
 
 def prompt_for_question(question: MBPPQuestion) -> Prompt:

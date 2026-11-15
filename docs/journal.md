@@ -59,3 +59,6 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 53. Close payment paid 0.3 for crashing code → make it flat 0.05
 54. Runtime errors score 0.0 → below a clean failure, above syntax
 55. Length penalty could invert test order → clamp above the lower tier
+56. Run 17 died with 92 percent runtime errors, all name mismatches
+57. Prompt now states the function name the hidden tests call
+58. Twenty local replays: renaming the function passed ten of sixteen
