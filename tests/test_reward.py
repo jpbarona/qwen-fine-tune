@@ -111,8 +111,10 @@ def test_code_score_reward_never_uses_a_judge() -> None:
         ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 1000}, 0.9),
         ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 1100}, 0.8),
         ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 4096}, 0.8),
-        # The term applies to the whole output, whatever the base score.
-        ({"tests_passed": 2, "tests_total": 4, "completion_tokens": 1100}, 0.4),
+        # The term applies to answers that passed a test, but never enough to
+        # drop one below the tier beneath it. Two of four would be 0.60 less the
+        # full 0.2, so it floors just above the one-test band at 0.45.
+        ({"tests_passed": 2, "tests_total": 4, "completion_tokens": 1100}, 0.451),
         # Failure tiers are flat. A long failure must not fall below a crash,
         # so the length term only shapes answers that passed a test.
         ({"tests_passed": 0, "tests_total": 4, "completion_tokens": 1100}, 0.0),
@@ -229,6 +231,24 @@ def test_every_test_count_scores_strictly_above_the_one_below_it() -> None:
     assert scores == sorted(scores)
     assert len(set(scores)) == 5
     assert scores[0] < scores[1]
+
+
+def test_more_tests_pay_more_even_when_the_answer_is_longer() -> None:
+    for total in (3, 4, 5, 10):
+        for passed in range(1, total):
+            higher = compose_reward(
+                "code-score",
+                tests_passed=passed + 1,
+                tests_total=total,
+                completion_tokens=4096,
+            )
+            lower = compose_reward(
+                "code-score",
+                tests_passed=passed,
+                tests_total=total,
+                completion_tokens=0,
+            )
+            assert higher > lower, (total, passed, higher, lower)
 
 
 def test_a_closed_full_pass_is_clipped_at_one() -> None:

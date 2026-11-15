@@ -58,3 +58,4 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 52. Run 16 reached step 67 with zero passes and reward 0.297
 53. Close payment paid 0.3 for crashing code → make it flat 0.05
 54. Runtime errors score 0.0 → below a clean failure, above syntax
+55. Length penalty could invert test order → clamp above the lower tier

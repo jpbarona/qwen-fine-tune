@@ -56,7 +56,10 @@ Clip the sum to the range -1 to 1.
 
 The length penalty applies to answers that passed a test, over the whole
 output, thinking included. It does not touch the failure tiers, so a long clean
-failure cannot fall below a crash.
+failure cannot fall below a crash. It is also clamped just above the tier
+beneath it, so a long answer that passed more tests never scores below a short
+answer that passed fewer. Two of four at 1,100 tokens floors at 0.451, above one
+of four at 0.45, instead of dropping to 0.40.
 
 Invariant, a correct answer that finishes scores above an unclosed wrong
 answer, at any length:
