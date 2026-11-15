@@ -428,7 +428,7 @@ Fixed outcomes in `code-score`:
 |---|---|
 | truncated rollout | `-1.0` |
 | code that does not compile | `-0.5` |
-| closing reasoning marker written | raises a compiling answer to `0.4` if lower |
+| closing marker, zero tests passed | up to `0.4`, capped below one test |
 | length above 900 tokens | `-0.001` per token, capped at `-0.2` |
 
 The sum is clipped to `-1` and `1`. The thinking budget starts at 768 tokens and

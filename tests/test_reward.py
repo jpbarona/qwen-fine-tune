@@ -12,7 +12,8 @@ import pytest
 from rlvr.reward import (
     ARM_REWARDS,
     ARMS,
-    CLOSE_REWARD_FLOOR,
+    CLOSE_REWARD,
+    close_reward,
     PENDING_ARMS,
     RewardError,
     all_tests_passed,
@@ -166,23 +167,37 @@ def test_the_length_term_uses_the_given_settings() -> None:
     ) == pytest.approx(0.95)
 
 
-def test_the_close_floor_is_four_tenths() -> None:
-    assert CLOSE_REWARD_FLOOR == pytest.approx(0.4)
+def test_the_close_reward_is_capped_below_one_test() -> None:
+    assert CLOSE_REWARD == pytest.approx(0.4)
+    assert close_reward(3) == pytest.approx(0.3)
+    assert close_reward(2) == pytest.approx(0.4)
+    assert close_reward(4) == pytest.approx(0.225)
+    assert close_reward(10) == pytest.approx(0.09)
 
 
-def test_a_closed_rollout_is_raised_to_the_floor_not_above_it() -> None:
+def test_the_close_reward_only_applies_when_no_test_passed() -> None:
     assert compose_reward(
         "code-score", tests_passed=0, tests_total=4, closed=True
-    ) == pytest.approx(0.4)
+    ) == pytest.approx(0.225)
     assert reward_code_score(
         tests_passed=1, tests_total=4, closed=True
-    ) == pytest.approx(0.4)
+    ) == pytest.approx(0.25)
     assert reward_code_score(
         tests_passed=2, tests_total=4, closed=True
     ) == pytest.approx(0.5)
     assert reward_code_score(
         tests_passed=3, tests_total=4, closed=True
     ) == pytest.approx(0.75)
+
+
+def test_every_test_count_scores_strictly_above_the_one_below_it() -> None:
+    scores = [
+        compose_reward("code-score", tests_passed=passed, tests_total=4, closed=True)
+        for passed in range(5)
+    ]
+    assert scores == sorted(scores)
+    assert len(set(scores)) == 5
+    assert scores[0] < scores[1]
 
 
 def test_a_closed_full_pass_is_clipped_at_one() -> None:
@@ -229,10 +244,10 @@ def test_a_closed_syntax_error_gets_no_floor() -> None:
     ) == pytest.approx(-0.5)
 
 
-def test_a_closed_rollout_beats_an_unclosed_one_with_the_same_counts() -> None:
-    plain = compose_reward("code-score", tests_passed=1, tests_total=4)
+def test_closing_beats_not_closing_when_no_test_passed() -> None:
+    plain = compose_reward("code-score", tests_passed=0, tests_total=4)
     closed = compose_reward(
-        "code-score", tests_passed=1, tests_total=4, closed=True
+        "code-score", tests_passed=0, tests_total=4, closed=True
     )
     assert closed > plain
 
@@ -280,7 +295,7 @@ def test_any_correct_answer_beats_an_unclosed_wrong_answer_at_every_length() -> 
 
 
 def test_any_correct_answer_beats_a_closed_zero_test_answer_at_every_length() -> None:
-    # The bonus must not lift the worst wrong answer over the worst correct one.
+    # The close reward must stay below one test, and below the worst correct one.
     correct = [
         compose_reward(
             "code-score", tests_passed=4, tests_total=4, completion_tokens=length
@@ -298,7 +313,7 @@ def test_any_correct_answer_beats_a_closed_zero_test_answer_at_every_length() ->
         for length in range(0, 4097)
     ]
     assert min(correct) == pytest.approx(0.8)
-    assert max(wrong_closed) == pytest.approx(0.4)
+    assert max(wrong_closed) == pytest.approx(0.225)
     assert min(correct) > max(wrong_closed)
 
 
