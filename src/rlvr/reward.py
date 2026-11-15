@@ -10,16 +10,18 @@ The table comes from SPEC.md and is frozen:
 | gated-process  | 0                        | 0.5 * process + 0.5 * judge |
 
 The code arm now gives partial credit and penalties. Its base score runs from
-0.45 at one test to 0.75 just below a full pass, with 1.0 for a full pass,
-except that a truncated rollout scores -1.0 and a rollout whose code does not
-compile scores -0.5. A length term of 0.001 per
-completion token above 900 is subtracted from that base, capped at 0.2, so a
-perfect answer keeps at least 0.8. A rollout that passes no test but writes the
-closing reasoning marker gets up to 0.4, capped below one test's worth, so
-passing one test always beats closing alone. With three tests the reward is 0.3
-against 0.333 for one test. Partial answers are unchanged, so closing cannot
-lift a 3-of-4 answer above a 4-of-4 one. The sum is clipped to -1 to 1. The
-other three arms are unchanged.
+0.45 at one test to 0.75 just below a full pass, with 1.0 for a full pass. The
+failure tiers are flat and ordered: a truncated rollout scores -1.0, a rollout
+whose code does not compile scores -0.3, a rollout whose code raises while it
+runs scores 0.0, and a rollout that closes with no passing test scores 0.05. A
+length term of 0.001 per completion token above 900 is subtracted from answers
+that passed a test, capped at 0.2, so a perfect answer keeps at least 0.8. It
+does not touch the failure tiers, so a long clean failure cannot fall below a
+crash. The close payment buys termination, not proximity: at 0.05 it cannot be
+farmed by a crashing near miss, and one passing test still beats closing alone
+by a wide margin. Partial answers are unchanged, so closing cannot lift a 3-of-4
+answer above a 4-of-4 one. The sum is clipped to -1 to 1. The other three arms
+are unchanged.
 
 Each arm gets one small function, and `ARM_REWARDS` is the single dispatch
 point. All four arms are implemented. Adding an arm means adding one entry to
@@ -29,7 +31,7 @@ point. All four arms are implemented. Adding an arm means adding one entry to
 that passes all but one both count as failures for the gated arms. A task with
 zero tests is an error for the code score: nothing was proven, and returning
 0.0 would hide a broken test runner. The one exception is a syntax error: the
-code never ran, so the runner knows no test counts, and the arm scores -0.5.
+code never ran, so the runner knows no test counts, and the arm scores -0.3.
 The gated arms differ: a question with no tests cannot pass the gate, so it gets
 zero and the judge is not called. The Experiment records a code score of 0.0 for
 that case.
@@ -54,6 +56,8 @@ __all__ = [
     "DEFAULT_LENGTH_SOFT_LIMIT",
     "PENDING_ARMS",
     "RewardError",
+    "RUNTIME_ERROR_CLASS",
+    "RUNTIME_ERROR_REWARD",
     "SYNTAX_ERROR_CLASS",
     "all_tests_passed",
     "check_arm_implemented",
@@ -75,13 +79,19 @@ DEFAULT_LENGTH_PENALTY_FLOOR = 0.2
 
 #: Fixed code-arm scores for outcomes that are not a test fraction.
 TRUNCATION_REWARD = -1.0
-SYNTAX_ERROR_REWARD = -0.5
+SYNTAX_ERROR_REWARD = -0.3
+RUNTIME_ERROR_REWARD = 0.0
+
+#: The error class for code that raises while it runs. It is worse than a
+#: clean failure and better than a syntax error.
+RUNTIME_ERROR_CLASS = "runtime_error"
 
 #: The most a rollout can earn for writing the closing reasoning marker when it
-#: passed no tests. It is capped below one test's worth in `close_reward`, so
-#: passing one test always beats closing alone. The model still has a reason to
-#: close while it solves nothing, which is when the collapse used to happen.
-CLOSE_REWARD = 0.4
+#: passed no tests. A flat, small payment. It buys termination, not a near miss,
+#: so it stays far below one passing test and cannot be farmed by code that
+#: crashes. The model still has a reason to close while it solves nothing, which
+#: is when the collapse used to happen.
+CLOSE_REWARD = 0.05
 
 #: The close reward may never reach this share of one test. Keeps the ordering
 #: strict: no tests < one test < two tests < a full pass.
@@ -180,11 +190,12 @@ def all_tests_passed(tests_passed: int, tests_total: int) -> bool:
 
 
 def close_reward(tests_total: int) -> float:
-    """The reward for closing when no test passed, capped below one test.
+    """The reward for closing when no test passed.
 
-    With three tests the reward is 0.3, below one test at 0.333. With two tests
-    it is 0.4, below one test at 0.5. So a closed zero-test answer can never
-    outrank an answer that passed a test, and one test can never outrank two.
+    A flat 0.05. It buys termination, not proximity, so it stays far below one
+    passing test at 0.45 and cannot pay for code that crashes. The value is
+    still capped below one test's worth, which the flat size makes trivially
+    true.
     """
     if isinstance(tests_total, bool) or not isinstance(tests_total, int):
         raise TypeError(f"tests_total must be an integer, got {tests_total!r}")
@@ -262,10 +273,12 @@ def reward_code_score(
 ) -> float:
     """Code-score arm: the test fraction, with truncation, syntax and length terms.
 
-    A truncated rollout scores -1.0 and a rollout whose code did not compile
-    scores -0.5. Everything else starts at the fraction of tests passed, raised
-    to the close floor when the rollout closed and scored less. The length term
-    is subtracted from that base, and the sum is clipped to [-1, 1].
+    A truncated rollout scores -1.0, code that does not compile scores -0.3, and
+    code that raises while it runs scores 0.0. Everything else starts at the
+    fraction of tests passed, raised to the close payment when the rollout
+    closed and scored less. The length term is subtracted from answers that
+    passed a test, and the sum is clipped to [-1, 1]. Failure tiers are flat so
+    a long clean failure can never fall below a crash.
 
     The judge score arguments are accepted and ignored, so every arm function
     has the same call shape at the dispatch point.
@@ -275,17 +288,23 @@ def reward_code_score(
         base = TRUNCATION_REWARD
     elif error_class == SYNTAX_ERROR_CLASS:
         base = SYNTAX_ERROR_REWARD
+    elif error_class == RUNTIME_ERROR_CLASS:
+        base = RUNTIME_ERROR_REWARD
     elif tests_passed == 0:
         if tests_total == 0:
             raise RewardError("a rollout with zero tests has no code score")
         base = close_reward(tests_total) if closed else 0.0
     else:
         base = partial_reward(tests_passed, tests_total)
-    penalty = _length_penalty(
-        completion_tokens,
-        soft_limit=length_soft_limit,
-        per_token=length_penalty_per_token,
-        floor=length_penalty_floor,
+    penalty = (
+        _length_penalty(
+            completion_tokens,
+            soft_limit=length_soft_limit,
+            per_token=length_penalty_per_token,
+            floor=length_penalty_floor,
+        )
+        if tests_passed > 0
+        else 0.0
     )
     return min(MAX_REWARD, max(MIN_REWARD, base - penalty))
 

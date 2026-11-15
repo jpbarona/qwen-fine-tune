@@ -81,16 +81,31 @@ def test_code_score_reward_never_uses_a_judge() -> None:
         ({"tests_passed": 3, "tests_total": 4}, 0.75),
         ({"tests_passed": 1, "tests_total": 4}, 0.45),
         ({"tests_passed": 0, "tests_total": 4}, 0.0),
-        # Fixed penalties for truncation and code that does not compile.
+        # Fixed failure tiers, worst first: truncated, syntax error, runtime
+        # error, a clean failure that closed, then a real test pass.
         ({"tests_passed": 0, "tests_total": 4, "truncated": True}, -1.0),
         (
             {"tests_passed": 0, "tests_total": 4, "error_class": "syntax_error"},
-            -0.5,
+            -0.3,
         ),
         (
             {"tests_passed": 0, "tests_total": 0, "error_class": "syntax_error"},
-            -0.5,
+            -0.3,
         ),
+        (
+            {"tests_passed": 0, "tests_total": 4, "error_class": "runtime_error"},
+            0.0,
+        ),
+        (
+            {
+                "tests_passed": 0,
+                "tests_total": 4,
+                "error_class": "runtime_error",
+                "closed": True,
+            },
+            0.0,
+        ),
+        ({"tests_passed": 0, "tests_total": 4, "closed": True}, 0.05),
         # The length term starts above 900 tokens and is capped at 0.2.
         ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 900}, 1.0),
         ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 1000}, 0.9),
@@ -98,7 +113,18 @@ def test_code_score_reward_never_uses_a_judge() -> None:
         ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 4096}, 0.8),
         # The term applies to the whole output, whatever the base score.
         ({"tests_passed": 2, "tests_total": 4, "completion_tokens": 1100}, 0.4),
-        ({"tests_passed": 0, "tests_total": 4, "completion_tokens": 1100}, -0.2),
+        # Failure tiers are flat. A long failure must not fall below a crash,
+        # so the length term only shapes answers that passed a test.
+        ({"tests_passed": 0, "tests_total": 4, "completion_tokens": 1100}, 0.0),
+        (
+            {
+                "tests_passed": 0,
+                "tests_total": 4,
+                "closed": True,
+                "completion_tokens": 1100,
+            },
+            0.05,
+        ),
         (
             {
                 "tests_passed": 0,
@@ -115,7 +141,7 @@ def test_code_score_reward_never_uses_a_judge() -> None:
                 "error_class": "syntax_error",
                 "completion_tokens": 1100,
             },
-            -0.7,
+            -0.3,
         ),
     ],
 )
@@ -168,18 +194,16 @@ def test_the_length_term_uses_the_given_settings() -> None:
     ) == pytest.approx(0.95)
 
 
-def test_the_close_reward_is_capped_below_one_test() -> None:
-    assert CLOSE_REWARD == pytest.approx(0.4)
-    assert close_reward(3) == pytest.approx(0.3)
-    assert close_reward(2) == pytest.approx(0.4)
-    assert close_reward(4) == pytest.approx(0.225)
-    assert close_reward(10) == pytest.approx(0.09)
+def test_the_close_reward_is_a_small_flat_payment() -> None:
+    assert CLOSE_REWARD == pytest.approx(0.05)
+    for tests_total in (1, 2, 3, 4, 10):
+        assert close_reward(tests_total) == pytest.approx(0.05)
 
 
 def test_the_close_reward_only_applies_when_no_test_passed() -> None:
     assert compose_reward(
         "code-score", tests_passed=0, tests_total=4, closed=True
-    ) == pytest.approx(0.225)
+    ) == pytest.approx(0.05)
     assert reward_code_score(
         tests_passed=1, tests_total=4, closed=True
     ) == pytest.approx(0.45)
@@ -248,7 +272,45 @@ def test_a_closed_syntax_error_gets_no_floor() -> None:
         tests_total=4,
         error_class="syntax_error",
         closed=True,
-    ) == pytest.approx(-0.5)
+    ) == pytest.approx(-0.3)
+
+
+def test_a_runtime_error_gets_no_close_payment() -> None:
+    for closed in (False, True):
+        assert compose_reward(
+            "code-score",
+            tests_passed=0,
+            tests_total=4,
+            error_class="runtime_error",
+            closed=closed,
+        ) == 0.0
+
+
+def test_failure_tiers_stay_in_order() -> None:
+    truncated = compose_reward(
+        "code-score", tests_passed=0, tests_total=4, truncated=True, closed=True
+    )
+    syntax = compose_reward(
+        "code-score",
+        tests_passed=0,
+        tests_total=4,
+        error_class="syntax_error",
+        closed=True,
+    )
+    runtime = compose_reward(
+        "code-score",
+        tests_passed=0,
+        tests_total=4,
+        error_class="runtime_error",
+        closed=True,
+    )
+    clean = compose_reward(
+        "code-score", tests_passed=0, tests_total=4, closed=True
+    )
+    one_test = compose_reward(
+        "code-score", tests_passed=1, tests_total=4, closed=True
+    )
+    assert truncated < syntax < runtime < clean < one_test
 
 
 def test_closing_beats_not_closing_when_no_test_passed() -> None:
@@ -320,7 +382,7 @@ def test_any_correct_answer_beats_a_closed_zero_test_answer_at_every_length() ->
         for length in range(0, 4097)
     ]
     assert min(correct) == pytest.approx(0.8)
-    assert max(wrong_closed) == pytest.approx(0.225)
+    assert max(wrong_closed) == pytest.approx(0.05)
     assert min(correct) > max(wrong_closed)
 
 

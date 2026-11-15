@@ -55,3 +55,6 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 49. vLLM 0.10.1 needs CUDA 12.8, so torch uses cu128
 50. Removed the false claim that bands come from measured pass rate
 51. Removed the false claim that gradient division fixes update size
+52. Run 16 reached step 67 with zero passes and reward 0.297
+53. Close payment paid 0.3 for crashing code → make it flat 0.05
+54. Runtime errors score 0.0 → below a clean failure, above syntax
