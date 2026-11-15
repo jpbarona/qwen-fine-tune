@@ -71,3 +71,5 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 65. Prompt may never carry a test body or an expected value
 66. Stage pools checked for repeats and train overlap
 67. README now states the mastery rule and the stage exit cost
+68. Dashboard GPU tiles now report GiB instead of thousands of MiB
+69. Dashboard now plots the share of the current stage solved

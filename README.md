@@ -196,6 +196,17 @@ subset of the test pool with greedy decoding. The subset is
 split seed, and the subset is a seeded sample, not the first questions in file
 order. The subset keeps the pool order.
 
+## Live dashboard
+
+The dashboard reads a run folder and shows reward, pass rate, pass@1, completion
+length, truncation, and memory. Two things worth knowing:
+
+- the system tiles report GPU memory in GiB,
+- the stage completion panel plots how much of the current band has been solved.
+  A prompt counts as solved only when all 8 of its rollouts pass, and the
+  denominator is the band's starting pool from `meta.json`, so the line shows
+  progress that does not move backwards.
+
 ## Curriculum
 
 Training runs band by band: very easy, medium, hard, very hard. Each band is
@@ -251,10 +262,11 @@ empty. A wrong or empty split stops the command before a run folder is made.
 
 The prompt names the function the hidden tests call. MBPP problem text often
 leaves the name out, so the model used to invent one and every test failed with
-`NameError`. `data.expected_function_name` reads the name from the first
-`assert name(` in the test list, and `format_prompt` puts it in the first line:
-``Write a Python function named `topbottom_surfacearea` ...``. 962 of the 964
-rows get a name. Test bodies and expected values never enter the prompt.
+`NameError`. `data.expected_function_name` takes every call in every test,
+drops keywords and module attributes, and keeps the one name all tests share.
+`format_prompt` puts it in the first line:
+``Write a Python function named `topbottom_surfacearea` ...``. All 1014 rows get
+a name. Test bodies and expected values never enter the prompt.
 
 ## Completion length and sampled entropy
 

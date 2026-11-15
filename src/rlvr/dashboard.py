@@ -438,6 +438,73 @@ def _band_pass_rates(run_dir: Path) -> list[dict[str, Any]]:
     ]
 
 
+def _stage_progress(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
+    """How much of the current curriculum band has been solved, per step.
+
+    A prompt counts as solved in a step only when every rollout of that prompt
+    in that step passed, which is the training pool rule. The total for a band
+    is its starting training pool from `meta.json`, so the percentage is stable
+    even though the pool shrinks.
+
+    The series keeps one point per training step, and carries the band with it,
+    because a run that moves to a new band restarts at zero.
+    """
+    curriculum = meta.get("curriculum")
+    totals: dict[str, int] = {}
+    if isinstance(curriculum, Mapping):
+        stages = curriculum.get("stages")
+        if isinstance(stages, list):
+            for stage in stages:
+                if not isinstance(stage, Mapping):
+                    continue
+                name = _string(stage.get("name"))
+                count = _integer(stage.get("train"))
+                if name is not None and count:
+                    totals[name] = count
+
+    by_step: dict[int, dict[str, dict[str, list[bool]]]] = {}
+    for record in _rollout_records(run_dir / ROLLOUTS_NAME):
+        step = _integer(record.get("step"))
+        band = _string(record.get("stage"))
+        prompt_id = _string(record.get("prompt_id"))
+        if step is None or band is None or prompt_id is None:
+            continue
+        passed = _integer(record.get("tests_passed"))
+        total = _integer(record.get("tests_total"))
+        full = passed is not None and total is not None and total > 0 and passed == total
+        step_band = by_step.setdefault(step, {}).setdefault(band, {})
+        step_band.setdefault(prompt_id, []).append(full)
+
+    solved: dict[str, set[str]] = {}
+    points: list[dict[str, Any]] = []
+    for step in sorted(by_step):
+        for band, prompts in by_step[step].items():
+            for prompt_id, outcomes in prompts.items():
+                if outcomes and all(outcomes):
+                    solved.setdefault(band, set()).add(prompt_id)
+            total = totals.get(band)
+            if not total:
+                continue
+            points.append(
+                {
+                    "step": step,
+                    "band": band,
+                    "solved": len(solved.get(band, ())),
+                    "total": total,
+                    "percent": len(solved.get(band, ())) / total,
+                }
+            )
+
+    latest = points[-1] if points else None
+    return {
+        "band": latest["band"] if latest else None,
+        "solved": latest["solved"] if latest else 0,
+        "total": latest["total"] if latest else 0,
+        "percent": latest["percent"] if latest else None,
+        "points": points,
+    }
+
+
 def _distributions(run_dir: Path) -> dict[str, Any]:
     rewards: list[float] = []
     passed_counts: list[int] = []
@@ -481,6 +548,7 @@ def _waiting_run(arm: str) -> dict[str, Any]:
         "target_steps": None,
         "stage": None,
         "bands": [],
+        "stage_progress": {"band": None, "solved": 0, "total": 0, "percent": None, "points": []},
         "latest": {name: None for name in LATEST_FIELDS},
         "series": {"steps": []} | {name: [] for name in SERIES_FIELDS},
         "pass_at_1": {"checkpoint": {"steps": [], "values": []}, "final": {"steps": [], "values": []}},
@@ -511,6 +579,7 @@ def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
         "target_steps": _target_steps(meta),
         "stage": _string(rows[-1].get("stage")) if rows else None,
         "bands": _band_pass_rates(run_dir),
+        "stage_progress": _stage_progress(run_dir, meta),
         "latest": _latest(rows),
         "series": _series(rows),
         "pass_at_1": _pass_at_1_series(eval_payload),
@@ -643,6 +712,10 @@ _SCRIPT = """\
     if (v === null || v === undefined) { return "-"; }
     if (d === undefined) { d = 4; }
     return Number(v).toFixed(d);
+  }
+  function gib(v) {
+    if (v === null || v === undefined) { return "-"; }
+    return (Number(v) / 1024).toFixed(1);
   }
   function fmtElapsed(sec) {
     if (sec === null || sec === undefined) { return "-"; }
@@ -790,20 +863,25 @@ _SCRIPT = """\
 
     // The batch is chosen per step from free memory. Prompts are prompt groups,
     // sequences are the sampled completions across those groups.
-    html += '<div class="grid grid-cols-2 gap-px bg-zinc-800 border border-zinc-800 mb-3">';
+    var progress = run.stage_progress || {};
+    var stageDone = (progress.percent === null || progress.percent === undefined)
+      ? "-" : (progress.percent * 100).toFixed(0) + "%";
+
+    html += '<div class="grid grid-cols-3 gap-px bg-zinc-800 border border-zinc-800 mb-3">';
     html += kpi("prompts per step", fmt(latest.prompts, 0));
     html += kpi("sequences per step", fmt(latest.sequences, 0));
+    html += kpi("stage done", stageDone);
     html += '</div>';
 
     // The allocator split is separate from the nvidia-smi device sample above.
     // Live, cache and fragmentation are the process view. The total is the
     // device, and unaccounted is whatever the allocator does not hold.
     html += '<div class="grid grid-cols-2 sm:grid-cols-5 gap-px bg-zinc-800 border border-zinc-800 mb-3">';
-    html += kpi("gpu live MiB", fmt(latest.gpu_live_mib, 1));
-    html += kpi("gpu cached MiB", fmt(latest.gpu_cached_mib, 1));
-    html += kpi("gpu fragmented MiB", fmt(latest.gpu_fragmented_mib, 1));
-    html += kpi("gpu unaccounted MiB", fmt(latest.gpu_unaccounted_mib, 1));
-    html += kpi("gpu total MiB", fmt(latest.gpu_total_mib, 1));
+    html += kpi("gpu live GiB", gib(latest.gpu_live_mib));
+    html += kpi("gpu cached GiB", gib(latest.gpu_cached_mib));
+    html += kpi("gpu fragmented GiB", gib(latest.gpu_fragmented_mib));
+    html += kpi("gpu unaccounted GiB", gib(latest.gpu_unaccounted_mib));
+    html += kpi("gpu total GiB", gib(latest.gpu_total_mib));
     html += '</div>';
 
     html += '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">';
@@ -814,7 +892,8 @@ _SCRIPT = """\
     html += chartCard(p + "-length", "completion tokens per step");
     html += chartCard(p + "-trunc", "truncation rate per step");
     html += chartCard(p + "-batch", "prompts and sequences per step");
-    html += chartCard(p + "-mem", "gpu memory per step (MiB)");
+    html += chartCard(p + "-stage", "stage completion per step (%)");
+    html += chartCard(p + "-mem", "gpu memory per step (GiB)");
     html += chartCard(p + "-rewardhist", "reward distribution");
     html += chartCard(p + "-testshist", "tests passed distribution");
     html += '</div>';
@@ -830,7 +909,7 @@ _SCRIPT = """\
     html += '<h2 class="text-sm font-semibold text-zinc-100 border-b border-zinc-800 pb-2 mb-3">system</h2>';
     html += '<div class="grid grid-cols-2 sm:grid-cols-4 gap-px bg-zinc-800 border border-zinc-800 mb-3">';
     html += kpi("gpu util", cur && cur.utilization !== null && cur.utilization !== undefined ? cur.utilization.toFixed(0) + "%" : "-");
-    html += kpi("gpu memory", cur && cur.memory_used !== null && cur.memory_used !== undefined ? (cur.memory_used + " MiB" + (cur.memory_total !== null && cur.memory_total !== undefined ? " / " + cur.memory_total + " MiB" : "")) : "-");
+    html += kpi("gpu memory", cur && cur.memory_used !== null && cur.memory_used !== undefined ? (gib(cur.memory_used) + " GiB" + (cur.memory_total !== null && cur.memory_total !== undefined ? " / " + gib(cur.memory_total) + " GiB" : "")) : "-");
     html += kpi("gpu temp", cur && cur.temperature !== null && cur.temperature !== undefined ? cur.temperature.toFixed(0) + " C" : "-");
     html += kpi("samples", String((gpu.history || []).length));
     html += '</div>';
@@ -926,10 +1005,26 @@ _SCRIPT = """\
       options: Object.assign(lineOpts(), { plugins: { legend: { display: true, labels: { color: "#a1a1aa", boxWidth: 10, boxHeight: 10 } } } })
     });
 
+    var pg = (run.stage_progress && run.stage_progress.points) || [];
+    mount(p + "-stage", {
+      type: "line",
+      data: { datasets: [{
+        data: pg.map(function (point) { return { x: point.step, y: point.percent * 100 }; }),
+        borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5,
+        pointRadius: 2, pointBackgroundColor: ACCENT, tension: 0, spanGaps: false
+      }] },
+      options: Object.assign(lineOpts(), {
+        scales: {
+          x: { type: "linear", grid: { color: "#27272a" }, ticks: { color: "#71717a", maxTicksLimit: 8, maxRotation: 0 } },
+          y: { min: 0, max: 100, grid: { color: "#27272a" }, ticks: { color: "#71717a", callback: function (v) { return v + "%"; } } }
+        }
+      })
+    });
+
     var memSeries = function (label, color, values) {
       return {
         label: label,
-        data: xyPresent(steps, values || []),
+        data: xyPresent(steps, (values || []).map(function (v) { return (v === null || v === undefined) ? null : v / 1024; })),
         borderColor: color, backgroundColor: color, borderWidth: 1.5,
         pointRadius: 0, tension: 0, spanGaps: false
       };
@@ -975,7 +1070,7 @@ _SCRIPT = """\
       type: "line",
       data: { datasets: [
         { label: "utilization %", data: xy(t, util), borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: false, yAxisID: "y" },
-        { label: "memory MiB", data: xy(t, mem), borderColor: MUTED, backgroundColor: MUTED, borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: false, yAxisID: "y1" }
+        { label: "memory GiB", data: xy(t, mem.map(function (v) { return v === null || v === undefined ? null : v / 1024; })), borderColor: MUTED, backgroundColor: MUTED, borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: false, yAxisID: "y1" }
       ] },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,

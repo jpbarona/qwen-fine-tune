@@ -237,11 +237,11 @@ def test_collect_dashboard_separates_the_memory_figures(tmp_path) -> None:
 
     html = render_html(data)
     for label in (
-        "gpu live MiB",
-        "gpu cached MiB",
-        "gpu fragmented MiB",
-        "gpu unaccounted MiB",
-        "gpu total MiB",
+        "gpu live GiB",
+        "gpu cached GiB",
+        "gpu fragmented GiB",
+        "gpu unaccounted GiB",
+        "gpu total GiB",
     ):
         assert label in html
 
@@ -255,7 +255,7 @@ def test_a_fake_run_without_a_gpu_shows_zero_memory(run_fake) -> None:
     assert latest["gpu_cached_mib"] == 0.0
     assert latest["gpu_fragmented_mib"] == 0.0
     assert latest["gpu_total_mib"] == 0.0
-    assert "gpu memory per step (MiB)" in render_html(data)
+    assert "gpu memory per step (GiB)" in render_html(data)
 
 
 def test_collect_dashboard_ignores_a_truncated_rollout_line(tmp_path) -> None:
@@ -691,3 +691,81 @@ def test_series_and_distribution_shapes(tmp_path) -> None:
 
     assert run["pass_at_1"]["checkpoint"]["steps"] == [1]
     assert run["pass_at_1"]["final"]["steps"] == [2]
+
+
+def stage_rollouts(step: int, prompt_id: str, passes: int, total: int = 8) -> list[dict]:
+    """One prompt group of 8 rollouts, `passes` of them fully passing."""
+    return [
+        {
+            "step": step,
+            "stage": "very easy",
+            "prompt_id": prompt_id,
+            "tests_passed": 3 if index < passes else 0,
+            "tests_total": 3,
+            "reward": 1.0 if index < passes else 0.0,
+        }
+        for index in range(total)
+    ]
+
+
+def test_stage_progress_counts_only_prompts_where_every_rollout_passed(tmp_path) -> None:
+    rollouts = (
+        stage_rollouts(1, "p1", passes=8)
+        + stage_rollouts(1, "p2", passes=7)
+        + stage_rollouts(2, "p2", passes=8)
+    )
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        meta_extra={
+            "curriculum": {
+                "stages": [
+                    {"name": "very easy", "train": 4, "held_out": 1},
+                    {"name": "medium", "train": 10, "held_out": 2},
+                ]
+            }
+        },
+        rollouts=rollouts,
+    )
+    data = collect_dashboard([run_dir])
+    progress = data["runs"][0]["stage_progress"]
+
+    assert progress["band"] == "very easy"
+    assert progress["total"] == 4
+    assert progress["solved"] == 2
+    assert progress["percent"] == pytest.approx(0.5)
+    assert [point["percent"] for point in progress["points"]][-1] == pytest.approx(0.5)
+
+
+def test_stage_progress_is_blank_without_a_pool_size(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=stage_rollouts(1, "p1", 8))
+    data = collect_dashboard([run_dir])
+    progress = data["runs"][0]["stage_progress"]
+
+    assert progress["points"] == []
+    assert progress["percent"] is None
+    html = render_html(data)
+    assert "stage completion per step (%)" in html
+    assert "stage done" in html
+
+
+def test_gpu_tiles_are_reported_in_gib_not_mib(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "gpu_live_mib": 2048.0,
+            "gpu_cached_mib": 1024.0,
+            "gpu_fragmented_mib": 0.0,
+            "gpu_unaccounted_mib": 4096.0,
+            "gpu_total_mib": 49152.0,
+        }
+    ]
+    run_dir = write_run(tmp_path / "runs", "code-score", rows=rows)
+    html = render_html(collect_dashboard([run_dir]))
+
+    assert "gpu live GiB" in html
+    assert "gpu total GiB" in html
+    assert "gpu memory per step (GiB)" in html
+    assert "MiB" not in html
+    assert "function gib(" in html
