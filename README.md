@@ -229,8 +229,7 @@ empty. A wrong or empty split stops the command before a run folder is made.
 
 ## Completion length and sampled entropy
 
-`completion_tokens` is the completion length used for the length study. It is
-logged, not rewarded.
+`completion_tokens` is the completion length. It feeds the length penalty.
 
 Entropy is not a rollout field. It is measured on the update pass, on the same
 forward logits the policy loss uses, every `[training] entropy_every_steps`
@@ -280,7 +279,8 @@ and types are a contract.
 | `code_score` | float | passed / total, in [0, 1] |
 | `judge_score` | float or null | null when the arm does not judge or tests failed |
 | `process_score` | float or null | null except in `gated-process` on a pass |
-| `reward` | float | the arm reward, in [0, 1] |
+| `reward` | float | the arm reward, clipped to [-1, 1] |
+| `stage` | str | curriculum band, or `unstaged` |
 | `cache_hit` | bool | true when any judge call was served from cache |
 
 Timestamps and truncation flags are deliberately out of this record. Truncation
@@ -424,6 +424,11 @@ Fixed outcomes in `code-score`:
 |---|---|
 | truncated rollout | `-1.0` |
 | code that does not compile | `-0.5` |
+| closing reasoning marker written | `+0.4` |
+| length above 900 tokens | `-0.001` per token, capped at `-0.2` |
+
+The sum is clipped to `-1` and `1`. The thinking budget starts at 768 tokens and
+doubles each curriculum stage, capped at `max_completion_tokens`.
 
 Any failed test closes the gate, so a gated arm makes no judge call. For the
 gated arms zero tests counts as a failure. For `code-score` zero tests is an

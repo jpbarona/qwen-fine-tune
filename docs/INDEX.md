@@ -15,14 +15,14 @@ Docs, all in this folder:
 Repo items, relative to this folder:
 
 - `../issues/09-spec-single-arm-curriculum.md` — current spec, single arm.
-- `../issues/10` to `../issues/16` — the implemented tickets.
+- `../issues/10` to `../issues/17` — the implemented tickets.
 - `../README.md` — install, run, and test commands.
 - `../configs/` — `real.toml` and `smoke.toml`.
 - `../data/mbpp_full.jsonl` — 964 MBPP rows, fixed 714 and 250 split.
 - `../data/difficulty_labels.jsonl` — one band per training row.
 - `../data/synthetic_easy.jsonl` — 50 very easy rows for the first stage.
 - `../src/rlvr/` — package source.
-- `../tests/` — 751 tests, no GPU tests.
+- `../tests/` — 794 tests, no GPU tests.
 - `../runs/` — run folders, kept as study data.
 
 The dead GPU instance data is backed up at
