@@ -233,7 +233,7 @@ def test_the_other_arms_accept_closed_and_ignore_it() -> None:
         assert closed == plain
 
 
-def test_any_correct_answer_beats_any_wrong_answer_at_every_length() -> None:
+def test_any_correct_answer_beats_an_unclosed_wrong_answer_at_every_length() -> None:
     correct = [
         compose_reward(
             "code-score", tests_passed=4, tests_total=4, completion_tokens=length
