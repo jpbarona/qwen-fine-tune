@@ -146,7 +146,7 @@ def test_eval_settings_default_when_the_run_table_is_absent(tmp_path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(GOOD, encoding="utf-8")
     config = load_config(path)
-    assert config.eval_every_steps == 100
+    assert config.eval_every_steps == 20
     assert config.eval_questions == 100
     assert config.eval_subset_seed == 2026
 
@@ -182,7 +182,7 @@ def test_a_bad_eval_setting_is_named(tmp_path, line: str, key: str) -> None:
 
 def test_the_default_config_sets_the_eval_schedule() -> None:
     config = load_config(default_config_path())
-    assert config.eval_every_steps == 100
+    assert config.eval_every_steps == 20
     assert config.eval_questions == 100
     assert isinstance(config.eval_subset_seed, int)
 
@@ -285,7 +285,7 @@ def test_a_bad_length_setting_is_named(tmp_path, line: str, key: str) -> None:
 
 def test_checkpoint_and_budget_defaults(write_config) -> None:
     config = load_config(write_config(GOOD))
-    assert config.checkpoint_every_steps == 50
+    assert config.checkpoint_every_steps == 20
     assert config.eval_final_questions is None
     assert config.max_steps is None
     assert config.max_judge_calls is None
@@ -366,7 +366,8 @@ def test_the_shipped_real_config_loads() -> None:
     assert config.max_completion_tokens == 2048
     assert config.entropy_every_steps == 500
     assert config.lora_rank == 32 and config.lora_alpha == 64
-    assert config.checkpoint_every_steps == 50
+    assert config.checkpoint_every_steps == 20
+    assert config.eval_every_steps == 20
     assert config.length_soft_limit == 900
     assert config.length_penalty_per_token == pytest.approx(0.001)
     assert config.length_penalty_floor == pytest.approx(0.2)

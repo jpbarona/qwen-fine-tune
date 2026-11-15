@@ -78,10 +78,12 @@ memory_floor_mib = 512
 # max_judge_calls = 100000
 
 [run]
-checkpoint_every_steps = 50
+# One checkpoint every 20 steps. The ten newest are kept in the run folder:
+# the latest five consecutive, then older ones at doubling gaps.
+checkpoint_every_steps = 20
 # Checkpoint evaluation: every N steps, on a fixed subset of the test pool,
 # greedy decoding. The final evaluation always covers the whole test pool.
-eval_every_steps = 100
+eval_every_steps = 20
 eval_questions = 100
 # Optional cap on the final evaluation pool. Unset means the whole test pool.
 # eval_final_questions = 250
