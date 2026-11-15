@@ -780,17 +780,6 @@ class QwenGenerator:
         self._pending_groups = cached_groups if cache else None
         return generations
 
-    def engine_state_dict(self):
-        """The trainable weights as name and tensor pairs, for the vLLM engine.
-
-        The adapter parameters are the only ones that change during a run, so
-        these are what the engine needs after each optimizer step. The tensors
-        are detached views of the live parameters.
-        """
-        for name, parameter in self.model.named_parameters():
-            if parameter.requires_grad:
-                yield name, parameter.detach()
-
     def _decode_group(
         self,
         prompt: Prompt,
