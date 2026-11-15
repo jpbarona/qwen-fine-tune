@@ -37,24 +37,26 @@ export function Panel({
   right,
   legend,
   children,
+  flush = false,
   className = '',
 }: {
   title: string
   right?: ReactNode
   legend?: ReactNode
   children: ReactNode
+  flush?: boolean
   className?: string
 }) {
   return (
-    <section className={`bg-[#0b0b0d] px-3 py-2.5 ${className}`}>
-      <header className="mb-1 flex items-baseline justify-between gap-3">
-        <h3 className="text-[10px] uppercase tracking-[0.09em] text-[#6b6b73]">{title}</h3>
-        {right ? <div className="flex items-center gap-3 font-mono text-[10.5px] text-[#8b8b94]">{right}</div> : null}
+    <section className={`border border-white/[0.07] bg-[#0b0b0d] ${className}`}>
+      <header className="flex items-baseline justify-between gap-3 px-3 pb-1.5 pt-2.5">
+        <h3 className="text-[11px] uppercase tracking-[0.09em] text-[#6b6b73]">{title}</h3>
+        {right ? <div className="flex items-center gap-3 font-mono text-[11px] text-[#8b8b94]">{right}</div> : null}
       </header>
       {legend ? (
-        <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[9px] text-[#6b6b73]">{legend}</div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 pb-1 font-mono text-[10px] text-[#6b6b73]">{legend}</div>
       ) : null}
-      {children}
+      <div className={flush ? '' : 'px-3 pb-2'}>{children}</div>
     </section>
   )
 }
@@ -152,16 +154,16 @@ export function LineChart({
           {ticks.map((tick, index) => (
             <g key={index}>
               <line x1={pad.left} x2={width - pad.right} y1={sy(tick)} y2={sy(tick)} stroke={GRID} strokeWidth={1} />
-              <text x={pad.left - 6} y={sy(tick) + 3} textAnchor="end" fontSize={9} fontFamily="ui-monospace, monospace" fill={AXIS}>
+              <text x={pad.left - 6} y={sy(tick) + 3} textAnchor="end" fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS}>
                 {format(tick)}
               </text>
             </g>
           ))}
-          <text x={pad.left} y={height - 3} fontSize={9} fontFamily="ui-monospace, monospace" fill={AXIS} textAnchor="start">
+          <text x={pad.left} y={height - 3} fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS} textAnchor="start">
             {xLo}
           </text>
           {xHi !== xLo ? (
-            <text x={width - pad.right} y={height - 3} fontSize={9} fontFamily="ui-monospace, monospace" fill={AXIS} textAnchor="end">
+            <text x={width - pad.right} y={height - 3} fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS} textAnchor="end">
               {xHi}
             </text>
           ) : null}
@@ -237,7 +239,7 @@ export function BarChart({
             return (
               <g key={fraction}>
                 <line x1={pad.left} x2={width - pad.right} y1={pad.top + fraction * plotHeight} y2={pad.top + fraction * plotHeight} stroke={GRID} strokeWidth={1} />
-                <text x={pad.left - 6} y={pad.top + fraction * plotHeight + 3} textAnchor="end" fontSize={9} fontFamily="ui-monospace, monospace" fill={AXIS}>
+                <text x={pad.left - 6} y={pad.top + fraction * plotHeight + 3} textAnchor="end" fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS}>
                   {value}
                 </text>
               </g>
@@ -253,10 +255,10 @@ export function BarChart({
               fill="#4a4a52"
             />
           ))}
-          <text x={pad.left} y={height - 3} fontSize={9} fontFamily="ui-monospace, monospace" fill={AXIS} textAnchor="start">
+          <text x={pad.left} y={height - 3} fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS} textAnchor="start">
             {format(bins[0])}
           </text>
-          <text x={width - pad.right} y={height - 3} fontSize={9} fontFamily="ui-monospace, monospace" fill={AXIS} textAnchor="end">
+          <text x={width - pad.right} y={height - 3} fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS} textAnchor="end">
             {format(bins[bins.length - 1])}
           </text>
         </svg>
