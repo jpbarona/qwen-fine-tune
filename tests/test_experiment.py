@@ -1173,6 +1173,38 @@ def test_a_checkpoint_manifest_is_saved_every_configured_steps(tmp_path) -> None
     assert generator.save_calls[0].endswith("step-00000002")
 
 
+def test_a_save_prunes_to_the_retained_set(tmp_path) -> None:
+    from rlvr.fake import FakeGenerator, FakeTestRunner
+    from rlvr.runs import RunStore
+
+    config_text = (
+        "[model]\nname = \"Qwen/Qwen3-0.6B\"\nrevision = \"r\"\n"
+        "[judge]\nmodel = \"fake-judge-model\"\n"
+        "[data]\nsplit_seed = 1\n"
+        "[fake]\nsteps = 11\n"
+        "[run]\ncheckpoint_every_steps = 1\n"
+    )
+    config = load_config(_write_config(tmp_path, config_text))
+    store = RunStore(tmp_path / "runs", "code-score", timestamp="20261112T000000Z")
+    Experiment(
+        arm="code-score",
+        config=config,
+        generator=FakeGenerator(),
+        judge=ExplodingJudge(),
+        test_runner=FakeTestRunner(),
+        store=store,
+        prompts=make_prompts(1),
+        eval_prompts=make_prompts(1),
+    ).run()
+
+    names = sorted(path.name for path in store.checkpoints_dir.iterdir())
+    assert len(names) == 10
+    assert names[-1] == "step-00000011"
+    # The selection keeps step 6 out, so the save deletes that directory.
+    assert "step-00000006" not in names
+    assert "step-00000001" in names
+
+
 def test_generation_defaults_truncation_flags_to_false() -> None:
     generation = Generation(
         reasoning="r", code="c", prompt_tokens=1, completion_tokens=1

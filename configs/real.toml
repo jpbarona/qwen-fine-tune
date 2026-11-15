@@ -1,7 +1,8 @@
 # Full training config for one arm. Five epochs over the 714 train questions,
 # one prompt group of 8 generations per step. The step budget is computed by
 # the CLI as [training] epochs times the train size, so no step count appears
-# here. Checkpoints every 50 steps, checkpoint evaluation every 100 steps.
+# here. Checkpoints every 20 steps, checkpoint evaluation every 20 steps, and
+# the ten newest checkpoints are kept in the run folder.
 
 [model]
 name = "Qwen/Qwen3-0.6B"
@@ -57,7 +58,7 @@ memory_floor_mib = 512
 seed = 0
 
 [run]
-checkpoint_every_steps = 50
-eval_every_steps = 100
+checkpoint_every_steps = 20
+eval_every_steps = 20
 eval_questions = 100
 eval_subset_seed = 2026

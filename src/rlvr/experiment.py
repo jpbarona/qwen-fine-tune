@@ -48,7 +48,13 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from . import repro
 from .batching import START_PROMPTS, BatchSizePolicy, is_cuda_out_of_memory
 from .budget import thinking_budget_for_stage
-from .checkpoint import checkpoint_dir_name, write_checkpoint_manifest
+from .checkpoint import (
+    checkpoint_dir_name,
+    parse_checkpoint_step,
+    prune_checkpoints,
+    select_checkpoints_to_keep,
+    write_checkpoint_manifest,
+)
 from .config import Config
 from .evaluation import pass_at_1, select_eval_subset, subset_selector
 from .memory import MemoryReport
@@ -982,6 +988,10 @@ class Experiment:
         curriculum position. A resume therefore continues on the next batch
         boundary with the same size and the same stage pool, instead of
         rewinding the prompt list or training the first stage again.
+
+        After the manifest is written, older checkpoints beyond the retained
+        set are deleted. This only touches this run folder, never persistent
+        storage.
         """
         directory = self.store.checkpoints_dir / checkpoint_dir_name(step)
         self.generator.save_checkpoint(directory)
@@ -1008,6 +1018,15 @@ class Experiment:
             batch=batch,
             stage=stage,
         )
+        existing: list[int] = []
+        for child in self.store.checkpoints_dir.iterdir():
+            if not child.is_dir():
+                continue
+            parsed = parse_checkpoint_step(child.name)
+            if parsed is not None:
+                existing.append(parsed)
+        keep = select_checkpoints_to_keep([*existing, step])
+        prune_checkpoints(self.store.checkpoints_dir, keep)
 
     @staticmethod
     def _metric_row(

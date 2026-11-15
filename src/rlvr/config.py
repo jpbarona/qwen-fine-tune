@@ -14,10 +14,10 @@ Optional keys, with the defaults shown:
 
     [fake]  steps = 1
 
-    [run] eval_every_steps = 100
+    [run] eval_every_steps = 20
     [run] eval_questions   = 100
     [run] eval_subset_seed = 2026
-    [run] checkpoint_every_steps = 50
+    [run] checkpoint_every_steps = 20
     [run] eval_final_questions   = (unset: the whole pool)
 
     [training] generations_per_prompt = 8
@@ -96,12 +96,13 @@ __all__ = ["Config", "ConfigError", "default_config_path", "load_config"]
 #: Resource path of the config used when --config is not given.
 DEFAULT_CONFIG_RESOURCE = "resources/default_config.toml"
 
-#: Defaults for the optional [run] table. The spec's schedule is one checkpoint
-#: evaluation every 100 steps over 100 fixed questions.
-DEFAULT_EVAL_EVERY_STEPS = 100
+#: Defaults for the optional [run] table. One checkpoint and one checkpoint
+#: evaluation every 20 steps, so a collapse at step 22 still leaves a recent
+#: checkpoint to resume from. Ten checkpoints are kept per run folder.
+DEFAULT_EVAL_EVERY_STEPS = 20
 DEFAULT_EVAL_QUESTIONS = 100
 DEFAULT_EVAL_SUBSET_SEED = 2026
-DEFAULT_CHECKPOINT_EVERY_STEPS = 50
+DEFAULT_CHECKPOINT_EVERY_STEPS = 20
 
 #: Defaults for the optional [fake] table, used only by `--fake`.
 DEFAULT_STEPS = 1

@@ -6,6 +6,11 @@ optimizer state into that directory. A small `checkpoint.json` manifest records
 the step, arm, and timestamp so a resume can find the latest checkpoint without
 importing torch.
 
+The run folder keeps ten checkpoints: the newest five consecutive and older ones
+at doubling gaps, so an early collapse still has a checkpoint to resume from.
+`select_checkpoints_to_keep` picks them and `prune_checkpoints` deletes the
+rest. Retention only touches the run folder, never persistent storage.
+
 This module is pure Python. The real state dicts live in `qwen.py` and are the
 only part that needs torch.
 """
@@ -13,18 +18,23 @@ only part that needs torch.
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 __all__ = [
+    "DEFAULT_KEEP_RECENT",
+    "DEFAULT_KEEP_TOTAL",
     "MANIFEST_NAME",
     "Checkpoint",
     "CheckpointError",
     "checkpoint_dir_name",
     "find_latest_checkpoint",
     "parse_checkpoint_step",
+    "prune_checkpoints",
     "read_checkpoint_manifest",
+    "select_checkpoints_to_keep",
     "write_checkpoint_manifest",
 ]
 
@@ -32,6 +42,17 @@ MANIFEST_NAME = "checkpoint.json"
 
 #: Number of digits in a checkpoint directory name.
 _STEP_WIDTH = 8
+
+#: Retention: ten checkpoints, the newest five consecutive and older ones back
+#: at doubling gaps. One checkpoint is about 100 MB, so ten keep an early
+#: collapse recoverable without filling a 30 GB disk.
+DEFAULT_KEEP_RECENT = 5
+DEFAULT_KEEP_TOTAL = 10
+
+#: Cumulative positions back from the newest for the older retained
+#: checkpoints, doubling at 2, 4, 8, 16 and 32 beyond the newest block. The
+#: first skip of 6 counts the newest five plus one.
+_RETENTION_OFFSETS = (6, 10, 18, 34, 66)
 
 
 class CheckpointError(ValueError):
@@ -62,6 +83,74 @@ def parse_checkpoint_step(name: str) -> int | None:
         return None
     step = int(digits)
     return step if step >= 1 else None
+
+
+def select_checkpoints_to_keep(
+    steps: Sequence[int],
+    *,
+    recent: int = DEFAULT_KEEP_RECENT,
+    total: int = DEFAULT_KEEP_TOTAL,
+) -> list[int]:
+    """The step numbers to retain, oldest first.
+
+    The newest `recent` checkpoints stay. Older ones step back at doubling gaps
+    of 2, 4, 8, 16 and 32 positions from the newest, which is cumulative 6, 10,
+    18, 34 and 66. When the gaps run past the oldest checkpoint before `total`
+    is reached, the remaining slots take the oldest unkept checkpoints, working
+    forward, so a short run keeps a checkpoint near its start. A run with no
+    more than `total` checkpoints keeps all of them.
+    """
+    if isinstance(recent, bool) or recent < 1:
+        raise ValueError(f"recent must be at least 1, got {recent!r}")
+    if isinstance(total, bool) or total < 1:
+        raise ValueError(f"total must be at least 1, got {total!r}")
+    if recent > total:
+        raise ValueError(f"recent ({recent}) must not exceed total ({total})")
+
+    ordered = sorted({int(step) for step in steps})
+    if not ordered:
+        return []
+
+    keep = set(ordered[-recent:])
+    newest_index = len(ordered) - 1
+    for offset in _RETENTION_OFFSETS:
+        if len(keep) >= total:
+            break
+        index = newest_index - offset
+        if index < 0:
+            break
+        keep.add(ordered[index])
+
+    for step in ordered:
+        if len(keep) >= total:
+            break
+        keep.add(step)
+
+    return sorted(keep)
+
+
+def prune_checkpoints(directory: str | Path, keep: Sequence[int]) -> list[Path]:
+    """Delete `step-XXXXXXXX` directories whose step is not in `keep`.
+
+    Only directories named for a step are considered. Files, other directories
+    and symlinks are left alone, so README notes or a partial copy survive.
+    Returns the deleted paths, sorted by name. A missing directory is a no-op.
+    """
+    root = Path(directory)
+    if not root.is_dir():
+        return []
+
+    kept = {int(step) for step in keep}
+    deleted: list[Path] = []
+    for child in sorted(root.iterdir(), key=lambda path: path.name):
+        if child.is_symlink() or not child.is_dir():
+            continue
+        step = parse_checkpoint_step(child.name)
+        if step is None or step in kept:
+            continue
+        shutil.rmtree(child)
+        deleted.append(child)
+    return deleted
 
 
 def write_checkpoint_manifest(
