@@ -73,3 +73,4 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 67. README now states the mastery rule and the stage exit cost
 68. Dashboard GPU tiles now report GiB instead of thousands of MiB
 69. Dashboard now plots the share of the current stage solved
+70. A one minute stale window called live runs stopped
