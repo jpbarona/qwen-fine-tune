@@ -14,6 +14,7 @@ from rlvr.reward import (
     ARMS,
     CLOSE_REWARD,
     close_reward,
+    partial_reward,
     PENDING_ARMS,
     RewardError,
     all_tests_passed,
@@ -53,9 +54,9 @@ def test_code_score_is_the_fraction_of_tests_passed() -> None:
     assert code_score(4, 4) == 1.0
 
 
-def test_code_score_reward_is_the_fraction() -> None:
-    assert reward_code_score(tests_passed=2, tests_total=4) == 0.5
-    assert compose_reward("code-score", tests_passed=2, tests_total=4) == 0.5
+def test_code_score_reward_uses_the_partial_band() -> None:
+    assert reward_code_score(tests_passed=2, tests_total=4) == pytest.approx(0.60)
+    assert compose_reward("code-score", tests_passed=2, tests_total=4) == pytest.approx(0.60)
     assert compose_reward("code-score", tests_passed=4, tests_total=4) == 1.0
     assert compose_reward("code-score", tests_passed=0, tests_total=4) == 0.0
 
@@ -68,7 +69,7 @@ def test_code_score_reward_never_uses_a_judge() -> None:
             judge_score=1.0,
             process_score=1.0,
         )
-        == 0.5
+        == pytest.approx(0.45)
     )
 
 
@@ -78,7 +79,7 @@ def test_code_score_reward_never_uses_a_judge() -> None:
         # The plain test fraction.
         ({"tests_passed": 4, "tests_total": 4}, 1.0),
         ({"tests_passed": 3, "tests_total": 4}, 0.75),
-        ({"tests_passed": 1, "tests_total": 4}, 0.25),
+        ({"tests_passed": 1, "tests_total": 4}, 0.45),
         ({"tests_passed": 0, "tests_total": 4}, 0.0),
         # Fixed penalties for truncation and code that does not compile.
         ({"tests_passed": 0, "tests_total": 4, "truncated": True}, -1.0),
@@ -96,7 +97,7 @@ def test_code_score_reward_never_uses_a_judge() -> None:
         ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 1100}, 0.8),
         ({"tests_passed": 4, "tests_total": 4, "completion_tokens": 4096}, 0.8),
         # The term applies to the whole output, whatever the base score.
-        ({"tests_passed": 2, "tests_total": 4, "completion_tokens": 1100}, 0.3),
+        ({"tests_passed": 2, "tests_total": 4, "completion_tokens": 1100}, 0.4),
         ({"tests_passed": 0, "tests_total": 4, "completion_tokens": 1100}, -0.2),
         (
             {
@@ -181,13 +182,19 @@ def test_the_close_reward_only_applies_when_no_test_passed() -> None:
     ) == pytest.approx(0.225)
     assert reward_code_score(
         tests_passed=1, tests_total=4, closed=True
-    ) == pytest.approx(0.25)
+    ) == pytest.approx(0.45)
     assert reward_code_score(
         tests_passed=2, tests_total=4, closed=True
-    ) == pytest.approx(0.5)
+    ) == pytest.approx(0.60)
     assert reward_code_score(
         tests_passed=3, tests_total=4, closed=True
     ) == pytest.approx(0.75)
+
+
+def test_the_partial_band_on_the_real_three_test_tasks() -> None:
+    assert partial_reward(1, 3) == pytest.approx(0.45)
+    assert partial_reward(2, 3) == pytest.approx(0.75)
+    assert partial_reward(3, 3) == 1.0
 
 
 def test_every_test_count_scores_strictly_above_the_one_below_it() -> None:

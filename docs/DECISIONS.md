@@ -46,7 +46,7 @@ This is now decided, see D8.
 | Truncated at the cap | -1.0 |
 | No code parsed, or syntax error | -0.5 |
 | Compiles, tests fail | 0.0 |
-| Partial tests | passed / total, from 0 to 1 |
+| Partial tests | 0.45 at one test, rising to 0.75 just below a full pass |
 | All tests pass | 1.0 |
 | Length above 900 tokens | -0.001 per token above 900, floor -0.2 |
 
@@ -63,13 +63,13 @@ answer, at any length:
 - 0.8 is greater than 0.0, so this holds.
 
 Closing pays only when no test passed. The reward is 0.4, capped at 0.9 of one
-test, so with three tests it is 0.3 against 0.333 for one test. The order is
+test, so with three tests it is 0.3 against 0.45 for one test. The order is
 strict: zero tests is below one test is below two, up to a full pass. Closing
 does not touch a partial score, so a 3-of-4 answer stays 0.75 and a full pass
 keeps at least 0.8.
 
 Why partial credit carries the early training: a group of 8 all-zero rollouts
-gives zero advantage, so no penalty helps. Fraction of tests passed creates the
+gives zero advantage, so no penalty helps. Partial credit creates the
 variance that GRPO needs.
 
 ## D4. Curriculum stages

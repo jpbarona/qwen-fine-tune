@@ -417,7 +417,7 @@ switched provider cannot reuse the other one's scores.
 
 | Arm | Tests fail | Tests pass |
 |---|---|---|
-| `code-score` | fraction of tests passed | 1.0 |
+| `code-score` | 0.45 at one test, up to 0.75 | 1.0 |
 | `hybrid` | 0 | `0.5 + 0.5 * judge` |
 | `gated-judge` | 0 | `judge` |
 | `gated-process` | 0 | `0.5 * process + 0.5 * judge` |

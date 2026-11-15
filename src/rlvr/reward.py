@@ -9,9 +9,10 @@ The table comes from SPEC.md and is frozen:
 | gated-judge    | 0                        | judge                       |
 | gated-process  | 0                        | 0.5 * process + 0.5 * judge |
 
-The code arm now gives partial credit and penalties. Its base score is the
-fraction of tests passed, except that a truncated rollout scores -1.0 and a
-rollout whose code does not compile scores -0.5. A length term of 0.001 per
+The code arm now gives partial credit and penalties. Its base score runs from
+0.45 at one test to 0.75 just below a full pass, with 1.0 for a full pass,
+except that a truncated rollout scores -1.0 and a rollout whose code does not
+compile scores -0.5. A length term of 0.001 per
 completion token above 900 is subtracted from that base, capped at 0.2, so a
 perfect answer keeps at least 0.8. A rollout that passes no test but writes the
 closing reasoning marker gets up to 0.4, capped below one test's worth, so
@@ -44,7 +45,10 @@ __all__ = [
     "ARMS",
     "ArmNotImplemented",
     "CLOSE_REWARD",
+    "PARTIAL_REWARD_START",
+    "PARTIAL_REWARD_TOP",
     "close_reward",
+    "partial_reward",
     "DEFAULT_LENGTH_PENALTY_FLOOR",
     "DEFAULT_LENGTH_PENALTY_PER_TOKEN",
     "DEFAULT_LENGTH_SOFT_LIMIT",
@@ -82,6 +86,12 @@ CLOSE_REWARD = 0.4
 #: The close reward may never reach this share of one test. Keeps the ordering
 #: strict: no tests < one test < two tests < a full pass.
 CLOSE_REWARD_TEST_SHARE = 0.9
+
+#: Partial credit starts here at one test and tops out here just below a full
+#: pass. The first step from zero to one test is 0.45, far above the close
+#: reward, so solving beats closing by a clear margin.
+PARTIAL_REWARD_START = 0.45
+PARTIAL_REWARD_TOP = 0.75
 
 #: The code arm clips its sum to this range.
 MIN_REWARD = -1.0
@@ -183,6 +193,28 @@ def close_reward(tests_total: int) -> float:
     return min(CLOSE_REWARD, CLOSE_REWARD_TEST_SHARE / tests_total)
 
 
+def partial_reward(tests_passed: int, tests_total: int) -> float:
+    """The reward for a partial pass, from 0.45 to 0.75.
+
+    Zero tests scores 0, a full pass scores 1.0, and the partial band runs
+    `PARTIAL_REWARD_START` up to `PARTIAL_REWARD_TOP`. The top stays below the
+    0.8 floor of a full pass, so a partial answer can never outrank one. With
+    three tests the steps are 0, 0.45, 0.75, 1.0. With four they are 0, 0.45,
+    0.60, 0.75, 1.0.
+    """
+    _check_counts(tests_passed, tests_total)
+    if tests_total == 0:
+        raise RewardError("a rollout with zero tests has no partial reward")
+    if tests_passed == 0:
+        return 0.0
+    if tests_passed == tests_total:
+        return 1.0
+    if tests_total == 2:
+        return PARTIAL_REWARD_START
+    span = PARTIAL_REWARD_TOP - PARTIAL_REWARD_START
+    return PARTIAL_REWARD_START + span * (tests_passed - 1) / (tests_total - 2)
+
+
 def code_score(tests_passed: int, tests_total: int) -> float:
     """The fraction of the task tests that passed.
 
@@ -243,10 +275,12 @@ def reward_code_score(
         base = TRUNCATION_REWARD
     elif error_class == SYNTAX_ERROR_CLASS:
         base = SYNTAX_ERROR_REWARD
+    elif tests_passed == 0:
+        if tests_total == 0:
+            raise RewardError("a rollout with zero tests has no code score")
+        base = close_reward(tests_total) if closed else 0.0
     else:
-        base = code_score(tests_passed, tests_total)
-        if closed and tests_passed == 0:
-            base = close_reward(tests_total)
+        base = partial_reward(tests_passed, tests_total)
     penalty = _length_penalty(
         completion_tokens,
         soft_limit=length_soft_limit,
