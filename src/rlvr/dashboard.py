@@ -3,7 +3,7 @@
 The dashboard reads the same run folders the summary reads, but never fails on
 a run that is mid-write. It serves two resources:
 
-    GET /          a self-contained page with Tailwind and Chart.js
+    GET /          one HTML page with the React bundle inlined
     GET /data.json the JSON the page polls every five seconds
 
 The page is a monitoring tool, not a report. One section per arm, one KPI strip
@@ -15,9 +15,12 @@ chart. The per step memory split (live, cached, fragmented, device total,
 unaccounted) comes from the metrics rows the trainer writes, so the memory
 panel works on a machine with no GPU.
 
-The server binds to 127.0.0.1 and stops on Ctrl+C. Nothing here reads secrets,
-environment variables, or the network beyond the two CDN scripts the page
-fetches in the browser.
+The page is built from the Vite app in `dashboard/` and committed as a single
+HTML file in the `rlvr/web` package data. It fetches nothing from the network,
+so the dashboard works on a host with no internet access.
+
+The server binds to 127.0.0.1 and stops on Ctrl+C. Nothing here reads secrets
+or environment variables.
 """
 
 from __future__ import annotations
@@ -523,6 +526,14 @@ def _distributions(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def _metrics_age(metrics_path: Path, now: float) -> float | None:
+    """Seconds since the metrics file was last written, or None."""
+    try:
+        return round(now - metrics_path.stat().st_mtime, 1)
+    except OSError:
+        return None
+
+
 def _status(eval_payload: Mapping[str, Any], metrics_path: Path, now: float) -> str:
     if any(point.get("kind") == "final" for point in _raw_evaluations(eval_payload)):
         return "finished"
@@ -546,6 +557,7 @@ def _waiting_run(arm: str) -> dict[str, Any]:
         "started_utc": None,
         "elapsed_seconds": None,
         "status": "waiting",
+        "metrics_age_seconds": None,
         "steps_done": 0,
         "target_steps": None,
         "stage": None,
@@ -577,6 +589,7 @@ def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
         "started_utc": _started_label(timestamp),
         "elapsed_seconds": round(elapsed, 1) if elapsed is not None else None,
         "status": _status(eval_payload, run_dir / METRICS_NAME, now),
+        "metrics_age_seconds": _metrics_age(run_dir / METRICS_NAME, now),
         "steps_done": _steps_done(rows),
         "target_steps": _target_steps(meta),
         "stage": _string(rows[-1].get("stage")) if rows else None,
@@ -682,482 +695,41 @@ def _embed_json(data: Mapping[str, Any]) -> str:
     )
 
 
-_STYLE = """
-html { color-scheme: dark; }
-canvas { display: block; }
-.tnum { font-variant-numeric: tabular-nums; }
+WEB_DIR = Path(__file__).with_name("web")
+PAGE_NAME = "index.html"
+DATA_MARKER = "__RLVR_INITIAL_DATA__"
+
+_page_template: str | None = None
+
+_FALLBACK_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>RLVR</title></head>
+<body style="background:#08080a;color:#9a9aa3;font:12px ui-monospace,monospace;padding:24px">
+the dashboard bundle is missing. run `npm install && npm run build` in dashboard/
+</body>
+</html>
 """
 
-_SCRIPT = """\
-(function () {
-  "use strict";
-  var ACCENT = "#fbbf24";
-  var MUTED = "#a1a1aa";
-  var CACHED = "#60a5fa";
-  var FRAGMENTED = "#f87171";
-  var UNACCOUNTED = "#71717a";
-  var DATA = JSON.parse(document.getElementById("initial-data").textContent);
-  var charts = [];
-  var timer = null;
 
-  function esc(s) {
-    if (s === null || s === undefined) { return ""; }
-    return String(s).replace(/[&<>"']/g, function (c) {
-      if (c === "&") { return "&amp;"; }
-      if (c === "<") { return "&lt;"; }
-      if (c === ">") { return "&gt;"; }
-      if (c === '"') { return "&quot;"; }
-      return "&#39;";
-    });
-  }
-  function fmt(v, d) {
-    if (v === null || v === undefined) { return "-"; }
-    if (d === undefined) { d = 4; }
-    return Number(v).toFixed(d);
-  }
-  function gib(v) {
-    if (v === null || v === undefined) { return "-"; }
-    return (Number(v) / 1024).toFixed(1);
-  }
-  function fmtElapsed(sec) {
-    if (sec === null || sec === undefined) { return "-"; }
-    var total = Math.floor(sec);
-    var h = Math.floor(total / 3600);
-    var m = Math.floor((total % 3600) / 60);
-    var s = total % 60;
-    function pad(n) { return (n < 10 ? "0" : "") + n; }
-    if (h) { return h + "h " + pad(m) + "m " + pad(s) + "s"; }
-    if (m) { return m + "m " + pad(s) + "s"; }
-    return s + "s";
-  }
-  function xy(steps, values) {
-    var out = [];
-    for (var i = 0; i < steps.length; i++) {
-      if (steps[i] === null || steps[i] === undefined) { continue; }
-      out.push({ x: steps[i], y: (values[i] === undefined ? null : values[i]) });
-    }
-    return out;
-  }
-  function xyPresent(steps, values) {
-    var out = [];
-    for (var i = 0; i < steps.length; i++) {
-      if (steps[i] === null || steps[i] === undefined) { continue; }
-      var y = values[i];
-      if (y === null || y === undefined) { continue; }
-      out.push({ x: steps[i], y: y });
-    }
-    return out;
-  }
-  function pill(status) {
-    var map = {
-      running: "text-amber-300 border-amber-500/40",
-      finished: "text-emerald-300 border-emerald-500/40",
-      stopped: "text-red-300 border-red-500/40",
-      waiting: "text-zinc-400 border-zinc-600"
-    };
-    var cls = map[status] || "text-zinc-400 border-zinc-600";
-    return '<span class="inline-block px-2 py-0.5 border rounded text-[10px] uppercase tracking-wider ' +
-      cls + '">' + esc(status) + '</span>';
-  }
-  function kpi(label, value) {
-    return '<div class="bg-zinc-900 px-3 py-2">' +
-      '<div class="text-[10px] uppercase tracking-wider text-zinc-500">' + esc(label) + '</div>' +
-      '<div class="text-lg font-medium text-zinc-100 tnum">' + value + '</div>' +
-      '</div>';
-  }
-  function chartCard(id, label) {
-    return '<div class="border border-zinc-800 bg-zinc-900/40 p-3">' +
-      '<div class="text-[11px] uppercase tracking-wider text-zinc-500 mb-2">' + esc(label) + '</div>' +
-      '<div class="relative h-40"><canvas id="' + id + '"></canvas></div></div>';
-  }
-  function runHeader(run) {
-    var target = (run.target_steps === null || run.target_steps === undefined) ? "" : " / " + run.target_steps;
-    return '<div class="flex items-center justify-between flex-wrap gap-2 border-b border-zinc-800 pb-2 mb-3">' +
-      '<div class="flex items-baseline gap-2 min-w-0">' +
-        '<h2 class="text-sm font-semibold text-zinc-100">' + esc(run.arm) + '</h2>' +
-        '<span class="text-xs text-zinc-500 font-mono truncate">' + esc(run.run_name || "") + '</span>' +
-      '</div>' +
-      '<div class="flex items-center gap-3 text-xs text-zinc-500">' +
-        pill(run.status) +
-        '<span class="tnum">stage <span class="text-zinc-300">' + esc(run.stage || "-") + '</span></span>' +
-        '<span class="tnum">started ' + esc(run.started_utc || run.started || "-") + '</span>' +
-        '<span class="tnum">elapsed ' + fmtElapsed(run.elapsed_seconds) + '</span>' +
-        '<span class="tnum">steps ' + (run.steps_done || 0) + target + '</span>' +
-      '</div>' +
-      '</div>';
-  }
-  function evaluationTable(evals) {
-    var html = '<div class="mt-3 border border-zinc-800">';
-    html += '<div class="px-3 py-2 text-[11px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">evaluations</div>';
-    html += '<table class="w-full text-xs">';
-    html += '<thead><tr class="text-left text-zinc-500">' +
-      '<th class="px-3 py-1.5 font-normal">step</th>' +
-      '<th class="px-3 py-1.5 font-normal">kind</th>' +
-      '<th class="px-3 py-1.5 font-normal">stage</th>' +
-      '<th class="px-3 py-1.5 font-normal text-right">count</th>' +
-      '<th class="px-3 py-1.5 font-normal text-right">pass@1</th></tr></thead><tbody>';
-    if (!evals.length) {
-      html += '<tr><td colspan="5" class="px-3 py-2 text-zinc-500">no evaluation recorded</td></tr>';
-    } else {
-      for (var e = 0; e < evals.length; e++) {
-        var it = evals[e];
-        html += '<tr class="border-t border-zinc-800/60">' +
-          '<td class="px-3 py-1.5 tnum">' + (it.step === null || it.step === undefined ? "-" : it.step) + '</td>' +
-          '<td class="px-3 py-1.5">' + esc(it.kind || "") + '</td>' +
-          '<td class="px-3 py-1.5">' + esc(it.stage || "-") + '</td>' +
-          '<td class="px-3 py-1.5 text-right tnum">' + (it.count === null || it.count === undefined ? "-" : it.count) + '</td>' +
-          '<td class="px-3 py-1.5 text-right tnum">' + fmt(it.pass_at_1) + '</td></tr>';
-      }
-    }
-    html += '</tbody></table></div>';
-    return html;
-  }
-  function bandTable(bands) {
-    var html = '<div class="mt-3 border border-zinc-800">';
-    html += '<div class="px-3 py-2 text-[11px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">pass rate per band</div>';
-    html += '<table class="w-full text-xs">';
-    html += '<thead><tr class="text-left text-zinc-500">' +
-      '<th class="px-3 py-1.5 font-normal">band</th>' +
-      '<th class="px-3 py-1.5 font-normal text-right">rollouts</th>' +
-      '<th class="px-3 py-1.5 font-normal text-right">pass rate</th></tr></thead><tbody>';
-    if (!bands.length) {
-      html += '<tr><td colspan="3" class="px-3 py-2 text-zinc-500">no stage records</td></tr>';
-    } else {
-      for (var b = 0; b < bands.length; b++) {
-        var band = bands[b];
-        html += '<tr class="border-t border-zinc-800/60">' +
-          '<td class="px-3 py-1.5">' + esc(band.band || "") + '</td>' +
-          '<td class="px-3 py-1.5 text-right tnum">' + (band.rollouts === null || band.rollouts === undefined ? "-" : band.rollouts) + '</td>' +
-          '<td class="px-3 py-1.5 text-right tnum">' + fmt(band.pass_rate) + '</td></tr>';
-      }
-    }
-    html += '</tbody></table></div>';
-    return html;
-  }
-  function renderRun(run, i) {
-    var p = "r" + i;
-    var status = run.status || "waiting";
-    var latest = run.latest || {};
-    var evals = run.evaluations || [];
-    var lastEval = evals.length ? evals[evals.length - 1] : null;
-
-    var html = '<section class="mb-6">' + runHeader(run);
-    if (status === "waiting") {
-      html += '<div class="py-8 text-center text-sm text-zinc-500">waiting for a run</div></section>';
-      return html;
-    }
-
-    var cacheRate = "-";
-    if (latest.cache_hits !== null && latest.cache_hits !== undefined && latest.rollouts) {
-      cacheRate = (latest.cache_hits / latest.rollouts).toFixed(3);
-    }
-
-    html += '<div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-px bg-zinc-800 border border-zinc-800 mb-3">';
-    html += kpi("steps", (run.steps_done || 0) + (run.target_steps === null || run.target_steps === undefined ? "" : " / " + run.target_steps));
-    html += kpi("mean reward", fmt(latest.mean_reward));
-    html += kpi("pass rate", fmt(latest.pass_rate));
-    html += kpi("pass@1", lastEval ? fmt(lastEval.pass_at_1) : "-");
-    html += kpi("entropy", fmt(latest.mean_entropy));
-    html += kpi("comp len", fmt(latest.mean_completion_tokens, 1));
-    html += kpi("truncation", fmt(latest.truncation_rate));
-    html += kpi("cache hit rate", cacheRate);
-    html += '</div>';
-
-    // The batch is chosen per step from free memory. Prompts are prompt groups,
-    // sequences are the sampled completions across those groups.
-    var progress = run.stage_progress || {};
-    var stageDone = (progress.percent === null || progress.percent === undefined)
-      ? "-" : (progress.percent * 100).toFixed(0) + "%";
-
-    html += '<div class="grid grid-cols-3 gap-px bg-zinc-800 border border-zinc-800 mb-3">';
-    html += kpi("prompts per step", fmt(latest.prompts, 0));
-    html += kpi("sequences per step", fmt(latest.sequences, 0));
-    html += kpi("stage done", stageDone);
-    html += '</div>';
-
-    // The allocator split is separate from the nvidia-smi device sample above.
-    // Live, cache and fragmentation are the process view. The total is the
-    // device, and unaccounted is whatever the allocator does not hold.
-    html += '<div class="grid grid-cols-2 sm:grid-cols-5 gap-px bg-zinc-800 border border-zinc-800 mb-3">';
-    html += kpi("gpu live GiB", gib(latest.gpu_live_mib));
-    html += kpi("gpu cached GiB", gib(latest.gpu_cached_mib));
-    html += kpi("gpu fragmented GiB", gib(latest.gpu_fragmented_mib));
-    html += kpi("gpu unaccounted GiB", gib(latest.gpu_unaccounted_mib));
-    html += kpi("gpu total GiB", gib(latest.gpu_total_mib));
-    html += '</div>';
-
-    html += '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">';
-    html += chartCard(p + "-reward", "reward per step");
-    html += chartCard(p + "-pass", "pass rate per step");
-    html += chartCard(p + "-passat1", "pass@1");
-    html += chartCard(p + "-entropy", "entropy per step");
-    html += chartCard(p + "-length", "completion tokens per step");
-    html += chartCard(p + "-trunc", "truncation rate per step");
-    html += chartCard(p + "-batch", "prompts and sequences per step");
-    html += chartCard(p + "-stage", "stage completion per step (%)");
-    html += chartCard(p + "-mem", "gpu memory per step (GiB)");
-    html += chartCard(p + "-rewardhist", "reward distribution");
-    html += chartCard(p + "-testshist", "tests passed distribution");
-    html += '</div>';
-
-    html += bandTable(run.bands || []);
-    html += evaluationTable(evals);
-    html += '</section>';
-    return html;
-  }
-  function renderGpu(gpu) {
-    var cur = gpu.current;
-    var html = '<section class="mb-6">';
-    html += '<h2 class="text-sm font-semibold text-zinc-100 border-b border-zinc-800 pb-2 mb-3">system</h2>';
-    html += '<div class="grid grid-cols-2 sm:grid-cols-4 gap-px bg-zinc-800 border border-zinc-800 mb-3">';
-    html += kpi("gpu util", cur && cur.utilization !== null && cur.utilization !== undefined ? cur.utilization.toFixed(0) + "%" : "-");
-    html += kpi("gpu memory", cur && cur.memory_used !== null && cur.memory_used !== undefined ? (gib(cur.memory_used) + " GiB" + (cur.memory_total !== null && cur.memory_total !== undefined ? " / " + gib(cur.memory_total) + " GiB" : "")) : "-");
-    html += kpi("gpu temp", cur && cur.temperature !== null && cur.temperature !== undefined ? cur.temperature.toFixed(0) + " C" : "-");
-    html += kpi("samples", String((gpu.history || []).length));
-    html += '</div>';
-    if ((gpu.history || []).length) {
-      html += '<div class="grid grid-cols-1 gap-3">' + chartCard("gpu-chart", "gpu utilization and memory") + '</div>';
-    }
-    html += '</section>';
-    return html;
-  }
-  function render(data) {
-    charts.forEach(function (c) { try { c.destroy(); } catch (e) {} });
-    charts = [];
-    var app = document.getElementById("app");
-    var runs = data.runs || [];
-    var html = "";
-    if (!runs.length) {
-      html = '<div class="py-16 text-center text-sm text-zinc-500">waiting for a run</div>';
-    } else {
-      if (data.gpu && data.gpu.current) { html += renderGpu(data.gpu); }
-      for (var i = 0; i < runs.length; i++) { html += renderRun(runs[i], i); }
-    }
-    app.innerHTML = html;
-    if (!runs.length) {
-      document.getElementById("footer").innerHTML = "source -  |  refresh 5s";
-      return;
-    }
-    if (data.gpu && data.gpu.current && data.gpu.history && data.gpu.history.length) {
-      mountGpuChart(data.gpu);
-    }
-    for (var j = 0; j < runs.length; j++) {
-      if (runs[j].status !== "waiting") { mountRunCharts(runs[j], j); }
-    }
-    var sources = runs.map(function (r) { return esc(r.run_dir || ""); }).join("   ");
-    document.getElementById("footer").innerHTML = "source " + sources + "  |  refresh 5s";
-  }
-  function lineOpts() {
-    return {
-      responsive: true, maintainAspectRatio: false, animation: false,
-      interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: false }, tooltip: { backgroundColor: "#18181b", borderColor: "#3f3f46", borderWidth: 1 } },
-      scales: {
-        x: { type: "linear", grid: { color: "#27272a" }, ticks: { color: "#71717a", maxTicksLimit: 8, maxRotation: 0 } },
-        y: { grid: { color: "#27272a" }, ticks: { color: "#71717a" } }
-      }
-    };
-  }
-  function mount(id, cfg) {
-    var canvas = document.getElementById(id);
-    if (!canvas) { return; }
-    charts.push(new Chart(canvas, cfg));
-  }
-  function lineDs(color, data) {
-    return { data: data, borderColor: color, backgroundColor: color, borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: false };
-  }
-  function bar(id, labels, counts, color) {
-    mount(id, {
-      type: "bar",
-      data: { labels: labels, datasets: [{ data: counts, backgroundColor: color, borderWidth: 0 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: { legend: { display: false }, tooltip: { backgroundColor: "#18181b", borderColor: "#3f3f46", borderWidth: 1 } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: "#71717a", maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
-          y: { grid: { color: "#27272a" }, ticks: { color: "#71717a", precision: 0 }, beginAtZero: true }
-        }
-      }
-    });
-  }
-  function mountRunCharts(run, i) {
-    var p = "r" + i;
-    var s = run.series || {};
-    var steps = s.steps || [];
-    var d = function (color, values) { return lineDs(color, xy(steps, values || [])); };
-    mount(p + "-reward", { type: "line", data: { datasets: [d(ACCENT, s.mean_reward)] }, options: lineOpts() });
-    mount(p + "-pass", { type: "line", data: { datasets: [d(ACCENT, s.pass_rate)] }, options: lineOpts() });
-    mount(p + "-entropy", {
-      type: "line",
-      data: { datasets: [{
-        data: xyPresent(steps, s.mean_entropy || []),
-        borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5,
-        pointRadius: 2, pointBackgroundColor: ACCENT, tension: 0, spanGaps: false
-      }] },
-      options: lineOpts()
-    });
-    mount(p + "-length", { type: "line", data: { datasets: [d(ACCENT, s.mean_completion_tokens)] }, options: lineOpts() });
-    mount(p + "-trunc", { type: "line", data: { datasets: [d(ACCENT, s.truncation_rate)] }, options: lineOpts() });
-    mount(p + "-batch", {
-      type: "line",
-      data: { datasets: [
-        { label: "prompts", data: xy(steps, s.prompts || []), borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: false },
-        { label: "sequences", data: xy(steps, s.sequences || []), borderColor: MUTED, backgroundColor: MUTED, borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: false }
-      ] },
-      options: Object.assign(lineOpts(), { plugins: { legend: { display: true, labels: { color: "#a1a1aa", boxWidth: 10, boxHeight: 10 } } } })
-    });
-
-    var pg = (run.stage_progress && run.stage_progress.points) || [];
-    mount(p + "-stage", {
-      type: "line",
-      data: { datasets: [{
-        data: pg.map(function (point) { return { x: point.step, y: point.percent * 100 }; }),
-        borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5,
-        pointRadius: 2, pointBackgroundColor: ACCENT, tension: 0, spanGaps: false
-      }] },
-      options: Object.assign(lineOpts(), {
-        scales: {
-          x: { type: "linear", grid: { color: "#27272a" }, ticks: { color: "#71717a", maxTicksLimit: 8, maxRotation: 0 } },
-          y: { min: 0, max: 100, grid: { color: "#27272a" }, ticks: { color: "#71717a", callback: function (v) { return v + "%"; } } }
-        }
-      })
-    });
-
-    var memSeries = function (label, color, values) {
-      return {
-        label: label,
-        data: xyPresent(steps, (values || []).map(function (v) { return (v === null || v === undefined) ? null : v / 1024; })),
-        borderColor: color, backgroundColor: color, borderWidth: 1.5,
-        pointRadius: 0, tension: 0, spanGaps: false
-      };
-    };
-    mount(p + "-mem", {
-      type: "line",
-      data: { datasets: [
-        memSeries("live", ACCENT, s.gpu_live_mib),
-        memSeries("cached", CACHED, s.gpu_cached_mib),
-        memSeries("fragmented", FRAGMENTED, s.gpu_fragmented_mib),
-        memSeries("unaccounted", UNACCOUNTED, s.gpu_unaccounted_mib),
-        memSeries("device total", MUTED, s.gpu_total_mib)
-      ] },
-      options: Object.assign(lineOpts(), { plugins: { legend: { display: true, labels: { color: "#a1a1aa", boxWidth: 10, boxHeight: 10 } } } })
-    });
-
-    var pa = run.pass_at_1 || {};
-    var cp = pa.checkpoint || { steps: [], values: [] };
-    var fn = pa.final || { steps: [], values: [] };
-    mount(p + "-passat1", {
-      type: "line",
-      data: { datasets: [
-        { label: "checkpoint", data: xy(cp.steps || [], cp.values || []), borderColor: MUTED, backgroundColor: MUTED, borderWidth: 1.5, pointRadius: 2, pointBackgroundColor: MUTED, tension: 0, spanGaps: false },
-        { label: "final", data: xy(fn.steps || [], fn.values || []), borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5, pointRadius: 2, pointBackgroundColor: ACCENT, tension: 0, spanGaps: false }
-      ] },
-      options: Object.assign(lineOpts(), { plugins: { legend: { display: true, labels: { color: "#a1a1aa", boxWidth: 10, boxHeight: 10 } } } })
-    });
-
-    var dist = run.distributions || {};
-    if (dist.reward && dist.reward.bins) {
-      bar(p + "-rewardhist", dist.reward.bins.map(function (b) { return b.toFixed(2); }), dist.reward.counts, "#3f3f46");
-    }
-    if (dist.tests_passed && dist.tests_passed.bins) {
-      bar(p + "-testshist", dist.tests_passed.bins.map(function (b) { return String(b); }), dist.tests_passed.counts, "#3f3f46");
-    }
-  }
-  function mountGpuChart(gpu) {
-    var hist = gpu.history || [];
-    var t = hist.map(function (h) { return h.t; });
-    var util = hist.map(function (h) { return h.utilization; });
-    var mem = hist.map(function (h) { return h.memory_used; });
-    mount("gpu-chart", {
-      type: "line",
-      data: { datasets: [
-        { label: "utilization %", data: xy(t, util), borderColor: ACCENT, backgroundColor: ACCENT, borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: false, yAxisID: "y" },
-        { label: "memory GiB", data: xy(t, mem.map(function (v) { return v === null || v === undefined ? null : v / 1024; })), borderColor: MUTED, backgroundColor: MUTED, borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: false, yAxisID: "y1" }
-      ] },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: { legend: { display: true, labels: { color: "#a1a1aa", boxWidth: 10, boxHeight: 10 } }, tooltip: { backgroundColor: "#18181b", borderColor: "#3f3f46", borderWidth: 1 } },
-        scales: {
-          x: { type: "linear", grid: { color: "#27272a" }, ticks: { color: "#71717a", maxTicksLimit: 8, maxRotation: 0 } },
-          y: { position: "left", grid: { color: "#27272a" }, ticks: { color: "#71717a" } },
-          y1: { position: "right", grid: { drawOnChartArea: false }, ticks: { color: "#71717a" } }
-        }
-      }
-    });
-  }
-  function refresh() {
-    fetch("/data.json").then(function (r) { return r.json(); }).then(function (data) {
-      document.getElementById("updated").textContent = data.generated_at || "-";
-      render(data);
-    }).catch(function () {});
-  }
-  function start() { stop(); timer = setInterval(refresh, 5000); }
-  function stop() { if (timer) { clearInterval(timer); timer = null; } }
-  document.getElementById("autorefresh").addEventListener("change", function (e) {
-    if (e.target.checked) { refresh(); start(); } else { stop(); }
-  });
-
-  Chart.defaults.color = MUTED;
-  Chart.defaults.borderColor = "#27272a";
-  Chart.defaults.font.family = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-  Chart.defaults.font.size = 11;
-
-  render(DATA);
-  start();
-})();
-"""
+def _page_template_text() -> str:
+    """The built page, read once per process."""
+    global _page_template
+    if _page_template is None:
+        try:
+            _page_template = (WEB_DIR / PAGE_NAME).read_text(encoding="utf-8")
+        except OSError:
+            _page_template = _FALLBACK_PAGE
+    return _page_template
 
 
 def render_html(data: Mapping[str, Any]) -> str:
-    """The dashboard page shell. User strings ride in JSON and are rendered by
-    the browser, so nothing from a run folder becomes HTML markup here."""
-    generated = _string(data.get("generated_at")) or "-"
-    parts = [
-        "<!DOCTYPE html>",
-        '<html lang="en">',
-        "<head>",
-        '<meta charset="utf-8">',
-        '<meta name="viewport" content="width=device-width, initial-scale=1">',
-        "<title>RLVR dashboard</title>",
-        '<script src="https://cdn.tailwindcss.com"></script>',
-        "<script>",
-        "tailwind.config = {",
-        "  theme: {",
-        "    extend: {",
-        "      colors: { accent: '#fbbf24', muted: '#a1a1aa' },",
-        "    },",
-        "  },",
-        "};",
-        "</script>",
-        '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
-        f"<style>\n{_STYLE}</style>",
-        "</head>",
-        '<body class="bg-zinc-950 text-zinc-300 antialiased">',
-        '<header class="border-b border-zinc-800">',
-        '<div class="max-w-[1440px] mx-auto px-4 py-3 flex items-center justify-between gap-4">',
-        '<div class="flex items-baseline gap-3">',
-        '<span class="text-sm font-semibold text-zinc-100">RLVR</span>',
-        '<span class="text-xs text-zinc-500 uppercase tracking-wider">training monitor</span>',
-        "</div>",
-        '<div class="flex items-center gap-4 text-xs text-zinc-500">',
-        '<span class="tnum">updated <span id="updated">' + generated + "</span></span>",
-        '<label class="flex items-center gap-2">',
-        '<input type="checkbox" id="autorefresh" checked class="accent-amber-400">',
-        "<span>auto-refresh</span>",
-        "</label>",
-        "</div>",
-        "</div>",
-        "</header>",
-        '<main id="app" class="max-w-[1440px] mx-auto px-4 py-4"></main>',
-        '<footer id="footer" class="max-w-[1440px] mx-auto px-4 pb-6 text-xs text-zinc-600"></footer>',
-        '<script type="application/json" id="initial-data">' + _embed_json(data) + "</script>",
-        "<script>" + _SCRIPT + "</script>",
-        "</body>",
-        "</html>",
-        "",
-    ]
-    return "\n".join(parts)
+    """The built dashboard page with the first payload inlined.
+
+    User strings ride in JSON and are rendered by React as text, so nothing
+    from a run folder becomes HTML markup here. The JS bundle was inlined by
+    the build, so the page makes no network requests beyond `/data.json`.
+    """
+    return _page_template_text().replace(DATA_MARKER, _embed_json(data), 1)
 
 
 class _DashboardHandler(BaseHTTPRequestHandler):
