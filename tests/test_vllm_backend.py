@@ -210,16 +210,16 @@ def test_only_the_two_newest_adapters_stay_on_disk(tmp_path) -> None:
     assert len(engine.adapters) == 5
 
 
-def test_checkpoints_delegate_to_the_trainer(tmp_path) -> None:
+def test_checkpoints_delegate_to_the_trainer_and_resync(tmp_path) -> None:
     trainer = FakeTrainer()
-    generator = VLLMGenerator(
-        trainer=trainer, engine=FakeEngine(), adapter_dir=tmp_path
-    )
+    engine = FakeEngine()
+    generator = VLLMGenerator(trainer=trainer, engine=engine, adapter_dir=tmp_path)
 
     generator.save_checkpoint(tmp_path)
     generator.load_checkpoint(tmp_path)
 
     assert trainer.checkpoint_calls == [("save", tmp_path), ("load", tmp_path)]
+    assert len(engine.adapters) == 2
 
 
 def test_missing_vllm_package_is_a_usage_error_naming_vllm(
