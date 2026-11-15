@@ -40,11 +40,11 @@ def prompt(index: int):
 
 
 class FakeEngine:
-    """Records sampling calls and syncs. Returns one n-row group per prompt."""
+    """Records sampling calls and adapter handoffs."""
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
-        self.syncs: list[list[tuple[str, str]]] = []
+        self.adapters: list[str] = []
 
     def generate(self, prompt_token_ids, *, n, temperature, max_tokens):
         ids = [list(row) for row in prompt_token_ids]
@@ -61,8 +61,8 @@ class FakeEngine:
             for index in range(len(ids))
         ]
 
-    def sync(self, state_dict):
-        self.syncs.append([(name, value) for name, value in state_dict])
+    def set_adapter(self, path):
+        self.adapters.append(str(path))
 
     def close(self) -> None:
         pass
@@ -79,6 +79,8 @@ class FakeTrainer:
         self.built: list[dict] = []
         self.accumulated: list[tuple[str, int]] = []
         self.updates = 0
+        self.step = 0
+        self.adapter_saves: list[str] = []
         self.checkpoint_calls: list[tuple[str, object]] = []
 
     def encode_prompt(self, prompt):
@@ -116,9 +118,14 @@ class FakeTrainer:
 
     def apply_update(self) -> None:
         self.updates += 1
+        self.step += 1
 
-    def engine_state_dict(self):
-        return [("adapter.weight", "tensor")]
+    def save_lora_adapter(self, directory):
+        folder = Path(directory)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "adapter_model.safetensors").write_text("fake", encoding="utf-8")
+        self.adapter_saves.append(str(folder))
+        return folder
 
     def save_checkpoint(self, directory) -> None:
         self.checkpoint_calls.append(("save", directory))
@@ -127,9 +134,9 @@ class FakeTrainer:
         self.checkpoint_calls.append(("load", directory))
 
 
-def test_n_answers_per_prompt_stay_grouped_in_prompt_order() -> None:
+def test_n_answers_per_prompt_stay_grouped_in_prompt_order(tmp_path) -> None:
     engine, trainer = FakeEngine(), FakeTrainer()
-    generator = VLLMGenerator(trainer=trainer, engine=engine)
+    generator = VLLMGenerator(trainer=trainer, engine=engine, adapter_dir=tmp_path)
 
     batches = generator.generate_batch([prompt(0), prompt(1)], n=3, temperature=0.9)
 
@@ -147,42 +154,67 @@ def test_n_answers_per_prompt_stay_grouped_in_prompt_order() -> None:
     assert trainer.built[0]["cache"] is True
 
 
-def test_generate_single_prompt_is_one_group() -> None:
-    generator = VLLMGenerator(trainer=FakeTrainer(), engine=FakeEngine())
+def test_generate_single_prompt_is_one_group(tmp_path) -> None:
+    generator = VLLMGenerator(
+        trainer=FakeTrainer(), engine=FakeEngine(), adapter_dir=tmp_path
+    )
 
     group = generator.generate(prompt(0), n=2, temperature=0.9)
 
     assert [item.code for item in group] == ["p-0:0", "p-0:1"]
 
 
-def test_one_sync_per_optimizer_step_not_per_prompt() -> None:
+def test_one_adapter_handoff_per_optimizer_step_not_per_prompt(tmp_path) -> None:
     engine, trainer = FakeEngine(), FakeTrainer()
-    generator = VLLMGenerator(trainer=trainer, engine=engine)
+    generator = VLLMGenerator(trainer=trainer, engine=engine, adapter_dir=tmp_path)
 
     batches = generator.generate_batch([prompt(0), prompt(1)], n=2, temperature=0.9)
     for item, group in zip([prompt(0), prompt(1)], batches):
         generator.accumulate(item, group, [0.0, 1.0])
     generator.apply_update()
 
-    assert engine.syncs == [[("adapter.weight", "tensor")]]
+    assert len(engine.adapters) == 2
     assert trainer.updates == 1
     assert trainer.accumulated == [("p-0", 2), ("p-1", 2)]
 
 
-def test_second_update_syncs_again() -> None:
+def test_second_update_hands_over_again(tmp_path) -> None:
     engine, trainer = FakeEngine(), FakeTrainer()
-    generator = VLLMGenerator(trainer=trainer, engine=engine)
+    generator = VLLMGenerator(trainer=trainer, engine=engine, adapter_dir=tmp_path)
 
     generator.apply_update()
     generator.apply_update()
 
-    assert len(engine.syncs) == 2
+    assert len(engine.adapters) == 3
     assert trainer.updates == 2
+
+
+def test_the_initial_adapter_is_handed_to_the_engine(tmp_path) -> None:
+    engine, trainer = FakeEngine(), FakeTrainer()
+
+    VLLMGenerator(trainer=trainer, engine=engine, adapter_dir=tmp_path)
+
+    assert len(engine.adapters) == 1
+    assert (tmp_path / "step-00000000").is_dir()
+
+
+def test_only_the_two_newest_adapters_stay_on_disk(tmp_path) -> None:
+    engine, trainer = FakeEngine(), FakeTrainer()
+    generator = VLLMGenerator(trainer=trainer, engine=engine, adapter_dir=tmp_path)
+
+    for _ in range(4):
+        generator.apply_update()
+
+    folders = sorted(path.name for path in tmp_path.iterdir() if path.is_dir())
+    assert folders == ["step-00000003", "step-00000004"]
+    assert len(engine.adapters) == 5
 
 
 def test_checkpoints_delegate_to_the_trainer(tmp_path) -> None:
     trainer = FakeTrainer()
-    generator = VLLMGenerator(trainer=trainer, engine=FakeEngine())
+    generator = VLLMGenerator(
+        trainer=trainer, engine=FakeEngine(), adapter_dir=tmp_path
+    )
 
     generator.save_checkpoint(tmp_path)
     generator.load_checkpoint(tmp_path)
@@ -230,12 +262,10 @@ def test_engine_accepts_the_inference_engine_spelling(write_config) -> None:
     assert load_config(path).engine == "vllm"
 
 
-def test_shipped_real_config_uses_hf() -> None:
-    # vLLM stays opt-in on purpose: its weight copy is not proven yet, and the
-    # documented install does not include the package.
+def test_shipped_real_config_uses_vllm() -> None:
     path = Path(__file__).resolve().parents[1] / "configs" / "real.toml"
 
-    assert load_config(path).engine == "hf"
+    assert load_config(path).engine == "vllm"
 
 
 def test_the_engine_defaults_to_hf_when_the_key_is_absent() -> None:
@@ -244,9 +274,11 @@ def test_the_engine_defaults_to_hf_when_the_key_is_absent() -> None:
     assert config.engine == "hf"
 
 
-def test_sync_without_collective_rpc_raises_a_clear_error() -> None:
+def test_set_adapter_needs_an_engine_to_hand_the_adapter_to() -> None:
     engine = object.__new__(VLLMEngine)
     engine._llm = object()
+    engine._adapter_id = 0
+    engine._lora_request = None
 
-    with pytest.raises(RuntimeError, match="collective_rpc"):
-        engine.sync([("adapter.weight", "tensor")])
+    with pytest.raises(RuntimeError, match="llm_engine"):
+        engine.set_adapter("/tmp/adapter")

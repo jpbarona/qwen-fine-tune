@@ -178,10 +178,16 @@ adapter and does the update. The engine is optional: `[training] engine`
 defaults to `hf`, so the existing path is unchanged, and `vllm` is a startup
 error when the package is missing.
 
-Weight sync is the risk. One `sync` call per optimizer step sends the adapter
-weights to the engine through `collective_rpc`, never per prompt. A vLLM build
-without that hook raises instead of sampling from stale weights. Training still
-recomputes old logprobs on the training model, so engine logprobs are not used.
+Weight handoff uses LoRA, not a full model copy. After each optimizer step the
+trainer writes the PEFT adapter to disk and the engine gets a new `LoRARequest`
+with a fresh integer id, so it cannot keep serving the previous adapter. Only
+the two newest adapter folders stay on disk. One handoff per optimizer step,
+never per prompt. Training still recomputes old logprobs on the training model,
+so engine logprobs are not used.
+
+Status: the shipped real config uses `vllm`, with `vllm==0.10.1` pinned in the
+`vllm` extra. The path is unit tested with a fake engine. It has not yet been
+executed against a real vLLM engine on a GPU.
 
 ## D12. Thinking budget schedule
 

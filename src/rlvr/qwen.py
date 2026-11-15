@@ -1167,6 +1167,17 @@ class QwenGenerator:
             folder / OPTIMIZER_STATE_NAME,
         )
 
+    def save_lora_adapter(self, directory: str | Path) -> Path:
+        """Write just the LoRA adapter, for the vLLM engine to load."""
+        if not self.trainable:
+            raise RuntimeError(
+                "this generator was built without an adapter and has none to save"
+            )
+        folder = Path(directory)
+        folder.mkdir(parents=True, exist_ok=True)
+        self.model.save_pretrained(str(folder))
+        return folder
+
     def load_checkpoint(self, directory: str | Path) -> None:
         """Restore the adapter weights, optimizer state, and step number."""
         if not self.trainable:
