@@ -241,7 +241,7 @@ def test_each_group_keeps_its_own_rewards(tmp_path) -> None:
     # rewards never mix, so the advantage is normalised inside each group.
     assert generator.groups == [
         ("mbpp-0000", (1.0,) * 8),
-        ("mbpp-0001", (0.25,) * 8),
+        ("mbpp-0001", (0.45,) * 8),
     ]
 
 

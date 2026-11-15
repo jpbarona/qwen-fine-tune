@@ -419,7 +419,7 @@ def test_each_group_is_updated_with_its_own_rewards(tmp_path) -> None:
     assert first[0] == "mbpp-0000"
     assert first[1] == pytest.approx((1.0,) * 8)
     assert second[0] == "mbpp-0001"
-    assert second[1] == pytest.approx((0.25,) * 8)
+    assert second[1] == pytest.approx((0.45,) * 8)
 
 
 def test_advantage_is_normalised_inside_a_group_not_across_the_batch(

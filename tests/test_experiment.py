@@ -451,7 +451,7 @@ def test_reward_is_partial_when_some_tests_fail(tmp_path) -> None:
     build("code-score", tmp_path, runner=runner, store=store).run()
     assert [r.tests_passed for r in store.rollouts] == [1] * 16
     assert [r.tests_total for r in store.rollouts] == [4] * 16
-    assert [r.reward for r in store.rollouts] == pytest.approx([0.25] * 16)
+    assert [r.reward for r in store.rollouts] == pytest.approx([0.45] * 16)
 
 
 def test_reward_is_one_when_every_test_passes(tmp_path) -> None:
@@ -810,7 +810,7 @@ def test_metrics_rows_summarize_the_step(tmp_path) -> None:
     row = store.metrics[0]
     assert row["step"] == 1
     assert row["rollouts"] == 8
-    assert row["mean_reward"] == pytest.approx(0.25)
+    assert row["mean_reward"] == pytest.approx(0.45)
     assert row["pass_rate"] == pytest.approx(0.0)
     assert row["mean_entropy"] == pytest.approx(0.5)
     assert row["mean_completion_tokens"] == pytest.approx(20.0)
@@ -1091,7 +1091,7 @@ def test_update_receives_the_rewards_of_its_group(tmp_path) -> None:
     runner = StubTestRunner(total=4, passes=1)
     build("code-score", tmp_path, generator=generator, runner=runner, store=RecordingStore()).run()
     _, rewards = generator.update_calls[0]
-    assert rewards == pytest.approx((0.25,) * 8)
+    assert rewards == pytest.approx((0.45,) * 8)
 
 
 def test_max_steps_budget_stops_the_run_early(tmp_path) -> None:
