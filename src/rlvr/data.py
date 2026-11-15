@@ -79,8 +79,35 @@ NAMED_PROMPT_TEMPLATE = (
     "Return only the Python code for the function."
 )
 
-#: The first call in a test, for example `assert do_thing(1) == 2`.
-_ASSERT_CALL = re.compile(r"assert\s+([A-Za-z_]\w*)\s*\(")
+#: Keywords that can be followed by a bracket, for example `assert (`.
+_KEYWORDS = frozenset(
+    {
+        "assert", "if", "elif", "while", "for", "return", "not", "and", "or",
+        "in", "is", "lambda", "with", "except", "yield", "raise", "del",
+    }
+)
+
+#: Any call in a test, for example `do_thing(` in `assert do_thing(1) == 2`.
+_CALL = re.compile(r"([A-Za-z_]\w*)\s*\(")
+
+#: Names that can appear in a test but are rarely the function under test.
+_BUILTIN_NAMES = frozenset(
+    {
+        "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes",
+        "callable", "chr", "classmethod", "complex", "dict", "dir", "divmod",
+        "enumerate", "eval", "exec", "filter", "float", "format", "frozenset",
+        "getattr", "globals", "hasattr", "hash", "help", "hex", "id", "input",
+        "int", "isinstance", "issubclass", "iter", "len", "list", "locals",
+        "map", "max", "memoryview", "min", "next", "object", "oct", "open",
+        "ord", "pow", "print", "property", "range", "repr", "reversed", "round",
+        "set", "setattr", "slice", "sorted", "staticmethod", "str", "sum",
+        "super", "tuple", "type", "vars", "zip",
+        # Exceptions and assertion helpers a test may raise or call.
+        "AssertionError", "Exception", "ValueError", "TypeError",
+        "isclose", "assertEqual", "assertAlmostEqual", "assertRaises",
+        "assertTrue", "assertFalse",
+    }
+)
 
 
 class DatasetError(ValueError):
@@ -329,13 +356,45 @@ def prompt_id_for(question: MBPPQuestion) -> str:
 def expected_function_name(question: MBPPQuestion) -> str | None:
     """The function name the hidden tests call, or None when no test calls one.
 
-    Read from the first test only. Every committed MBPP row calls one function
-    across all of its tests, so the first test speaks for the whole task.
+    Every identifier used as a call in every test is collected. Builtins and
+    keywords are dropped, because a test for the area of a circle reads
+    `assert abs(circle_area(1) - 3.14) < 1e-9` and `abs` is not the answer. A
+    name followed by a dot is a module attribute and is dropped too. Names that
+    appear in every test win, so a helper called in one test cannot stand in for
+    the function under test.
     """
+    called: list[list[str]] = []
     for test in question.test_list:
-        match = _ASSERT_CALL.search(test)
-        if match:
-            return match.group(1)
+        names: list[str] = []
+        for match in _CALL.finditer(test):
+            name = match.group(1)
+            before = test[match.start() - 1] if match.start() else ""
+            if before == "." or name in _KEYWORDS:
+                continue
+            if name not in names:
+                names.append(name)
+        called.append(names)
+
+    if not called:
+        return None
+    if all(called):
+        common = [
+            name for name in called[0] if all(name in names for names in called[1:])
+        ]
+        if len(common) == 1:
+            return common[0]
+        for name in common:
+            if name not in _BUILTIN_NAMES:
+                return name
+        if common:
+            return common[0]
+    for names in called:
+        for name in names:
+            if name not in _BUILTIN_NAMES:
+                return name
+    for names in called:
+        if names:
+            return names[0]
     return None
 
 

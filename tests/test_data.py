@@ -20,6 +20,7 @@ from rlvr.data import (
     format_prompt,
     load_dataset,
     load_split,
+    prompt_id_for,
     prompt_for_question,
     prompts_for_questions,
     split_questions,
@@ -214,3 +215,150 @@ def test_almost_every_committed_question_prompt_names_its_function() -> None:
     assert len(named) >= 960
     for question in named:
         assert expected_function_name(question) in format_prompt(question)
+
+
+def test_name_skips_a_builtin_wrapped_around_the_real_call() -> None:
+    question = MBPPQuestion(
+        task_id=9005,
+        text="Write a python function to return the area of a circle.",
+        test_list=(
+            "assert abs(circle_area(1) - 3.141592653589793) < 1e-9",
+            "assert circle_area(0) == 0",
+            "assert abs(circle_area(2) - 12.566370614359172) < 1e-9",
+        ),
+    )
+    assert expected_function_name(question) == "circle_area"
+
+
+def test_name_keeps_a_builtin_when_the_tests_call_nothing_else() -> None:
+    question = MBPPQuestion(
+        task_id=9006,
+        text="Write a function to find the sum of common divisors.",
+        test_list=("assert sum(10, 15) == 6", "assert sum(100, 150) == 93"),
+    )
+    assert expected_function_name(question) == "sum"
+
+
+def test_name_ignores_a_helper_that_only_one_test_calls() -> None:
+    question = MBPPQuestion(
+        task_id=9007,
+        text="Write a function to do a thing.",
+        test_list=(
+            "assert do_thing(1) == 2",
+            "assert check(do_thing(3)) == 4",
+        ),
+    )
+    assert expected_function_name(question) == "do_thing"
+
+
+def test_name_ignores_a_module_attribute() -> None:
+    question = MBPPQuestion(
+        task_id=9008,
+        text="Write a function to do a thing.",
+        test_list=("assert math.isclose(do_thing(1), 2)", "assert do_thing(3) == 4"),
+    )
+    assert expected_function_name(question) == "do_thing"
+
+
+def test_every_committed_row_names_exactly_one_common_function() -> None:
+    """The cold check for the prompt contract, over every row we train on."""
+    from rlvr.cli import load_synthetic_rows
+
+    for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
+        name = expected_function_name(question)
+        assert name is not None, question.task_id
+        assert f"`{name}`" in format_prompt(question), question.task_id
+        # The same name must be called in every test of the row, otherwise the
+        # prompt names a helper and the task cannot pass.
+        for test in question.test_list:
+            assert name + "(" in test.replace(" ", ""), (question.task_id, test)
+
+
+#: Rows whose tests build an object the prompt never provides. Task 601 uses a
+#: `Pair` class in its tests and no setup code, so the model has to invent the
+#: class name and its attributes. Recorded so a new row like it fails the suite.
+KNOWN_MISSING_HELPERS = {601: {"Pair"}}
+
+
+def test_no_row_needs_a_helper_the_prompt_never_provides() -> None:
+    import builtins
+    import re as _re
+
+    from rlvr.cli import load_synthetic_rows
+
+    call = _re.compile(r"([A-Za-z_]\w*)\s*\(")
+    define = _re.compile(r"(?:def|class)\s+(\w+)")
+    missing: dict[int, set[str]] = {}
+    for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
+        name = expected_function_name(question)
+        provided = set(define.findall(question.test_setup_code or ""))
+        for test in question.test_list:
+            clean = _re.sub(r"(\"[^\"]*\"|'[^']*')", '""', test)
+            for match in call.finditer(clean):
+                called = match.group(1)
+                if clean[match.start() - 1 : match.start()] == ".":
+                    continue
+                if called in (name, "assert") or called in provided:
+                    continue
+                if hasattr(builtins, called):
+                    continue
+                missing.setdefault(question.task_id, set()).add(called)
+    assert missing == KNOWN_MISSING_HELPERS, missing
+
+
+def test_every_test_string_compiles() -> None:
+    """A test that does not compile can never pass, whatever the model writes."""
+    from rlvr.cli import load_synthetic_rows
+
+    for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
+        for index, test in enumerate(question.test_list):
+            try:
+                compile(test, f"test_{index}.py", "exec")
+            except SyntaxError as error:
+                raise AssertionError(
+                    f"task {question.task_id} test {index} does not compile: {error}"
+                ) from error
+
+
+#: Rows whose source data repeats an assertion. Harmless, but recorded so a new
+#: one is noticed.
+KNOWN_DUPLICATE_TESTS = {37, 337, 508, 713, 862}
+
+
+def test_no_row_has_blank_tests() -> None:
+    from rlvr.cli import load_synthetic_rows
+
+    for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
+        assert all(test.strip() for test in question.test_list), question.task_id
+
+
+def test_only_the_known_rows_repeat_a_test() -> None:
+    from rlvr.cli import load_synthetic_rows
+
+    repeated = set()
+    for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
+        tests = list(question.test_list)
+        if len(set(tests)) != len(tests):
+            repeated.add(question.task_id)
+    assert repeated == KNOWN_DUPLICATE_TESTS
+
+
+def test_the_prompt_never_carries_a_test_or_an_expected_value() -> None:
+    """The model sees the name, never the assertion it has to satisfy."""
+    from rlvr.cli import load_synthetic_rows
+
+    for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
+        prompt = format_prompt(question)
+        for test in question.test_list:
+            assert test.strip() not in prompt, question.task_id
+        assert "assert" not in prompt.lower(), question.task_id
+
+
+def test_prompt_ids_are_unique_across_both_sets() -> None:
+    from rlvr.cli import load_synthetic_rows
+
+    ids = [
+        prompt_id_for(question)
+        for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows())
+    ]
+    assert len(set(ids)) == len(ids)

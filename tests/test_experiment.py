@@ -1289,3 +1289,44 @@ def test_a_step_batches_judge_calls_per_kind(tmp_path) -> None:
     assert judge.process_batches == 2
     assert judge.output_batch_sizes == [8, 8]
     assert judge.process_batch_sizes == [8, 8]
+
+
+class OneFailRunner:
+    """Fails the first call for each prompt, passes every later one.
+
+    With eight generations a group gets seven passes. Under the old rule that
+    was enough to remove the prompt from its stage pool.
+    """
+
+    def __init__(self) -> None:
+        self.seen: dict[str, int] = {}
+
+    def run(self, prompt: Prompt, code: str) -> Outcome:
+        count = self.seen.get(prompt.prompt_id, 0)
+        self.seen[prompt.prompt_id] = count + 1
+        if count == 0:
+            return Outcome(tests_passed=0, tests_total=2, error_class="wrong_answer")
+        return Outcome(tests_passed=2, tests_total=2, error_class="pass")
+
+
+def test_a_prompt_is_solved_only_when_every_generation_passes(tmp_path) -> None:
+    experiment = build(
+        "code-score",
+        tmp_path,
+        generator=StubGenerator(),
+        runner=OneFailRunner(),
+    )
+    prompt = make_prompts(1)[0]
+    generations = experiment.generator.generate(prompt, n=8, temperature=0.9)
+    _records, _truncated, _prompt_truncated, _entropy, solved = experiment._prompt_group(
+        1, prompt, "very easy", generations, measure_entropy=False
+    )
+    assert solved is False
+
+    all_pass = build("code-score", tmp_path, generator=StubGenerator())
+    prompt = make_prompts(1)[0]
+    generations = all_pass.generator.generate(prompt, n=8, temperature=0.9)
+    _records, _truncated, _prompt_truncated, _entropy, solved = all_pass._prompt_group(
+        1, prompt, "very easy", generations, measure_entropy=False
+    )
+    assert solved is True
