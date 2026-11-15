@@ -15,7 +15,9 @@ failure tiers are flat and ordered: a truncated rollout scores -1.0, a rollout
 whose code does not compile scores -0.3, a rollout whose code raises while it
 runs scores 0.0, and a rollout that closes with no passing test scores 0.05. A
 length term of 0.001 per completion token above 900 is subtracted from answers
-that passed a test, capped at 0.2, so a perfect answer keeps at least 0.8. It
+that passed a test, capped at 0.2, so a perfect answer keeps at least 0.8. The
+term never carries an answer below the tier beneath it, so a long answer that
+passed more tests still pays more than a short answer that passed fewer. It
 does not touch the failure tiers, so a long clean failure cannot fall below a
 crash. The close payment buys termination, not proximity: at 0.05 it cannot be
 farmed by a crashing near miss, and one passing test still beats closing alone
@@ -106,6 +108,10 @@ PARTIAL_REWARD_TOP = 0.75
 #: The code arm clips its sum to this range.
 MIN_REWARD = -1.0
 MAX_REWARD = 1.0
+
+#: The length term may never carry an answer below the tier beneath it by more
+#: than this. It keeps "more tests pay more" strict at any length.
+TIER_EPSILON = 0.001
 
 #: The error class for code that does not compile. A rollout with no extracted
 #: code is reported this way by the runner, so there is no separate class.
@@ -296,17 +302,19 @@ def reward_code_score(
         base = close_reward(tests_total) if closed else 0.0
     else:
         base = partial_reward(tests_passed, tests_total)
-    penalty = (
-        _length_penalty(
+        penalty = _length_penalty(
             completion_tokens,
             soft_limit=length_soft_limit,
             per_token=length_penalty_per_token,
             floor=length_penalty_floor,
         )
-        if tests_passed > 0
-        else 0.0
-    )
-    return min(MAX_REWARD, max(MIN_REWARD, base - penalty))
+        lower = (
+            close_reward(tests_total)
+            if tests_passed == 1
+            else partial_reward(tests_passed - 1, tests_total)
+        )
+        base = max(base - penalty, lower + TIER_EPSILON)
+    return min(MAX_REWARD, max(MIN_REWARD, base))
 
 
 def reward_hybrid(
