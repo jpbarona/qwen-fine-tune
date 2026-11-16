@@ -99,4 +99,4 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 86. Proposed raising group size as the pool shrinks, not built
 87. nvidia-smi utilisation means busy, not saturated, at any batch size
 88. Each evaluation pauses training about ten minutes every twenty steps
-89. Run 18 reached step 140 with 63 of 66 prompts solved
+89. Very easy stage emptied at step 161, medium started with 448
