@@ -675,6 +675,7 @@ def test_dashboard_data_is_json_serializable(tmp_path) -> None:
         "pass_at_1",
         "evaluations",
         "distributions",
+        "questions",
     }
     assert expected <= set(run)
     assert decoded["generated_at"]
@@ -848,6 +849,108 @@ def test_stage_progress_is_blank_without_a_pool_size(tmp_path) -> None:
     html = render_html(data)
     assert "stage completion per step (%)" in html
     assert "stage done" in html
+
+
+def question_group(step: int, prompt_id: str, passes: int, error: str = "runtime_error") -> list[dict]:
+    """Eight rollouts of one prompt, `passes` of them fully passing three tests."""
+    return [
+        {
+            "step": step,
+            "stage": "very easy",
+            "prompt_id": prompt_id,
+            "tests_passed": 3 if index < passes else 0,
+            "tests_total": 3,
+            "error_class": None if index < passes else error,
+            "reward": 1.0 if index < passes else 0.0,
+        }
+        for index in range(8)
+    ]
+
+
+def test_questions_aggregate_per_prompt_and_only_full_pass_steps_are_solved(tmp_path) -> None:
+    rollouts = (
+        question_group(1, "solved", passes=8)
+        + question_group(1, "almost", passes=7)
+        + question_group(2, "almost", passes=7)
+        + question_group(1, "dead", passes=0)
+        + question_group(2, "late", passes=8, error="timeout")
+    )
+    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=rollouts)
+    questions = collect_dashboard([run_dir])["runs"][0]["questions"]
+
+    assert questions["total"] == 4
+    rows = {row["prompt_id"]: row for row in questions["rows"]}
+
+    assert rows["solved"]["solved"] is True
+    assert rows["solved"]["steps"] == 1
+    assert rows["solved"]["rollouts"] == 8
+    assert rows["solved"]["full_pass_steps"] == 1
+    assert rows["solved"]["pass_rate"] == pytest.approx(1.0)
+    assert rows["solved"]["best_passed"] == 3
+    assert rows["solved"]["best_total"] == 3
+    assert rows["solved"]["last_step"] == 1
+    assert rows["solved"]["last_error"] is None
+
+    # Seven of eight passing is not solved. Two steps sampled, no full pass.
+    assert rows["almost"]["solved"] is False
+    assert rows["almost"]["steps"] == 2
+    assert rows["almost"]["rollouts"] == 16
+    assert rows["almost"]["full_pass_steps"] == 0
+    assert rows["almost"]["pass_rate"] == pytest.approx(14 / 16)
+    assert rows["almost"]["last_step"] == 2
+
+    assert rows["dead"]["solved"] is False
+    assert rows["dead"]["full_pass_steps"] == 0
+    assert rows["dead"]["pass_rate"] == pytest.approx(0.0)
+    assert rows["dead"]["last_error"] == "runtime_error"
+
+    assert rows["late"]["solved"] is True
+    assert rows["late"]["last_step"] == 2
+    assert rows["late"]["last_error"] is None
+
+    # Zero-pass rows come first, so dead questions are easy to spot.
+    assert questions["rows"][0]["prompt_id"] in {"almost", "dead"}
+    assert questions["rows"][0]["full_pass_steps"] == 0
+
+
+def test_questions_report_prompt_text_when_a_question_file_is_present(tmp_path, monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "mbpp_full.jsonl").write_text(
+        json.dumps({"task_id": 269, "text": "Write a function to find the ascii value."}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(dashboard_module, "QUESTION_SOURCES", (("mbpp", "mbpp_full.jsonl"),))
+
+    rollouts = [
+        {
+            "step": 1,
+            "stage": "very easy",
+            "prompt_id": "mbpp-269",
+            "tests_passed": 3,
+            "tests_total": 3,
+            "reward": 1.0,
+        }
+    ] * 8
+    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=rollouts)
+    row = collect_dashboard([run_dir])["runs"][0]["questions"]["rows"][0]
+
+    assert row["text"] == "Write a function to find the ascii value."
+
+
+def test_questions_do_not_fail_when_a_question_file_is_absent(tmp_path, monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(dashboard_module, "QUESTION_SOURCES", (("mbpp", "missing.jsonl"),))
+    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=question_group(1, "mbpp-269", 8))
+    row = collect_dashboard([run_dir])["runs"][0]["questions"]["rows"][0]
+
+    assert row["prompt_id"] == "mbpp-269"
+    assert row["text"] is None
 
 
 def test_gpu_tiles_are_reported_in_gib_not_mib(tmp_path) -> None:

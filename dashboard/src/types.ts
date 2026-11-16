@@ -58,6 +58,26 @@ export interface Histogram {
   counts: number[]
 }
 
+export interface QuestionRow {
+  prompt_id: string
+  stage: string | null
+  steps: number
+  rollouts: number
+  full_pass_steps: number
+  pass_rate: number
+  best_passed: number | null
+  best_total: number | null
+  last_error: string | null
+  last_step: number | null
+  solved: boolean
+  text: string | null
+}
+
+export interface Questions {
+  total: number
+  rows: QuestionRow[]
+}
+
 export interface Run {
   arm: string
   run_name: string | null
@@ -76,6 +96,7 @@ export interface Run {
   pass_at_1: { checkpoint: PointSeries; final: PointSeries }
   evaluations: Evaluation[]
   distributions: { reward: Histogram; tests_passed: Histogram }
+  questions: Questions
   metrics_age_seconds: number | null
 }
 

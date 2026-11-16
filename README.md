@@ -207,6 +207,14 @@ length, truncation, and memory. Two things worth knowing:
   denominator is the band's starting pool from `meta.json`, so the line shows
   progress that does not move backwards.
 
+The questions tab lists every prompt the run sampled, one row each: steps,
+rollouts, full-pass steps, per-rollout pass rate, best result, last error, last
+step, and solved. It streams `rollouts.jsonl` once and keeps counters per
+prompt. Rows with no full pass come first and carry a `dead` marker. The sort
+and stage and solved filters run in the page. Prompt text is read from
+`data/mbpp_full.jsonl` and `data/synthetic_easy.jsonl` when those files are
+present, and the tab still works from prompt ids when they are missing.
+
 The page is a React and Tailwind app in `dashboard/`. The build is committed as
 `src/rlvr/web/index.html`, a single file with the bundle inlined, so serving it
 needs no network. Rebuild after changing the UI:
