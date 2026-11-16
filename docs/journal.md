@@ -97,3 +97,6 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 84. Dropped prompts leave the questions tab and keep their history
 85. Run status now comes from the process, not file age
 86. Proposed raising group size as the pool shrinks, not built
+87. nvidia-smi utilisation means busy, not saturated, at any batch size
+88. Each evaluation pauses training about ten minutes every twenty steps
+89. Run 18 reached step 140 with 63 of 66 prompts solved
