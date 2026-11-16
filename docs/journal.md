@@ -94,3 +94,6 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 81. Resumed run drops three never-passing prompts at step 121
 82. Dashboard now checks for a live process, not just file age
 83. Missing GPU readings render as a dash, never as zero
+84. Dropped prompts leave the questions tab and keep their history
+85. Run status now comes from the process, not file age
+86. Proposed raising group size as the pool shrinks, not built

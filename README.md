@@ -210,10 +210,20 @@ length, truncation, and memory. Two things worth knowing:
 The questions tab lists every prompt the run sampled, one row each: steps,
 rollouts, full-pass steps, per-rollout pass rate, best result, last error, last
 step, and solved. It streams `rollouts.jsonl` once and keeps counters per
-prompt. Rows with no full pass come first and carry a `dead` marker. The sort
-and stage and solved filters run in the page. Prompt text is read from
+prompt. Prompts with no full pass come first and stay red. The sort and stage
+and solved filters run in the page. Prompt text is read from
 `data/mbpp_full.jsonl` and `data/synthetic_easy.jsonl` when those files are
 present, and the tab still works from prompt ids when they are missing.
+
+Dropped prompts are hidden by default. The tab says how many were dropped and
+offers a control to show them, with the step they were dropped.
+
+Status comes from the process table, not only from file age. A live
+`rlvr run --arm <arm>` keeps the run `running` through a long evaluation. A run
+whose process is gone turns `stopped` after a two minute grace. A GPU reading
+that cannot be taken renders as `-`, never as zero, and the strip carries
+`last sample Ns ago` so a stalled sampler is visible. Progress counts prompt
+samples against the plan rather than steps against a starting batch size.
 
 The page is a React and Tailwind app in `dashboard/`. The build is committed as
 `src/rlvr/web/index.html`, a single file with the bundle inlined, so serving it
