@@ -218,13 +218,16 @@ Reason: while every rollout fails to close, every reward is identical and no
 shaping term can help. A short budget makes closing reachable and creates the
 variance the bonus needs.
 
-## D13. Checkpoint and eval every 20 steps
+## D13. Checkpoint every 10 steps, eval every 20
 
-Status: implemented. `configs/real.toml` and the defaults set 20 and 20. Ten
-checkpoints are kept per run, the five newest consecutive plus older ones at
-doubling gaps, so an early collapse still has a state to resume from.
+Status: implemented. `configs/real.toml` sets `checkpoint_every_steps = 10` and
+`eval_every_steps = 20`. Fifteen checkpoints are kept per run, the five newest
+consecutive plus older ones at doubling gaps, so an early collapse still has a
+state to resume from and a long plateau has more points to fall back to.
 
-Reason: the collapse arrived at step 22 and the first checkpoint was at 50.
+Reason: the collapse arrived at step 22 and the first checkpoint was at 50. The
+medium plateau on run `20261115T212843Z` showed that 20 steps between saves
+loses up to 40 minutes of work on a restart.
 
 ## D14. Docs live in docs/
 
@@ -256,6 +259,17 @@ only the identifier was wrong.
 Not in the prompt: test bodies, expected values, or the number of tests. The
 name alone is enough to fix the failure and does not let a model hardcode an
 answer.
+
+Arity wording: the prompt says the tests call the function with exactly N
+arguments, not that the function takes N. The wording names the tests as the
+source, so the model cannot read it as a claim about its own signature. One
+output rule follows: output only the function definition, no prose and no code
+fences.
+
+Reason: in 300 medium traces, 245 restated the arity phrase, 27 guessed a
+signature, 23 contradicted their own code, 61 debated the output format, and 29
+produced code that would not parse. The fix removes the ambiguity without
+changing the task.
 
 ## D16. A prompt is solved only when every rollout passes
 

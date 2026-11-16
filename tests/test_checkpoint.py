@@ -153,13 +153,13 @@ def test_select_keeps_every_checkpoint_when_under_the_total() -> None:
     assert select_checkpoints_to_keep([20, 40, 60]) == [20, 40, 60]
 
 
-def test_select_keeps_ten_of_forty_at_doubling_gaps() -> None:
+def test_select_keeps_fifteen_of_forty_at_doubling_gaps() -> None:
     steps = [20 * index for index in range(1, 41)]
     kept = select_checkpoints_to_keep(steps)
-    assert len(kept) == 10
-    # The five newest are consecutive. The four older rungs sit at index gaps
-    # 2, 4, 8 and 16, and the oldest checkpoint fills the last slot.
-    assert kept == [20, 120, 440, 600, 680, 720, 740, 760, 780, 800]
+    assert len(kept) == 15
+    # The five newest are consecutive. Older rungs sit at doubling gaps, and
+    # the oldest checkpoints fill the remaining slots.
+    assert kept == [20, 40, 60, 80, 100, 120, 140, 440, 600, 680, 720, 740, 760, 780, 800]
     assert kept[-5:] == [720, 740, 760, 780, 800]
 
 

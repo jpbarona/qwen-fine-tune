@@ -1181,7 +1181,7 @@ def test_a_save_prunes_to_the_retained_set(tmp_path) -> None:
         "[model]\nname = \"Qwen/Qwen3-0.6B\"\nrevision = \"r\"\n"
         "[judge]\nmodel = \"fake-judge-model\"\n"
         "[data]\nsplit_seed = 1\n"
-        "[fake]\nsteps = 11\n"
+        "[fake]\nsteps = 21\n"
         "[run]\ncheckpoint_every_steps = 1\n"
     )
     config = load_config(_write_config(tmp_path, config_text))
@@ -1198,10 +1198,10 @@ def test_a_save_prunes_to_the_retained_set(tmp_path) -> None:
     ).run()
 
     names = sorted(path.name for path in store.checkpoints_dir.iterdir())
-    assert len(names) == 10
-    assert names[-1] == "step-00000011"
-    # The selection keeps step 6 out, so the save deletes that directory.
-    assert "step-00000006" not in names
+    assert len(names) == 15
+    assert names[-1] == "step-00000021"
+    # The selection keeps step 12 out, so the save deletes that directory.
+    assert "step-00000012" not in names
     assert "step-00000001" in names
 
 

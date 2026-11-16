@@ -31,7 +31,7 @@ RTX A6000 with one command per arm.
 7. As a researcher, I want token entropy per rollout, so I can study entropy change.
 8. As a researcher, I want completion length per rollout, so I can study the length effect.
 9. As a researcher, I want per-test results, so I can classify failures.
-10. As a researcher, I want checkpoints every 20 steps, so a crash costs minutes.
+10. As a researcher, I want checkpoints every 10 steps, so a crash costs minutes.
 11. As a researcher, I want to resume from a checkpoint.
 12. As a researcher, I want a smoke mode, so I can validate a new GPU in minutes.
 13. As a researcher, I want budget guards on steps and judge calls.
