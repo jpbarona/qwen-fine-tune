@@ -46,6 +46,17 @@ EVAL_NAME = "eval.json"
 META_NAME = "meta.json"
 ROLLOUTS_NAME = "rollouts.jsonl"
 
+#: Question files that carry prompt text. They live in `data/` in the repo and
+#: are optional: the questions view works from prompt ids alone when they are
+#: missing.
+QUESTION_SOURCES: tuple[tuple[str, str], ...] = (
+    ("mbpp", "mbpp_full.jsonl"),
+    ("synthetic", "synthetic_easy.jsonl"),
+)
+
+#: Rollouts per prompt in a step when meta.json does not record the count.
+DEFAULT_ROLLOUTS_PER_PROMPT = 8
+
 #: A metrics file not touched in this many seconds counts as stopped, unless a
 #: final evaluation is already on disk. One step is a vLLM batch plus a test run
 #: per rollout, which took about a minute on the 3090 and longer on wide batches,
@@ -554,6 +565,181 @@ def _stage_progress(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _rollouts_per_prompt(meta: Mapping[str, Any]) -> int:
+    """The number of completions the trainer samples for one prompt in a step."""
+    trainer = meta.get("trainer")
+    if isinstance(trainer, Mapping):
+        count = _positive_int(trainer.get("generations_per_prompt"))
+        if count is not None:
+            return count
+    config = meta.get("config")
+    if isinstance(config, Mapping):
+        training = config.get("training")
+        if isinstance(training, Mapping):
+            count = _positive_int(training.get("generations_per_prompt"))
+            if count is not None:
+                return count
+    return DEFAULT_ROLLOUTS_PER_PROMPT
+
+
+def _question_text_files() -> list[tuple[str, Path]]:
+    """Candidate question files next to the repo or the working directory."""
+    roots: list[Path] = []
+    for root in (Path.cwd(), Path(__file__).resolve().parents[2]):
+        if root not in roots:
+            roots.append(root)
+    files: list[tuple[str, Path]] = []
+    for root in roots:
+        for prefix, name in QUESTION_SOURCES:
+            path = root / "data" / name
+            if path.is_file():
+                files.append((prefix, path))
+    return files
+
+
+def _question_texts(needed: set[str]) -> dict[str, str]:
+    """Prompt text for the given ids, or an empty map when files are absent.
+
+    The files are streamed one line at a time and only the text for a prompt the
+    run sampled is kept, so a large question file costs little memory.
+    """
+    if not needed:
+        return {}
+    texts: dict[str, str] = {}
+    for prefix, path in _question_text_files():
+        try:
+            handle = path.open("r", encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        with handle:
+            for line in handle:
+                if len(texts) == len(needed):
+                    break
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                prompt_id = _string(row.get("prompt_id"))
+                if prompt_id is None:
+                    task_id = _integer(row.get("task_id"))
+                    if task_id is not None:
+                        prompt_id = f"{prefix}-{task_id}"
+                if prompt_id is None or prompt_id not in needed:
+                    continue
+                text = _string(row.get("text"))
+                if text is not None:
+                    texts[prompt_id] = text
+    return texts
+
+
+def _questions(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
+    """One row per prompt, from a single streaming pass over rollouts.jsonl.
+
+    A prompt is solved when every rollout of it in a step passed, matching the
+    training pool rule. The step group is closed when the step number changes,
+    so memory holds counters, not rollout records.
+    """
+    expected = _rollouts_per_prompt(meta)
+    counters: dict[str, dict[str, Any]] = {}
+    group: dict[str, dict[str, int]] = {}
+    current_step: int | None = None
+
+    def close_group() -> None:
+        for prompt_id, outcome in group.items():
+            counter = counters.get(prompt_id)
+            if counter is None:
+                continue
+            counter["steps"] += 1
+            if outcome["count"] >= expected and outcome["passed"] == outcome["count"]:
+                counter["full_pass_steps"] += 1
+
+    for record in _all_rollout_records(run_dir / ROLLOUTS_NAME):
+        step = _integer(record.get("step"))
+        prompt_id = _string(record.get("prompt_id"))
+        if step is None or prompt_id is None:
+            continue
+        if step != current_step:
+            close_group()
+            group = {}
+            current_step = step
+
+        counter = counters.get(prompt_id)
+        if counter is None:
+            counter = {
+                "stage": None,
+                "steps": 0,
+                "rollouts": 0,
+                "passed_rollouts": 0,
+                "full_pass_steps": 0,
+                "best_passed": None,
+                "best_total": None,
+                "best_ratio": -1.0,
+                "last_error": None,
+                "last_step": None,
+            }
+            counters[prompt_id] = counter
+
+        stage = _string(record.get("stage"))
+        if stage is not None:
+            counter["stage"] = stage
+        counter["last_step"] = step
+        counter["rollouts"] += 1
+
+        passed = _integer(record.get("tests_passed"))
+        total = _integer(record.get("tests_total"))
+        full = passed is not None and total is not None and total > 0 and passed == total
+        if full:
+            counter["passed_rollouts"] += 1
+        if passed is not None and total is not None and total > 0:
+            ratio = passed / total
+            if ratio > counter["best_ratio"] or (
+                ratio == counter["best_ratio"] and passed > (counter["best_passed"] or -1)
+            ):
+                counter["best_ratio"] = ratio
+                counter["best_passed"] = passed
+                counter["best_total"] = total
+
+        error = _string(record.get("error_class"))
+        if error is not None:
+            counter["last_error"] = error
+
+        outcome = group.setdefault(prompt_id, {"count": 0, "passed": 0})
+        outcome["count"] += 1
+        if full:
+            outcome["passed"] += 1
+
+    close_group()
+
+    texts = _question_texts(set(counters))
+    rows: list[dict[str, Any]] = []
+    for prompt_id, counter in counters.items():
+        rollouts = counter["rollouts"]
+        pass_rate = counter["passed_rollouts"] / rollouts if rollouts else 0.0
+        rows.append(
+            {
+                "prompt_id": prompt_id,
+                "stage": counter["stage"],
+                "steps": counter["steps"],
+                "rollouts": rollouts,
+                "full_pass_steps": counter["full_pass_steps"],
+                "pass_rate": pass_rate,
+                "best_passed": counter["best_passed"],
+                "best_total": counter["best_total"],
+                "last_error": counter["last_error"],
+                "last_step": counter["last_step"],
+                "solved": counter["full_pass_steps"] > 0,
+                "text": texts.get(prompt_id),
+            }
+        )
+
+    rows.sort(key=lambda row: (row["solved"], row["pass_rate"], -row["rollouts"], row["prompt_id"]))
+    return {"total": len(rows), "rows": rows}
+
+
 def _distributions(run_dir: Path) -> dict[str, Any]:
     rewards: list[float] = []
     passed_counts: list[int] = []
@@ -612,6 +798,7 @@ def _waiting_run(arm: str) -> dict[str, Any]:
         "pass_at_1": {"checkpoint": {"steps": [], "values": []}, "final": {"steps": [], "values": []}},
         "evaluations": [],
         "distributions": {"reward": {"bins": [], "counts": []}, "tests_passed": {"bins": [], "counts": []}},
+        "questions": {"total": 0, "rows": []},
     }
 
 
@@ -644,6 +831,7 @@ def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
         "pass_at_1": _pass_at_1_series(eval_payload),
         "evaluations": _evaluations(eval_payload),
         "distributions": _distributions(run_dir),
+        "questions": _questions(run_dir, meta),
     }
 
 
