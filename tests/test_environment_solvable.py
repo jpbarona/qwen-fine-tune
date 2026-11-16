@@ -18,7 +18,7 @@ import subprocess
 
 import pytest
 
-from rlvr.data import expected_function_name, prompt_id_for
+from rlvr.data import expected_call_arity, expected_function_name, prompt_id_for
 from rlvr.docker_runner import DEFAULT_IMAGE, DockerTestRunner
 from rlvr.experiment import Prompt
 from rlvr.synthetic import load_synthetic_questions
@@ -81,3 +81,20 @@ def test_a_wrong_function_name_is_a_runtime_error(docker_ready) -> None:
     assert name != "not_the_name"
     assert outcome.error_class == "runtime_error"
     assert any("NameError" in item.detail for item in outcome.results)
+
+
+def test_a_replaced_test_list_is_the_one_that_scores(docker_ready) -> None:
+    """The control file's `tests` edit must reach the container, not just memory."""
+    question = load_synthetic_questions()[0].as_question()
+    runner = DockerTestRunner([question])
+    prompt = Prompt(prompt_id=prompt_id_for(question), problem=question.text)
+
+    source = load_synthetic_questions()[0].code
+    assert runner.run(prompt, source).error_class == "pass"
+
+    name = expected_function_name(question)
+    arity = expected_call_arity(question)
+    arguments = ", ".join(["0"] * arity)
+    runner.replace_tests(prompt_id_for(question), [f"assert {name}({arguments}) == 999"])
+    outcome = runner.run(prompt, source)
+    assert outcome.error_class == "wrong_answer"

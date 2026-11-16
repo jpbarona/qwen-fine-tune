@@ -35,8 +35,9 @@ import os
 import subprocess
 import tempfile
 import uuid
+from dataclasses import replace
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from .data import MBPPQuestion, prompt_id_for
 from .experiment import Outcome, Prompt, TestResult
@@ -227,6 +228,17 @@ class DockerTestRunner:
             if key in self._questions:
                 raise ValueError(f"duplicate question for prompt id {key!r}")
             self._questions[key] = question
+
+    def replace_tests(self, prompt_id: str, tests: Sequence[str]) -> None:
+        """Swap the hidden tests for one prompt, keeping everything else.
+
+        The control file calls this between steps. An unknown prompt id is
+        ignored so a stale control file cannot stop a run.
+        """
+        question = self._questions.get(prompt_id)
+        if question is None:
+            return
+        self._questions[prompt_id] = replace(question, test_list=tuple(tests))
 
     def run(self, prompt: Prompt, code: str) -> Outcome:
         """Run one candidate. Never raises for bad candidate code."""

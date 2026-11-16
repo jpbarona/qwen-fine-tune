@@ -29,6 +29,7 @@ from .schema import RolloutRecord
 __all__ = ["RunStore", "utc_timestamp"]
 
 META_NAME = "meta.json"
+CONTROL_EVENTS_NAME = "control-events.jsonl"
 METRICS_NAME = "metrics.jsonl"
 ROLLOUTS_NAME = "rollouts.jsonl"
 EVAL_NAME = "eval.json"
@@ -194,6 +195,10 @@ class RunStore:
         return self.run_dir / EVAL_NAME
 
     @property
+    def control_events_path(self) -> Path:
+        return self.run_dir / CONTROL_EVENTS_NAME
+
+    @property
     def checkpoints_dir(self) -> Path:
         return self.run_dir / CHECKPOINTS_NAME
 
@@ -210,6 +215,13 @@ class RunStore:
         self._append_line(
             self.metrics_path,
             json.dumps(dict(row), ensure_ascii=False, allow_nan=False),
+        )
+
+    def append_control_event(self, event: Mapping[str, Any]) -> None:
+        """Append one control-file event, so an edit is never silent."""
+        self._append_line(
+            self.control_events_path,
+            json.dumps(dict(event), ensure_ascii=False, allow_nan=False),
         )
 
     def write_eval(self, payload: Mapping[str, Any]) -> None:

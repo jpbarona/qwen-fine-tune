@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from . import repro
+from .control import ControlState, ControlWatcher
 from .batching import START_PROMPTS, BatchSizePolicy, is_cuda_out_of_memory
 from .budget import thinking_budget_for_stage
 from .checkpoint import (
@@ -315,6 +316,7 @@ class Experiment:
     store: Store
     prompts: Sequence[Prompt]
     stages: Sequence[Stage[Prompt]] = ()
+    control: ControlWatcher | None = None
     eval_prompts: Sequence[Prompt] = ()
     resume_step: int = 0
     prior_evaluations: Sequence[Mapping[str, Any]] = ()
@@ -428,6 +430,41 @@ class Experiment:
         }
 
         for step in range(self.resume_step + 1, effective_steps + 1):
+            if self.control is not None:
+                state = self.control.poll()
+                self._record_control(step, state)
+                dropped = [
+                    prompt for prompt in stage_pool if prompt.prompt_id in state.drop
+                ]
+                for prompt in dropped:
+                    if prompt in stage_pool:
+                        stage_pool.remove(prompt)
+                for prompt_id, tests in state.tests.items():
+                    replace = getattr(self.test_runner, "replace_tests", None)
+                    if replace is not None:
+                        replace(prompt_id, tests)
+                if staged and not stage_pool:
+                    next_index = self._first_open_stage(stage_index + 1)
+                    if next_index < len(self.stages):
+                        stage_index = next_index
+                        stage_pool = list(self.stages[next_index].train)
+                        stage_step = 0
+                    else:
+                        curriculum_done = True
+                        stop_reason = "curriculum_complete"
+                elif not staged and state.drop:
+                    remaining = [
+                        prompt
+                        for prompt in self.prompts
+                        if prompt.prompt_id not in state.drop
+                    ]
+                    if remaining:
+                        self.prompts = remaining
+                    else:
+                        stop_reason = "completed"
+                        break
+                if curriculum_done:
+                    break
             if staged:
                 active_stage = self.stages[stage_index].name
             thinking_budget = thinking_budget_for_stage(
@@ -619,6 +656,26 @@ class Experiment:
             },
             "checkpoint_dir": str(self.store.checkpoints_dir),
         }
+
+    def _record_control(self, step: int, state: ControlState) -> None:
+        """Write one event when the control file changes, never every step."""
+        fingerprint = (frozenset(state.drop), tuple(sorted(state.tests.items())), self.control.error)
+        if fingerprint == getattr(self, "_control_fingerprint", None):
+            return
+        self._control_fingerprint = fingerprint
+        if self.control.error is not None:
+            self.store.append_control_event(
+                {"step": step, "action": "error", "error": self.control.error}
+            )
+        if state.drop or state.tests:
+            self.store.append_control_event(
+                {
+                    "step": step,
+                    "action": "apply",
+                    "drop": sorted(state.drop),
+                    "tests": sorted(state.tests),
+                }
+            )
 
     def _check_arm(self) -> None:
         """Reject an unknown arm, and an arm that has no reward yet.
