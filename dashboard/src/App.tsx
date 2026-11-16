@@ -355,10 +355,10 @@ function RunSection({ run }: { run: Run }) {
   )
 }
 
-type SortMode = 'dead' | 'rate-asc' | 'rate-desc' | 'attempts' | 'last-step' | 'prompt'
+type SortMode = 'never-passed' | 'rate-asc' | 'rate-desc' | 'attempts' | 'last-step' | 'prompt'
 
 const SORT_LABELS: Record<SortMode, string> = {
-  dead: 'zero passes first',
+  'never-passed': 'zero passes first',
   'rate-asc': 'pass rate low to high',
   'rate-desc': 'pass rate high to low',
   attempts: 'attempts',
@@ -374,9 +374,9 @@ function sortQuestions(rows: QuestionRow[], sort: SortMode): QuestionRow[] {
     if (sort === 'attempts') return b.rollouts - a.rollouts || a.pass_rate - b.pass_rate
     if (sort === 'last-step') return (b.last_step ?? -1) - (a.last_step ?? -1) || a.pass_rate - b.pass_rate
     if (sort === 'prompt') return a.prompt_id.localeCompare(b.prompt_id)
-    const deadA = a.full_pass_steps === 0 ? 1 : 0
-    const deadB = b.full_pass_steps === 0 ? 1 : 0
-    return deadB - deadA || a.pass_rate - b.pass_rate || b.rollouts - a.rollouts
+    const noneA = a.full_pass_steps === 0 ? 1 : 0
+    const noneB = b.full_pass_steps === 0 ? 1 : 0
+    return noneB - noneA || a.pass_rate - b.pass_rate || b.rollouts - a.rollouts
   })
   return sorted
 }
@@ -406,12 +406,7 @@ function QuestionTable({ rows }: { rows: QuestionRow[] }) {
           {rows.map((row) => (
             <tr key={row.prompt_id} className="border-t border-white/[0.055] align-top">
               <td className="px-3 py-[5px]">
-                <div className="flex items-baseline gap-2">
-                  <span className="truncate font-mono text-[11px] text-[#d9d9de]">{row.prompt_id}</span>
-                  {row.full_pass_steps === 0 ? (
-                    <span className="shrink-0 text-[9.5px] uppercase tracking-[0.1em] text-[#c76b62]">dead</span>
-                  ) : null}
-                </div>
+                <div className="truncate font-mono text-[11px] text-[#d9d9de]">{row.prompt_id}</div>
                 {row.text ? (
                   <div className="truncate text-[10.5px] leading-[1.45] text-[#6b6b73]" title={row.text}>
                     {row.text}
@@ -467,7 +462,7 @@ function QuestionsSection({ run }: { run: Run }) {
   const questions = run.questions ?? { total: 0, rows: [] }
   const [stage, setStage] = useState('all')
   const [solved, setSolved] = useState('all')
-  const [sort, setSort] = useState<SortMode>('dead')
+  const [sort, setSort] = useState<SortMode>('never-passed')
   const [limit, setLimit] = useState(100)
 
   const stages = useMemo(() => {
@@ -489,7 +484,7 @@ function QuestionsSection({ run }: { run: Run }) {
   }, [questions.rows, stage, solved, sort])
 
   const visible = filtered.slice(0, limit)
-  const dead = questions.rows.filter((row) => row.full_pass_steps === 0).length
+  const neverPassed = questions.rows.filter((row) => row.full_pass_steps === 0).length
 
   const selectClass =
     'border border-white/[0.08] bg-[#0b0b0d] px-1.5 py-[3px] font-mono text-[10.5px] text-[#b9b9c0] outline-none focus:border-[#e9b153]/60'
@@ -501,7 +496,7 @@ function QuestionsSection({ run }: { run: Run }) {
       right={
         <>
           <span>{whole(questions.total)} prompts</span>
-          {dead ? <span style={{ color: '#c76b62' }}>{whole(dead)} never passed</span> : null}
+          {neverPassed ? <span style={{ color: '#c76b62' }}>{whole(neverPassed)} without a full pass</span> : null}
         </>
       }
     >

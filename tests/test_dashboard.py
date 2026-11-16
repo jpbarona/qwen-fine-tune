@@ -908,7 +908,7 @@ def test_questions_aggregate_per_prompt_and_only_full_pass_steps_are_solved(tmp_
     assert rows["late"]["last_step"] == 2
     assert rows["late"]["last_error"] is None
 
-    # Zero-pass rows come first, so dead questions are easy to spot.
+    # Rows with no full-pass step come first.
     assert questions["rows"][0]["prompt_id"] in {"almost", "dead"}
     assert questions["rows"][0]["full_pass_steps"] == 0
 
