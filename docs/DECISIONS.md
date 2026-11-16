@@ -326,3 +326,31 @@ Reason: with the name but not the arity, the model wrote `union_elements(one)`
 where the tests pass two tuples, and `topbottom_surfacearea(radius, height)`
 where the tests pass one number. Four prompts failed every rollout that way, and
 the stage pool ended up holding only them.
+
+## D19. A run can be edited in place through a control file
+
+Status: implemented. Each run folder gets `control.json`, created empty at
+startup:
+
+```json
+{"drop": ["mbpp-679"], "tests": {"mbpp-535": ["assert f(10) == 314.15"]}}
+```
+
+The loop reads it at the top of every step, re-reading only when the text
+changes. `drop` removes a prompt from the current stage pool. If the pool
+empties, the stage advances or the curriculum completes. `tests` replaces one
+prompt's test list from the next step. Unknown prompt ids are ignored, unknown
+keys and test lists that do not compile are rejected, and a broken file is
+logged as an `error` event while the previous state stays in force. Every
+change writes a line to `control-events.jsonl` with the step, so an edit is
+never silent.
+
+`--control PATH` points a run at a different file.
+
+Reason: every defect found so far was found mid-run, and the only way to act on
+it was to stop the run and throw away GPU hours. Three prompts that can never
+pass pinned the very easy stage with no way out.
+
+Caveat: a run with edits is still a run, but a prompt id can mean two different
+tasks before and after an edit. The event log records the step, so an analysis
+can split there. Drops are cleaner than test edits for that reason.

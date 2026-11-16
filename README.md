@@ -223,6 +223,25 @@ needs no network. Rebuild after changing the UI:
 cd dashboard && npm install && npm run build
 ```
 
+## Editing a run in place
+
+Each run folder holds `control.json`. Edit it while training runs and the change
+applies at the next step, no restart:
+
+```json
+{"drop": ["mbpp-679", "mbpp-536"],
+ "tests": {"mbpp-535": ["assert topbottom_surfacearea(10) == 314.15000000000003"]}}
+```
+
+- `drop` removes a prompt from the current stage pool. Rollouts already recorded
+  stay in the history. If the pool empties, the stage advances.
+- `tests` replaces the hidden tests for one prompt from the next step.
+- A bad key or a test that does not compile is rejected. The previous state
+  stays in force, and the error lands in `control-events.jsonl`.
+
+`--control PATH` uses a different file. The event log records the step of every
+change, so a prompt edited mid-run can be split out of an analysis.
+
 ## Curriculum
 
 Training runs band by band: very easy, medium, hard, very hard. Each band is

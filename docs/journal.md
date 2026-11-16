@@ -80,3 +80,6 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 74. Prompt now states how many arguments the first test passes
 75. Four prompts failed every rollout for a missing argument count
 76. Row 644 renamed to the lowercase function name the model writes
+77. A control file now edits a run between steps, no restart
+78. Drop removes a prompt from the pool and can advance the stage
+79. Test edits are logged by step so analysis can split the run

@@ -289,3 +289,17 @@ def test_a_real_mbpp_row_runs_every_test(docker_ready) -> None:
 def test_unknown_prompt_id_is_an_error(runner: DockerTestRunner) -> None:
     with pytest.raises(KeyError):
         runner.run(Prompt(prompt_id="mbpp-999999", problem="x"), "def f():\n    return 1\n")
+
+
+def test_replace_tests_swaps_the_list_for_one_prompt() -> None:
+    runner = DockerTestRunner([question("assert f() == 1")])
+    runner.replace_tests(PROMPT_ID, ["assert f() == 2"])
+    stored = runner._questions[PROMPT_ID]
+    assert stored.test_list == ("assert f() == 2",)
+    assert len(stored.test_list) == 1
+
+
+def test_replace_tests_ignores_an_unknown_prompt() -> None:
+    runner = DockerTestRunner([question("assert f() == 1")])
+    runner.replace_tests("not-here", ["assert f() == 2"])
+    assert list(runner._questions) == [PROMPT_ID]

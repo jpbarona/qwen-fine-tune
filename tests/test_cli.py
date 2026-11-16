@@ -195,6 +195,7 @@ def test_run_writes_the_four_files(config_path, tmp_path) -> None:
     run_dir = next((runs_root / "code-score").iterdir())
     assert sorted(p.name for p in run_dir.iterdir()) == [
         "checkpoints",
+        "control.json",
         "eval.json",
         "meta.json",
         "metrics.jsonl",
@@ -820,3 +821,35 @@ def test_build_test_runner_uses_fakes_or_docker(write_config) -> None:
         question.prompt_id for question in load_synthetic_questions()
     }
     assert synthetic_ids <= set(runner._questions)
+
+
+def test_the_run_creates_an_empty_control_file(config_path, tmp_path) -> None:
+    import json as _json
+
+    runs_root = tmp_path / "runs"
+    main(["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)])
+    run_dir = next((runs_root / "code-score").iterdir())
+    payload = _json.loads((run_dir / "control.json").read_text(encoding="utf-8"))
+    assert payload == {"drop": [], "tests": {}}
+
+
+def test_a_control_path_can_be_given(config_path, tmp_path) -> None:
+    import json as _json
+
+    runs_root = tmp_path / "runs"
+    control = tmp_path / "elsewhere" / "edit.json"
+    main(
+        [
+            "run",
+            "--arm",
+            "code-score",
+            "--fake",
+            "--config",
+            str(config_path),
+            "--runs-root",
+            str(runs_root),
+            "--control",
+            str(control),
+        ]
+    )
+    assert _json.loads(control.read_text(encoding="utf-8")) == {"drop": [], "tests": {}}

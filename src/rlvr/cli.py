@@ -35,6 +35,7 @@ from typing import Mapping, Sequence
 
 from .batching import START_PROMPTS, BatchSizePolicy
 from .config import Config, ConfigError, default_config_path, load_config
+from .control import CONTROL_NAME, ControlWatcher
 from .checkpoint import find_latest_checkpoint, read_checkpoint_manifest
 from .data import (
     TEST_SIZE,
@@ -218,6 +219,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("runs"),
         help="folder that holds run folders (default: ./runs)",
+    )
+    run.add_argument(
+        "--control",
+        type=Path,
+        default=None,
+        help="control file read between steps (default: <run folder>/control.json)",
     )
     run.add_argument(
         "--resume",
@@ -604,6 +611,13 @@ def run_command(args: argparse.Namespace) -> int:
 
     test_runner = build_test_runner(config, fake=args.fake)
 
+    control_path = args.control if args.control is not None else store.run_dir / CONTROL_NAME
+    control = ControlWatcher(control_path)
+    try:
+        control.ensure_file()
+    except OSError as error:
+        raise UsageError(f"cannot create the control file: {error}") from error
+
     experiment = Experiment(
         arm=args.arm,
         config=config,
@@ -623,6 +637,7 @@ def run_command(args: argparse.Namespace) -> int:
         resume_stage_step=resume_stage_step,
         resume_stage_pool=resume_stage_pool,
         batch_policy=batch_policy,
+        control=control,
     )
     summary = experiment.run()
 
