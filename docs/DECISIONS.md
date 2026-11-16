@@ -354,3 +354,38 @@ pass pinned the very easy stage with no way out.
 Caveat: a run with edits is still a run, but a prompt id can mean two different
 tasks before and after an edit. The event log records the step, so an analysis
 can split there. Drops are cleaner than test edits for that reason.
+
+## D20. The dashboard reports what it can prove
+
+Status: implemented. Three rules, after the resume that died and left the page
+claiming RUNNING with a zeroed GPU strip:
+
+- Status comes from the process table. A live `rlvr run --arm <arm>` keeps the
+  run `running` through a long evaluation. A missing process turns it `stopped`
+  after a two minute grace. If the process table cannot be read, the old
+  metrics-age rule is the fallback.
+- A missing GPU reading is `-`, never `0%`. The strip shows `last sample Ns ago`
+  and a sample where every field is unreadable is not recorded at all. Zero
+  stays zero, so an idle GPU is still visible as idle.
+- Dropped prompts leave the questions tab, keeping their history behind a
+  "show dropped" control, and stage completion subtracts them.
+
+Reason: an idle GPU and a broken sampler look the same if zero is the fallback,
+and a dead trainer looked alive for fifteen minutes.
+
+## D21. Proposed: raise generations per prompt when the pool is small
+
+Status: proposed, not implemented. With three prompts left, a step is 24
+sequences and the card is idle. The proposal is a floor of 8 generations per
+prompt that rises as the pool shrinks, up to a cap (32 is the suggestion), so a
+step keeps roughly constant work.
+
+Why it is worth doing: group size is what the GRPO baseline is computed from, so
+a larger group lowers gradient variance, not just idle time.
+
+The catch is the mastery rule in D16. If solved means every rollout passed,
+raising `n` to 32 makes retirement far less likely and the stage stalls again, a
+failure already seen twice. The workable version keeps the rule by judging the
+first 8 rollouts and letting the extra generations feed only the advantage.
+
+Not decided, not built.
