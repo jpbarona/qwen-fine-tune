@@ -1002,3 +1002,107 @@ def test_an_abandoned_run_is_stopped(tmp_path) -> None:
 
     data = collect_dashboard([run_dir])
     assert data["runs"][0]["status"] == "stopped"
+
+
+def write_control(run_dir: Path, drop: list[str], events: list[dict] | None = None) -> None:
+    (run_dir / "control.json").write_text(
+        json.dumps({"drop": drop, "tests": {}}), encoding="utf-8"
+    )
+    if events is not None:
+        (run_dir / "control-events.jsonl").write_text(
+            "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8"
+        )
+
+
+def test_control_drops_report_the_ids_and_the_step_they_were_applied(tmp_path) -> None:
+    rollouts = (
+        question_group(1, "kept", passes=8)
+        + question_group(1, "mbpp-679", passes=8)
+        + question_group(1, "mbpp-535", passes=0)
+    )
+    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=rollouts)
+    write_control(
+        run_dir,
+        ["mbpp-679", "mbpp-535"],
+        [
+            {"step": 12, "action": "apply", "drop": ["mbpp-679"], "tests": []},
+            {"step": 14, "action": "apply", "drop": ["mbpp-535"], "tests": []},
+        ],
+    )
+
+    run = collect_dashboard([run_dir])["runs"][0]
+    dropped = run["dropped"]
+
+    assert dropped["ids"] == ["mbpp-535", "mbpp-679"]
+    assert dropped["events"] == [
+        {"step": 12, "prompt_ids": ["mbpp-679"]},
+        {"step": 14, "prompt_ids": ["mbpp-535"]},
+    ]
+    assert dropped["steps"] == {"mbpp-535": 14, "mbpp-679": 12}
+
+    rows = {row["prompt_id"]: row for row in run["questions"]["rows"]}
+    assert rows["mbpp-679"]["dropped"] is True
+    assert rows["mbpp-679"]["dropped_step"] == 12
+    # The prompt passed every rollout before it was dropped. That is solved,
+    # then dropped, not a failure.
+    assert rows["mbpp-679"]["solved"] is True
+    assert rows["mbpp-535"]["dropped"] is True
+    assert rows["mbpp-535"]["solved"] is False
+    assert rows["kept"]["dropped"] is False
+    assert rows["kept"]["dropped_step"] is None
+
+
+def test_a_drop_stays_in_force_after_it_leaves_the_control_file(tmp_path) -> None:
+    """The loop applies a drop to the pool. Editing the file cannot undo it."""
+    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=question_group(1, "mbpp-679", 8))
+    write_control(
+        run_dir,
+        [],
+        [{"step": 12, "action": "apply", "drop": ["mbpp-679"], "tests": []}],
+    )
+
+    dropped = collect_dashboard([run_dir])["runs"][0]["dropped"]
+
+    assert dropped["ids"] == ["mbpp-679"]
+    assert dropped["steps"] == {"mbpp-679": 12}
+
+
+def test_missing_control_files_drop_nothing(tmp_path) -> None:
+    rollouts = question_group(1, "mbpp-269", 8)
+    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=rollouts)
+    assert not (run_dir / "control.json").exists()
+    assert not (run_dir / "control-events.jsonl").exists()
+
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["dropped"] == {"ids": [], "events": [], "steps": {}}
+    assert all(row["dropped"] is False for row in run["questions"]["rows"])
+    assert all(row["dropped_step"] is None for row in run["questions"]["rows"])
+
+
+def test_a_control_file_without_events_marks_the_prompt_without_a_step(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=question_group(1, "mbpp-679", 8))
+    write_control(run_dir, ["mbpp-679"])
+
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["dropped"]["ids"] == ["mbpp-679"]
+    assert run["dropped"]["events"] == []
+    assert run["dropped"]["steps"] == {}
+    assert run["questions"]["rows"][0]["dropped"] is True
+    assert run["questions"]["rows"][0]["dropped_step"] is None
+
+
+def test_the_page_has_the_dropped_wording(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=question_group(1, "mbpp-679", 8))
+    write_control(
+        run_dir,
+        ["mbpp-679"],
+        [{"step": 12, "action": "apply", "drop": ["mbpp-679"], "tests": []}],
+    )
+    html = render_html(collect_dashboard([run_dir]))
+
+    assert "show dropped (" in html
+    assert "hide dropped (" in html
+    assert "solved, then dropped" in html
+    assert " at step " in html

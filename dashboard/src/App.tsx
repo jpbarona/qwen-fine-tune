@@ -407,6 +407,12 @@ function QuestionTable({ rows }: { rows: QuestionRow[] }) {
             <tr key={row.prompt_id} className="border-t border-white/[0.055] align-top">
               <td className="px-3 py-[5px]">
                 <div className="truncate font-mono text-[11px] text-[#d9d9de]">{row.prompt_id}</div>
+                {row.dropped ? (
+                  <div className="truncate font-mono text-[10px] uppercase tracking-[0.08em] text-[#8b8b94]">
+                    {row.solved ? 'solved, then dropped' : 'dropped'}
+                    {row.dropped_step !== null ? ` at step ${row.dropped_step}` : ''}
+                  </div>
+                ) : null}
                 {row.text ? (
                   <div className="truncate text-[10.5px] leading-[1.45] text-[#6b6b73]" title={row.text}>
                     {row.text}
@@ -464,6 +470,10 @@ function QuestionsSection({ run }: { run: Run }) {
   const [solved, setSolved] = useState('all')
   const [sort, setSort] = useState<SortMode>('never-passed')
   const [limit, setLimit] = useState(100)
+  const [showDropped, setShowDropped] = useState(false)
+
+  const activeRows = useMemo(() => questions.rows.filter((row) => !row.dropped), [questions.rows])
+  const droppedIds = run.dropped?.ids ?? []
 
   const stages = useMemo(() => {
     const found: string[] = []
@@ -474,17 +484,17 @@ function QuestionsSection({ run }: { run: Run }) {
   }, [questions.rows])
 
   const filtered = useMemo(() => {
-    const matches = questions.rows.filter((row) => {
+    const matches = (showDropped ? questions.rows : activeRows).filter((row) => {
       if (stage !== 'all' && row.stage !== stage) return false
       if (solved === 'solved') return row.solved
       if (solved === 'unsolved') return !row.solved
       return true
     })
     return sortQuestions(matches, sort)
-  }, [questions.rows, stage, solved, sort])
+  }, [questions.rows, activeRows, showDropped, stage, solved, sort])
 
   const visible = filtered.slice(0, limit)
-  const neverPassed = questions.rows.filter((row) => row.full_pass_steps === 0).length
+  const neverPassed = activeRows.filter((row) => row.full_pass_steps === 0).length
 
   const selectClass =
     'border border-white/[0.08] bg-[#0b0b0d] px-1.5 py-[3px] font-mono text-[10.5px] text-[#b9b9c0] outline-none focus:border-[#e9b153]/60'
@@ -495,7 +505,8 @@ function QuestionsSection({ run }: { run: Run }) {
       flush
       right={
         <>
-          <span>{whole(questions.total)} prompts</span>
+          <span>{whole(activeRows.length)} prompts</span>
+          {droppedIds.length ? <span>{whole(droppedIds.length)} dropped</span> : null}
           {neverPassed ? <span style={{ color: '#c76b62' }}>{whole(neverPassed)} without a full pass</span> : null}
         </>
       }
@@ -530,6 +541,16 @@ function QuestionsSection({ run }: { run: Run }) {
             ))}
           </select>
         </label>
+        {droppedIds.length ? (
+          <button
+            type="button"
+            onClick={() => setShowDropped(!showDropped)}
+            aria-pressed={showDropped}
+            className="border border-white/[0.08] px-1.5 py-[3px] font-mono text-[10.5px] uppercase tracking-[0.08em] text-[#8b8b94] transition-colors hover:text-[#e7e7ea]"
+          >
+            {showDropped ? `hide dropped (${droppedIds.length})` : `show dropped (${droppedIds.length})`}
+          </button>
+        ) : null}
         <span className="ml-auto font-mono text-[10.5px] tabular-nums text-[#55555d]">
           showing {whole(visible.length)} of {whole(filtered.length)} filtered
         </span>
