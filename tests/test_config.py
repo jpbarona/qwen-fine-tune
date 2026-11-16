@@ -366,7 +366,7 @@ def test_the_shipped_real_config_loads() -> None:
     assert config.max_completion_tokens == 2048
     assert config.entropy_every_steps == 500
     assert config.lora_rank == 32 and config.lora_alpha == 64
-    assert config.checkpoint_every_steps == 20
+    assert config.checkpoint_every_steps == 10
     assert config.eval_every_steps == 20
     assert config.length_soft_limit == 900
     assert config.length_penalty_per_token == pytest.approx(0.001)

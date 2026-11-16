@@ -8,7 +8,7 @@
 - Judge: OpenCode Go OpenAI-compatible endpoint, `deepseek-v4.1-flash`, normal reasoning effort, temperature 0, JSON output, 32 concurrent, retries with backoff, content-hash cache. Output judge sees problem and code only. Process judge sees problem and trace only. Neither sees tests.
 - Execution: Docker per rollout, no network, non-root, read-only mount, 5 second timeout, no secrets in the container. Record per-test results and an error class.
 - Logging: one JSONL record per rollout with arm, step, prompt id, reasoning, code, token counts, mean token entropy, tests passed, tests total, error class, code score, judge score, process score, reward, cache hit.
-- Run layout `runs/<arm>/<timestamp>/` with `metrics.jsonl`, `rollouts.jsonl`, `eval.json`, `checkpoints/`, `meta.json`. Checkpoints every 20 steps with resume, ten kept per run. Evaluation every 20 steps on 100 fixed test questions, final pass@1 on all 250. pass@8 out of scope.
+- Run layout `runs/<arm>/<timestamp>/` with `metrics.jsonl`, `rollouts.jsonl`, `eval.json`, `checkpoints/`, `meta.json`. Checkpoints every 10 steps with resume, fifteen kept per run. Evaluation every 20 steps on 100 fixed test questions, final pass@1 on all 250. pass@8 out of scope.
 - Reliability: fail fast on bad config, missing data, missing key, unrecoverable judge errors. Smoke mode raises errors. Budget guards cap steps and judge calls. No wall-clock cap.
 - Reproducibility: record git commit, package versions, model revision, judge model, split seed, timestamp in `meta.json`.
 - The only seam is an `Experiment` entry point with injected `Generator`, `Judge`, `TestRunner`, `Store`. No GPU tests. The GPU check is a manual smoke run.

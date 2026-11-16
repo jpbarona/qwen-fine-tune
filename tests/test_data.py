@@ -203,7 +203,7 @@ def test_prompt_names_the_function_that_the_tests_call() -> None:
     prompt = format_prompt(question)
     assert "`do_thing`" in prompt
     assert question.text in prompt
-    assert "only the Python code" in prompt
+    assert "Output only the function definition" in prompt
 
 
 def test_prompt_omits_a_name_when_the_tests_name_nothing() -> None:
@@ -377,7 +377,7 @@ def test_the_prompt_says_how_many_arguments_the_tests_pass() -> None:
         test_list=("assert topbottom_surfacearea(10) == 314.15",),
     )
     prompt = format_prompt(question)
-    assert "takes 1 argument" in prompt, prompt
+    assert "call it with exactly 1 argument" in prompt, prompt
 
 
 def test_the_arity_counts_keyword_arguments() -> None:
@@ -407,7 +407,7 @@ def test_every_row_states_the_arity_of_its_first_test_call() -> None:
         name = expected_function_name(question)
         arity = expected_call_arity(question)
         assert arity is not None, question.task_id
-        assert f"takes {arity} argument" in format_prompt(question), question.task_id
+        assert f"call it with exactly {arity} argument" in format_prompt(question), question.task_id
         tree = _ast.parse(question.test_list[0])
         calls = [
             node
@@ -425,3 +425,12 @@ def test_row_644_uses_the_name_the_model_writes() -> None:
     question = rows[644]
     assert all("reverse_array_up_to_k(" in test for test in question.test_list)
     assert expected_function_name(question) == "reverse_array_up_to_k"
+
+
+def test_every_prompt_ends_with_one_output_rule() -> None:
+    questions = list(load_dataset(DEFAULT_DATA_PATH))
+    for question in questions[:5]:
+        prompt = format_prompt(question)
+        assert prompt.count("Output only the function definition") == 1, prompt
+        assert "code fences" in prompt, prompt
+        assert "code block" not in prompt.lower(), prompt

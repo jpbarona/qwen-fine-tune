@@ -70,7 +70,7 @@ SOURCE_SPLITS: tuple[str, ...] = ("train", "validation", "test")
 PROMPT_TEMPLATE = (
     "Write a Python function that solves the problem below.\n\n"
     "Problem: {text}\n\n"
-    "Return only the Python code for the function."
+    "Output only the function definition. No prose and no code fences."
 )
 
 #: The same prompt, with the name the hidden tests call. Without the name the
@@ -78,17 +78,18 @@ PROMPT_TEMPLATE = (
 NAMED_PROMPT_TEMPLATE = (
     "Write a Python function named `{name}` that solves the problem below.\n\n"
     "Problem: {text}\n\n"
-    "Return only the Python code for the function."
+    "Output only the function definition. No prose and no code fences."
 )
 
 #: The same prompt, with the name and the argument count. A missing count made
 #: the model write one parameter where the tests pass two, which fails every
-#: test with `TypeError`.
+#: test with `TypeError`. The wording names the tests as the source, so the
+#: model cannot read it as a claim about its own signature and argue with it.
 ARITY_PROMPT_TEMPLATE = (
-    "Write a Python function named `{name}` that takes {arity} {noun} and solves "
-    "the problem below.\n\n"
+    "Write a Python function named `{name}`. The tests call it with exactly "
+    "{arity} {noun}.\n\n"
     "Problem: {text}\n\n"
-    "Return only the Python code for the function."
+    "Output only the function definition. No prose and no code fences."
 )
 
 #: Keywords that can be followed by a bracket, for example `assert (`.

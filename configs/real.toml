@@ -60,7 +60,7 @@ memory_floor_mib = 512
 seed = 0
 
 [run]
-checkpoint_every_steps = 20
+checkpoint_every_steps = 10
 eval_every_steps = 20
 eval_questions = 100
 eval_subset_seed = 2026

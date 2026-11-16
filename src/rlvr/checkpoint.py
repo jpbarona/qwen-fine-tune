@@ -6,7 +6,7 @@ optimizer state into that directory. A small `checkpoint.json` manifest records
 the step, arm, and timestamp so a resume can find the latest checkpoint without
 importing torch.
 
-The run folder keeps ten checkpoints: the newest five consecutive and older ones
+The run folder keeps fifteen checkpoints: the newest five consecutive and older ones
 at doubling gaps, so an early collapse still has a checkpoint to resume from.
 `select_checkpoints_to_keep` picks them and `prune_checkpoints` deletes the
 rest. Retention only touches the run folder, never persistent storage.
@@ -43,16 +43,16 @@ MANIFEST_NAME = "checkpoint.json"
 #: Number of digits in a checkpoint directory name.
 _STEP_WIDTH = 8
 
-#: Retention: ten checkpoints, the newest five consecutive and older ones back
-#: at doubling gaps. One checkpoint is about 100 MB, so ten keep an early
-#: collapse recoverable without filling a 30 GB disk.
+#: Retention: fifteen checkpoints, the newest five consecutive and older ones
+#: back at doubling gaps. One checkpoint is about 100 MB, so fifteen keep an
+#: early collapse recoverable without filling a 30 GB disk.
 DEFAULT_KEEP_RECENT = 5
-DEFAULT_KEEP_TOTAL = 10
+DEFAULT_KEEP_TOTAL = 15
 
 #: Cumulative positions back from the newest for the older retained
-#: checkpoints, doubling at 2, 4, 8, 16 and 32 beyond the newest block. The
-#: first skip of 6 counts the newest five plus one.
-_RETENTION_OFFSETS = (6, 10, 18, 34, 66)
+#: checkpoints, doubling at 2, 4, 8, 16, 32 and onward beyond the newest block.
+#: The first skip of 6 counts the newest five plus one.
+_RETENTION_OFFSETS = (6, 10, 18, 34, 66, 130, 258, 514, 1026, 2050)
 
 
 class CheckpointError(ValueError):

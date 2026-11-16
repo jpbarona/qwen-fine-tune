@@ -100,3 +100,6 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 87. nvidia-smi utilisation means busy, not saturated, at any batch size
 88. Each evaluation pauses training about ten minutes every twenty steps
 89. Very easy stage emptied at step 161, medium started with 448
+56. Prompt states the test arity directly → fewer invented signatures
+57. One output rule ends the code-fence debate in the prompt
+58. Checkpoints every 10 steps, fifteen kept per run

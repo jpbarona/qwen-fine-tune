@@ -137,7 +137,7 @@ OPENROUTER_API_KEY=... ./run.sh code-score
 
 ## Checkpoints and resume
 
-A checkpoint is saved every `[run] checkpoint_every_steps` steps (default 50).
+A checkpoint is saved every `[run] checkpoint_every_steps` steps (default 20). `configs/real.toml` sets 10. Fifteen checkpoints are kept per run.
 Each checkpoint directory holds the LoRA adapter, the optimizer state, the step
 number, and a `checkpoint.json` manifest. After a crash, resume from the last
 checkpoint:
