@@ -46,6 +46,11 @@ EVAL_NAME = "eval.json"
 META_NAME = "meta.json"
 ROLLOUTS_NAME = "rollouts.jsonl"
 
+#: The control file a run polls between steps, and the log of the changes it
+#: applied. Both are written by the training loop in the run folder.
+CONTROL_NAME = "control.json"
+CONTROL_EVENTS_NAME = "control-events.jsonl"
+
 #: Question files that carry prompt text. They live in `data/` in the repo and
 #: are optional: the questions view works from prompt ids alone when they are
 #: missing.
@@ -160,8 +165,8 @@ def _read_eval(run_dir: Path) -> dict[str, Any]:
     return _read_json(run_dir / EVAL_NAME)
 
 
-def _read_metrics(path: Path) -> list[dict[str, Any]]:
-    """Read metrics.jsonl, skipping a line that is still being written."""
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Read a JSONL file, skipping a line that is still being written."""
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -177,6 +182,10 @@ def _read_metrics(path: Path) -> list[dict[str, Any]]:
         if isinstance(row, dict):
             rows.append(row)
     return rows
+
+
+def _read_metrics(path: Path) -> list[dict[str, Any]]:
+    return _read_jsonl(path)
 
 
 def _read_tail_lines(path: Path, max_bytes: int) -> list[str]:
@@ -636,13 +645,62 @@ def _question_texts(needed: set[str]) -> dict[str, str]:
     return texts
 
 
-def _questions(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
+def _control_drops(run_dir: Path) -> dict[str, Any]:
+    """The prompts a run has stopped sampling, with the step each was dropped.
+
+    `control.json` holds the list in force now. `control-events.jsonl` holds one
+    line per applied change, so it is the only source for the step. A drop is
+    permanent in the training loop, so an id that appears in the history stays
+    dropped even if it is no longer in the current list. A missing file
+    contributes nothing. An id with no matching event has a null step.
+    """
+    control = _read_json(run_dir / CONTROL_NAME)
+    current_raw = control.get("drop")
+    current: set[str] = set()
+    if isinstance(current_raw, list):
+        current = {item for item in current_raw if isinstance(item, str) and item}
+
+    steps: dict[str, int] = {}
+    events: list[dict[str, Any]] = []
+    for row in _read_jsonl(run_dir / CONTROL_EVENTS_NAME):
+        if row.get("action") != "apply":
+            continue
+        dropped_raw = row.get("drop")
+        if not isinstance(dropped_raw, list):
+            continue
+        prompt_ids = sorted(
+            {item for item in dropped_raw if isinstance(item, str) and item}
+        )
+        if not prompt_ids:
+            continue
+        step = _integer(row.get("step"))
+        events.append({"step": step, "prompt_ids": prompt_ids})
+        if step is not None:
+            for prompt_id in prompt_ids:
+                if prompt_id not in steps or step < steps[prompt_id]:
+                    steps[prompt_id] = step
+
+    ids = sorted(current | set(steps))
+    return {
+        "ids": ids,
+        "events": events,
+        "steps": {prompt_id: steps[prompt_id] for prompt_id in ids if prompt_id in steps},
+    }
+
+
+def _questions(
+    run_dir: Path, meta: Mapping[str, Any], dropped: Mapping[str, Any]
+) -> dict[str, Any]:
     """One row per prompt, from a single streaming pass over rollouts.jsonl.
 
     A prompt is solved when every rollout of it in a step passed, matching the
     training pool rule. The step group is closed when the step number changes,
-    so memory holds counters, not rollout records.
+    so memory holds counters, not rollout records. A prompt named in the
+    control file keeps its history and is marked dropped, so a solved prompt
+    reads as solved, not as a failure.
     """
+    dropped_ids = set(dropped.get("ids", ()))
+    dropped_steps = dropped.get("steps") or {}
     expected = _rollouts_per_prompt(meta)
     counters: dict[str, dict[str, Any]] = {}
     group: dict[str, dict[str, int]] = {}
@@ -732,6 +790,8 @@ def _questions(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
                 "last_error": counter["last_error"],
                 "last_step": counter["last_step"],
                 "solved": counter["full_pass_steps"] > 0,
+                "dropped": prompt_id in dropped_ids,
+                "dropped_step": dropped_steps.get(prompt_id),
                 "text": texts.get(prompt_id),
             }
         )
@@ -799,6 +859,7 @@ def _waiting_run(arm: str) -> dict[str, Any]:
         "evaluations": [],
         "distributions": {"reward": {"bins": [], "counts": []}, "tests_passed": {"bins": [], "counts": []}},
         "questions": {"total": 0, "rows": []},
+        "dropped": {"ids": [], "events": [], "steps": {}},
     }
 
 
@@ -806,6 +867,7 @@ def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
     meta = _read_meta(run_dir)
     eval_payload = _read_eval(run_dir)
     rows = _read_metrics(run_dir / METRICS_NAME)
+    dropped = _control_drops(run_dir)
 
     arm = _string(meta.get("arm")) or _string(eval_payload.get("arm")) or arm_hint or run_dir.name
     timestamp = _string(meta.get("timestamp")) or _string(eval_payload.get("timestamp")) or run_dir.name
@@ -831,7 +893,8 @@ def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
         "pass_at_1": _pass_at_1_series(eval_payload),
         "evaluations": _evaluations(eval_payload),
         "distributions": _distributions(run_dir),
-        "questions": _questions(run_dir, meta),
+        "questions": _questions(run_dir, meta, dropped),
+        "dropped": dropped,
     }
 
 

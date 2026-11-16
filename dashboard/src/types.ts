@@ -70,12 +70,25 @@ export interface QuestionRow {
   last_error: string | null
   last_step: number | null
   solved: boolean
+  dropped: boolean
+  dropped_step: number | null
   text: string | null
 }
 
 export interface Questions {
   total: number
   rows: QuestionRow[]
+}
+
+export interface DroppedPrompt {
+  step: number | null
+  prompt_ids: string[]
+}
+
+export interface Dropped {
+  ids: string[]
+  events: DroppedPrompt[]
+  steps: Record<string, number>
 }
 
 export interface Run {
@@ -97,6 +110,7 @@ export interface Run {
   evaluations: Evaluation[]
   distributions: { reward: Histogram; tests_passed: Histogram }
   questions: Questions
+  dropped: Dropped
   metrics_age_seconds: number | null
 }
 
