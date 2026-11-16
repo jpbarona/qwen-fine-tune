@@ -80,14 +80,34 @@ function Strip({ children }: { children: ReactNode }) {
 }
 
 function StepProgress({ run }: { run: Run }) {
-  // The target counts one step per starting batch. The trainer grows the batch
-  // as memory allows, so the finished step count is lower and unknowable from
-  // here. Show the step count and name the target for what it is.
+  // One step samples a growing batch of prompts, so the planned step count
+  // depends on the batch size and is only correct at the starting size. The
+  // prompts the run must present does not depend on batching, so that is the
+  // progress figure. The step plan stays as a muted note naming its batch.
+  const samples = run.prompt_samples
+  const sampleTarget = run.prompt_sample_target
+  const percent = sampleTarget ? Math.min(samples / sampleTarget, 1) : null
   return (
     <div className="mt-2.5 flex flex-wrap items-baseline gap-x-2 font-mono text-[11px] tabular-nums text-[#6b6b73]">
       <span className="text-[15px] text-[#e7e7ea]">{whole(run.steps_done)}</span>
       <span>steps</span>
-      {run.target_steps ? <span className="text-[#55555d]">planned {whole(run.target_steps)} at the starting batch</span> : null}
+      {percent !== null && sampleTarget !== null ? (
+        <>
+          <span className="text-[#3f3f46]">/</span>
+          <span>
+            {whole(samples)} / {whole(sampleTarget)} prompt samples
+          </span>
+          <span className="text-[#8b8b94]">{(percent * 100).toFixed(1)}%</span>
+        </>
+      ) : null}
+      {run.target_steps ? (
+        <span className="text-[#55555d]">
+          planned {whole(run.target_steps)} steps
+          {run.start_batch_prompts
+            ? ` at ${whole(run.start_batch_prompts)} prompts per step`
+            : ' at the starting batch'}
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -137,12 +157,15 @@ function BandTable({ run }: { run: Run }) {
       flush
       right={
         progress.band ? (
-          <>
+          <span>
             <span className="text-[#8b8b94]">{progress.band}</span>
-            <span className="tabular-nums">
+            <span className="ml-2 tabular-nums">
               {progress.solved} / {progress.total} solved
             </span>
-          </>
+            {progress.dropped ? (
+              <span className="ml-2 text-[#55555d]">{progress.dropped} dropped</span>
+            ) : null}
+          </span>
         ) : undefined
       }
     >
@@ -200,7 +223,11 @@ function RunSection({ run }: { run: Run }) {
   const hasPassAtOne = hasValues(checkpointPoints) || hasValues(finalPoints)
   const hasEntropy = hasValues(entropyPoints)
   const missingPanels: string[] = []
-  if (!hasEntropy) missingPanels.push('entropy per step')
+  if (!hasEntropy) {
+    missingPanels.push(
+      run.entropy_every_steps ? `entropy per step (measured every ${run.entropy_every_steps} steps)` : 'entropy per step',
+    )
+  }
   if (!hasPassAtOne) missingPanels.push('pass@1')
 
   return (
@@ -235,7 +262,9 @@ function RunSection({ run }: { run: Run }) {
         </Stat>
         <Stat label="mean reward">{num(latest.mean_reward)}</Stat>
         <Stat label="pass rate">{rate(latest.pass_rate)}</Stat>
-        <Stat label="pass@1">{rate(lastEval?.pass_at_1)}</Stat>
+        <Stat label={lastEval && lastEval.step !== null ? `pass@1 at step ${lastEval.step}` : 'pass@1'}>
+          {rate(lastEval?.pass_at_1)}
+        </Stat>
         <Stat label="entropy">{num(latest.mean_entropy)}</Stat>
         <Stat label="comp len">{num(latest.mean_completion_tokens, 0)}</Stat>
         <Stat label="truncation">{rate(latest.truncation_rate)}</Stat>
@@ -612,25 +641,34 @@ function QuestionsView({ runs }: { runs: Run[] }) {
 
 function SystemStrip({ gpu }: { gpu: Dashboard['gpu'] }) {
   const current = gpu.current
-  if (!current) return null
+  const reading = (value: number | null | undefined, digits: number, suffix: string): string =>
+    value === null || value === undefined ? '-' : `${num(value, digits)}${suffix}`
+  const memory =
+    current && (current.memory_used !== null || current.memory_total !== null)
+      ? `${gib(current.memory_used)} / ${gib(current.memory_total)} GiB`
+      : '-'
   return (
     <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-1 border border-white/[0.07] bg-[#0b0b0d] px-3 py-[7px] font-mono text-[11px] tabular-nums text-[#7b7b84]">
       <span className="text-[10.5px] uppercase tracking-[0.12em] text-[#5f5f68]">system</span>
       <span>
-        gpu util <span className="text-[#d9d9de]">{num(current.utilization, 0)}%</span>
+        gpu util <span className="text-[#d9d9de]">{reading(current?.utilization, 0, '%')}</span>
       </span>
       <span>
-        gpu memory{' '}
-        <span className="text-[#d9d9de]">
-          {gib(current.memory_used)} / {gib(current.memory_total)} GiB
-        </span>
+        gpu memory <span className="text-[#d9d9de]">{memory}</span>
       </span>
       <span>
-        gpu temp <span className="text-[#d9d9de]">{num(current.temperature, 0)} C</span>
+        gpu temp <span className="text-[#d9d9de]">{reading(current?.temperature, 0, ' C')}</span>
       </span>
       <span>
         samples <span className="text-[#d9d9de]">{gpu.history.length}</span>
       </span>
+      <span>
+        last sample{' '}
+        <span className="text-[#d9d9de]">
+          {gpu.age_seconds === null || gpu.age_seconds === undefined ? '-' : `${elapsed(gpu.age_seconds)} ago`}
+        </span>
+      </span>
+      {current ? null : <span className="text-[#55555d]">no reading</span>}
     </div>
   )
 }

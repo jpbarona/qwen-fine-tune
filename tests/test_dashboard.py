@@ -512,6 +512,128 @@ def test_gpu_read_returns_none_for_unsupported_fields(monkeypatch) -> None:
     assert sample["temperature"] == 41
 
 
+def test_gpu_read_keeps_a_real_zero_reading(monkeypatch) -> None:
+    """A recorded sample from the A6000: an idle GPU is 0%, not a missing read."""
+    from rlvr import dashboard as dashboard_module
+
+    def fake_run(command, **kwargs):
+        return dashboard_module.subprocess.CompletedProcess(
+            args=command, returncode=0, stdout="0, 35, 49140, 24\n", stderr=""
+        )
+
+    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
+    sample = dashboard_module._gpu_read()
+
+    assert sample == {
+        "utilization": 0.0,
+        "memory_used": 35.0,
+        "memory_total": 49140.0,
+        "temperature": 24.0,
+    }
+
+
+def test_gpu_read_handles_not_supported_and_units(monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    def fake_run(command, **kwargs):
+        return dashboard_module.subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="[Not Supported], 0 MiB, 49140 MiB, [N/A]\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
+    sample = dashboard_module._gpu_read()
+
+    assert sample is not None
+    assert sample["utilization"] is None
+    assert sample["memory_used"] == 0.0
+    assert sample["memory_total"] == 49140.0
+    assert sample["temperature"] is None
+
+
+def test_gpu_read_returns_none_when_no_field_can_be_read(monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    def fake_run(command, **kwargs):
+        return dashboard_module.subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="[N/A], [Not Supported], [Unknown Error], [N/A]\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
+    assert dashboard_module._gpu_read() is None
+
+
+def test_gpu_read_sums_memory_across_gpus_and_takes_the_hottest(monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    def fake_run(command, **kwargs):
+        return dashboard_module.subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="85, 30000, 49140, 51\n10, 1000, 24570, 60\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
+    sample = dashboard_module._gpu_read()
+
+    assert sample is not None
+    assert sample["utilization"] == 85.0
+    assert sample["memory_used"] == 31000.0
+    assert sample["memory_total"] == 73710.0
+    assert sample["temperature"] == 60.0
+
+
+def test_a_failed_gpu_read_is_not_counted_as_a_sample(monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    dashboard_module._gpu_history.clear()
+    monkeypatch.setattr(dashboard_module, "_gpu_read", lambda: None)
+    try:
+        dashboard_module.sample_gpu(now=100.0)
+        state = dashboard_module._gpu_state(now=105.0)
+        assert state == {"current": None, "history": [], "age_seconds": None}
+    finally:
+        dashboard_module._gpu_history.clear()
+
+
+def test_the_gpu_state_reports_the_age_of_the_last_sample(monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    dashboard_module._gpu_history.clear()
+    sample = {
+        "utilization": 80.0,
+        "memory_used": 1000.0,
+        "memory_total": 2000.0,
+        "temperature": 50.0,
+    }
+    monkeypatch.setattr(dashboard_module, "_gpu_read", lambda: dict(sample))
+    try:
+        dashboard_module.sample_gpu(now=100.0)
+        state = dashboard_module._gpu_state(now=107.5)
+        assert state["age_seconds"] == 7.5
+        assert state["current"] == sample
+        assert state["history"][0]["t"] == 100.0
+    finally:
+        dashboard_module._gpu_history.clear()
+
+
+def test_the_system_strip_shows_a_dash_when_no_sample_exists() -> None:
+    data = {
+        "generated_at": "now",
+        "runs": [],
+        "gpu": {"current": None, "history": [], "age_seconds": None},
+    }
+    html = render_html(data)
+    assert "gpu util" in html
+    assert "last sample" in html
+
+
 def test_gpu_sample_is_reused_when_younger_than_two_seconds(monkeypatch) -> None:
     from rlvr import dashboard as dashboard_module
 
@@ -851,6 +973,47 @@ def test_stage_progress_is_blank_without_a_pool_size(tmp_path) -> None:
     assert "stage done" in html
 
 
+def test_a_dropped_unsolved_prompt_leaves_the_stage_total(tmp_path) -> None:
+    """A prompt dropped through the control file can never be solved."""
+    rollouts = (
+        stage_rollouts(1, "p1", passes=8)
+        + stage_rollouts(1, "p2", passes=8)
+        + stage_rollouts(1, "p3", passes=0)
+    )
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        meta_extra={"curriculum": {"stages": [{"name": "very easy", "train": 4}]}},
+        rollouts=rollouts,
+    )
+    write_control(run_dir, drop=["p3"], events=[{"action": "apply", "step": 2, "drop": ["p3"]}])
+
+    progress = collect_dashboard([run_dir])["runs"][0]["stage_progress"]
+
+    assert progress["solved"] == 2
+    assert progress["total"] == 3
+    assert progress["dropped"] == 1
+    assert progress["percent"] == pytest.approx(2 / 3)
+
+
+def test_a_dropped_solved_prompt_stays_in_the_stage_total(tmp_path) -> None:
+    """A prompt solved before it was dropped is already in the solved count."""
+    rollouts = stage_rollouts(1, "p1", passes=8) + stage_rollouts(1, "p2", passes=8)
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        meta_extra={"curriculum": {"stages": [{"name": "very easy", "train": 4}]}},
+        rollouts=rollouts,
+    )
+    write_control(run_dir, drop=["p1"], events=[{"action": "apply", "step": 5, "drop": ["p1"]}])
+
+    progress = collect_dashboard([run_dir])["runs"][0]["stage_progress"]
+
+    assert progress["total"] == 4
+    assert progress["dropped"] == 0
+    assert progress["solved"] == 2
+
+
 def question_group(step: int, prompt_id: str, passes: int, error: str = "runtime_error") -> list[dict]:
     """Eight rollouts of one prompt, `passes` of them fully passing three tests."""
     return [
@@ -975,11 +1138,90 @@ def test_gpu_tiles_are_reported_in_gib_not_mib(tmp_path) -> None:
     assert "gpu unaccounted GiB" in html
 
 
-def test_a_slow_step_is_still_running(tmp_path) -> None:
-    """A step takes minutes, so a metrics file a few minutes old is live."""
+def test_progress_is_counted_in_prompt_samples_not_starting_batches(tmp_path) -> None:
+    rows = [
+        {"step": 1, "arm": "code-score", "prompts": 2, "mean_reward": 0.5},
+        {"step": 2, "arm": "code-score", "prompts": 3, "mean_reward": 0.6},
+    ]
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        rows=rows,
+        meta_extra={
+            "trainer": {
+                "epochs": 2,
+                "batch_start_prompts": 2,
+                "entropy_every_steps": 500,
+            },
+            "config": {"data": {"train_size": 5}},
+        },
+    )
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["prompt_samples"] == 5
+    assert run["prompt_sample_target"] == 10
+    assert run["start_batch_prompts"] == 2
+    assert run["entropy_every_steps"] == 500
+
+    html = render_html({"generated_at": "now", "runs": [run], "gpu": {"current": None, "history": [], "age_seconds": None}})
+    assert "prompt samples" in html
+    assert "prompts per step" in html
+
+
+def test_a_slow_step_is_still_running(tmp_path, monkeypatch) -> None:
+    """A step takes minutes, so a live process with older metrics is running."""
     import os
     import time
 
+    from rlvr import dashboard as dashboard_module
+
+    monkeypatch.setattr(dashboard_module, "_process_arms", lambda: {"code-score"})
+    run_dir = write_run(tmp_path / "runs", "code-score")
+    metrics = run_dir / "metrics.jsonl"
+    old = time.time() - 300
+    os.utime(metrics, (old, old))
+    (run_dir / "eval.json").unlink()
+
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["status"] == "running"
+
+
+def test_a_run_without_a_process_is_stopped_after_the_grace(tmp_path, monkeypatch) -> None:
+    """A crashed resume leaves fresh metrics and no process behind."""
+    import os
+    import time
+
+    from rlvr import dashboard as dashboard_module
+
+    monkeypatch.setattr(dashboard_module, "_process_arms", lambda: set())
+    run_dir = write_run(tmp_path / "runs", "code-score")
+    metrics = run_dir / "metrics.jsonl"
+    old = time.time() - 300
+    os.utime(metrics, (old, old))
+    (run_dir / "eval.json").unlink()
+
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["status"] == "stopped"
+
+
+def test_a_just_exited_process_does_not_flip_a_fresh_run_to_stopped(tmp_path, monkeypatch) -> None:
+    from rlvr import dashboard as dashboard_module
+
+    monkeypatch.setattr(dashboard_module, "_process_arms", lambda: set())
+    run_dir = write_run(tmp_path / "runs", "code-score")
+    (run_dir / "eval.json").unlink()
+
+    data = collect_dashboard([run_dir])
+    assert data["runs"][0]["status"] == "running"
+
+
+def test_an_unreadable_process_list_falls_back_to_the_metrics_age(tmp_path, monkeypatch) -> None:
+    import os
+    import time
+
+    from rlvr import dashboard as dashboard_module
+
+    monkeypatch.setattr(dashboard_module, "_process_arms", lambda: None)
     run_dir = write_run(tmp_path / "runs", "code-score")
     metrics = run_dir / "metrics.jsonl"
     old = time.time() - 300

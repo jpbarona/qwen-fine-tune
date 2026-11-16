@@ -1184,7 +1184,13 @@ class QwenGenerator:
             dtype=torch.bfloat16,
             device_map="auto",
         ).eval()
-        self.model = PeftModel.from_pretrained(self.base_model, str(folder))
+        # `is_trainable` is what unfreezes the adapter. The default is False,
+        # which freezes every parameter and leaves AdamW with an empty list on
+        # the next line. A checkpoint carries `inference_mode: true` in its
+        # adapter config, so the saved value cannot be relied on either.
+        self.model = PeftModel.from_pretrained(
+            self.base_model, str(folder), is_trainable=True
+        )
         self.model.train()
 
         state = torch.load(folder / OPTIMIZER_STATE_NAME, map_location="cpu")
