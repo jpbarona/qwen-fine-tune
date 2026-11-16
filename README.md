@@ -218,6 +218,12 @@ present, and the tab still works from prompt ids when they are missing.
 Dropped prompts are hidden by default. The tab says how many were dropped and
 offers a control to show them, with the step they were dropped.
 
+GPU utilisation is `nvidia-smi`'s figure: the share of the sample window in
+which any kernel was running. It reads 70 to 85 percent on a step of 16
+sequences and on a step of 152, because one kernel runs almost continuously
+either way. It says busy, not saturated. Throughput, not utilisation, is the
+number that moves with batch size, and it is not logged yet.
+
 Status comes from the process table, not only from file age. A live
 `rlvr run --arm <arm>` keeps the run `running` through a long evaluation. A run
 whose process is gone turns `stopped` after a two minute grace. A GPU reading

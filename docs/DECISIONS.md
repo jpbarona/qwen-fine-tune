@@ -277,7 +277,7 @@ run.
 
 ## D17. The RL environment needs cold tests, not live-run discovery
 
-Status: implemented. 830 tests, 9 of them cold checks over the committed data.
+Status: implemented. 899 tests, 9 of them cold checks over the committed data.
 The prompt contract reads every one of the 964 MBPP rows and the 50 synthetic
 rows:
 
