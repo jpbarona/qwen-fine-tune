@@ -90,3 +90,7 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 84. A dropped unsolved prompt now leaves the stage pool total
 85. Progress now counts prompt samples, not starting-batch steps
 86. Resume froze the LoRA adapter, so AdamW got an empty list
+80. Resume froze the LoRA adapter, so the optimizer had no parameters
+81. Resumed run drops three never-passing prompts at step 121
+82. Dashboard now checks for a live process, not just file age
+83. Missing GPU readings render as a dash, never as zero

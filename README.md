@@ -242,6 +242,11 @@ applies at the next step, no restart:
 `--control PATH` uses a different file. The event log records the step of every
 change, so a prompt edited mid-run can be split out of an analysis.
 
+A resume must leave the adapter trainable. `PeftModel.from_pretrained` defaults
+to a frozen adapter, which then builds an optimizer over no parameters and
+fails with `optimizer got an empty parameter list`. The loader passes
+`is_trainable=True`.
+
 ## Curriculum
 
 Training runs band by band: very easy, medium, hard, very hard. Each band is
