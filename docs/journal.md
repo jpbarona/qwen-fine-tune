@@ -83,3 +83,10 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 77. A control file now edits a run between steps, no restart
 78. Drop removes a prompt from the pool and can advance the stage
 79. Test edits are logged by step so analysis can split the run
+80. A crashed resume left a fresh metrics file reading as running
+81. Run status now requires a live rlvr run process for that arm
+82. An nvidia-smi field of [N/A] is a missing reading, not zero
+83. The system strip shows a dash when nvidia-smi cannot be read
+84. A dropped unsolved prompt now leaves the stage pool total
+85. Progress now counts prompt samples, not starting-batch steps
+86. Resume froze the LoRA adapter, so AdamW got an empty list

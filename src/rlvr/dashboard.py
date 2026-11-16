@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import json
 import math
+import re
+import shutil
 import subprocess
 import time
 from collections import deque
@@ -67,6 +69,21 @@ DEFAULT_ROLLOUTS_PER_PROMPT = 8
 #: per rollout, which took about a minute on the 3090 and longer on wide batches,
 #: so a one minute window reported finished runs as stopped.
 STALE_SECONDS = 900.0
+
+#: Seconds after the last metrics write before a run with no matching `rlvr run`
+#: process counts as stopped. A crashed resume leaves a fresh metrics file
+#: behind, so the file age alone reported a dead run as running for fifteen
+#: minutes. The grace period covers a process that has just exited and a host
+#: where the process list cannot be read.
+PROCESS_GRACE_SECONDS = 120.0
+
+#: Where to look for nvidia-smi when PATH does not carry it. A tmux server
+#: started from a different shell can have a PATH without the driver tools even
+#: though the binary is installed.
+NVIDIA_SMI_PATHS: tuple[str, ...] = (
+    "/usr/bin/nvidia-smi",
+    "/usr/local/nvidia/bin/nvidia-smi",
+)
 
 #: How many bytes of rollouts.jsonl to read from the tail for distributions.
 ROLLOUT_TAIL_BYTES = 4 * 1024 * 1024
@@ -345,11 +362,73 @@ def _target_steps(meta: Mapping[str, Any]) -> int | None:
     return target
 
 
+def _prompt_sample_target(meta: Mapping[str, Any]) -> int | None:
+    """Epochs times the train size: the number of prompt presentations planned.
+
+    One step samples a growing batch of prompts, so the step count depends on
+    the batching policy. The number of prompts the run has to present does not,
+    which makes it the honest progress denominator for a real run.
+    """
+    if meta.get("mode") == "fake":
+        return None
+    epochs: int | None = None
+    trainer = meta.get("trainer")
+    if isinstance(trainer, Mapping):
+        epochs = _positive_int(trainer.get("epochs"))
+    config = meta.get("config")
+    if epochs is None and isinstance(config, Mapping):
+        training = config.get("training")
+        if isinstance(training, Mapping):
+            epochs = _positive_int(training.get("epochs"))
+    if epochs is None or not isinstance(config, Mapping):
+        return None
+    data = config.get("data")
+    if not isinstance(data, Mapping):
+        return None
+    train_size = _positive_int(data.get("train_size"))
+    if train_size is None:
+        return None
+    return epochs * train_size
+
+
+def _start_batch_prompts(meta: Mapping[str, Any]) -> int | None:
+    """The batch size the step target was computed from, when it is recorded."""
+    trainer = meta.get("trainer")
+    if isinstance(trainer, Mapping):
+        return _positive_int(trainer.get("batch_start_prompts"))
+    return None
+
+
+def _entropy_every_steps(meta: Mapping[str, Any]) -> int | None:
+    """How often entropy is measured, so a dash on the tile can say why."""
+    trainer = meta.get("trainer")
+    if isinstance(trainer, Mapping):
+        value = _positive_int(trainer.get("entropy_every_steps"))
+        if value is not None:
+            return value
+    config = meta.get("config")
+    if isinstance(config, Mapping):
+        training = config.get("training")
+        if isinstance(training, Mapping):
+            return _positive_int(training.get("entropy_every_steps"))
+    return None
+
+
 def _steps_done(rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
     step = _integer(rows[-1].get("step"))
     return step if step is not None and step > 0 else len(rows)
+
+
+def _prompt_samples(rows: list[dict[str, Any]]) -> int:
+    """The prompts the run has presented, summed over the metrics rows."""
+    total = 0
+    for row in rows:
+        value = _integer(row.get("prompts"))
+        if value is not None:
+            total += value
+    return total
 
 
 def _last_number(rows: list[dict[str, Any]], name: str) -> float | None:
@@ -494,13 +573,20 @@ def _band_pass_rates(run_dir: Path) -> list[dict[str, Any]]:
     ]
 
 
-def _stage_progress(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
+def _stage_progress(
+    run_dir: Path, meta: Mapping[str, Any], dropped_by_band: Mapping[str, int] | None = None
+) -> dict[str, Any]:
     """How much of the current curriculum band has been solved, per step.
 
     A prompt counts as solved in a step only when every rollout of that prompt
     in that step passed, which is the training pool rule. The total for a band
     is its starting training pool from `meta.json`, so the percentage is stable
     even though the pool shrinks.
+
+    A prompt dropped through the control file can never be solved, so it is
+    removed from that band's total. Without this a band with dropped prompts
+    tops out below 100% forever. The caller passes counts of dropped prompts
+    that were never solved, one per band.
 
     The whole rollout file is streamed, because a solved prompt can sit far
     before the tail. The series keeps one point per training step, and carries
@@ -519,6 +605,7 @@ def _stage_progress(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
                 if name is not None and count:
                     totals[name] = count
 
+    dropped_counts = dropped_by_band or {}
     solved: dict[str, set[str]] = {}
     points: list[dict[str, Any]] = []
 
@@ -526,7 +613,11 @@ def _stage_progress(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
         for prompt_id, outcomes in prompts.items():
             if outcomes and all(outcomes):
                 solved.setdefault(band, set()).add(prompt_id)
-        total = totals.get(band)
+        starting_total = totals.get(band)
+        if not starting_total:
+            return
+        dropped = min(dropped_counts.get(band, 0), starting_total)
+        total = starting_total - dropped
         if not total:
             return
         count = len(solved.get(band, ()))
@@ -536,7 +627,8 @@ def _stage_progress(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
                 "band": band,
                 "solved": count,
                 "total": total,
-                "percent": count / total,
+                "dropped": dropped,
+                "percent": min(count / total, 1.0),
             }
         )
 
@@ -569,6 +661,7 @@ def _stage_progress(run_dir: Path, meta: Mapping[str, Any]) -> dict[str, Any]:
         "band": latest["band"] if latest else None,
         "solved": latest["solved"] if latest else 0,
         "total": latest["total"] if latest else 0,
+        "dropped": latest["dropped"] if latest else 0,
         "percent": latest["percent"] if latest else None,
         "points": points,
     }
@@ -824,7 +917,21 @@ def _metrics_age(metrics_path: Path, now: float) -> float | None:
         return None
 
 
-def _status(eval_payload: Mapping[str, Any], metrics_path: Path, now: float) -> str:
+def _status(
+    eval_payload: Mapping[str, Any],
+    metrics_path: Path,
+    now: float,
+    alive: bool | None = None,
+) -> str:
+    """The run status, from the final eval, the metrics age, and the process.
+
+    `alive` is True when a training process for the arm is present, False when
+    the process list was read and no such process exists, and None when the
+    list cannot be read. A live process keeps a run running through a long
+    evaluation. A missing process only demotes a run after
+    `PROCESS_GRACE_SECONDS`, so a just-exited process and an unreadable process
+    list do not flip a fresh run to stopped.
+    """
     if any(point.get("kind") == "final" for point in _raw_evaluations(eval_payload)):
         return "finished"
     if not metrics_path.is_file():
@@ -833,9 +940,46 @@ def _status(eval_payload: Mapping[str, Any], metrics_path: Path, now: float) -> 
         mtime = metrics_path.stat().st_mtime
     except OSError:
         return "stopped"
-    if now - mtime <= STALE_SECONDS:
+    age = now - mtime
+    if alive is True:
+        return "running"
+    if age <= STALE_SECONDS and (alive is not False or age <= PROCESS_GRACE_SECONDS):
         return "running"
     return "stopped"
+
+
+def _process_arms() -> set[str] | None:
+    """The arms that have a live `rlvr run` process, or None when unreadable.
+
+    The trainer's command line carries `--arm <arm>`, and `run.sh` execs the
+    entry point, so the process keeps that argument. Scanning `/proc` costs a
+    few hundred small reads per poll. Only Linux hosts have it. A host without
+    `/proc`, or one the dashboard cannot list, returns None so the caller falls
+    back to the metrics age instead of guessing that nothing is running.
+    """
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return None
+    try:
+        entries = [entry for entry in proc.iterdir() if entry.name.isdigit()]
+    except OSError:
+        return None
+    arms: set[str] = set()
+    for entry in entries:
+        try:
+            raw = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if b"rlvr" not in raw:
+            continue
+        parts = [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+        for index, part in enumerate(parts):
+            if part == "--arm" and index + 1 < len(parts):
+                arms.add(parts[index + 1])
+            elif part.startswith("--arm="):
+                arms.add(part.split("=", 1)[1])
+    return arms
+
 
 
 def _waiting_run(arm: str) -> dict[str, Any]:
@@ -850,9 +994,20 @@ def _waiting_run(arm: str) -> dict[str, Any]:
         "metrics_age_seconds": None,
         "steps_done": 0,
         "target_steps": None,
+        "start_batch_prompts": None,
+        "prompt_samples": 0,
+        "prompt_sample_target": None,
+        "entropy_every_steps": None,
         "stage": None,
         "bands": [],
-        "stage_progress": {"band": None, "solved": 0, "total": 0, "percent": None, "points": []},
+        "stage_progress": {
+            "band": None,
+            "solved": 0,
+            "total": 0,
+            "dropped": 0,
+            "percent": None,
+            "points": [],
+        },
         "latest": {name: None for name in LATEST_FIELDS},
         "series": {"steps": []} | {name: [] for name in SERIES_FIELDS},
         "pass_at_1": {"checkpoint": {"steps": [], "values": []}, "final": {"steps": [], "values": []}},
@@ -863,7 +1018,9 @@ def _waiting_run(arm: str) -> dict[str, Any]:
     }
 
 
-def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
+def _collect_run(
+    arm_hint: str, run_dir: Path, now: float, live_arms: set[str] | None = None
+) -> dict[str, Any]:
     meta = _read_meta(run_dir)
     eval_payload = _read_eval(run_dir)
     rows = _read_metrics(run_dir / METRICS_NAME)
@@ -873,6 +1030,13 @@ def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
     timestamp = _string(meta.get("timestamp")) or _string(eval_payload.get("timestamp")) or run_dir.name
     started = _parse_timestamp(timestamp)
     elapsed = now - started if started is not None else None
+    alive = None if live_arms is None else arm in live_arms
+
+    questions = _questions(run_dir, meta, dropped)
+    dropped_by_band: dict[str, int] = {}
+    for row in questions["rows"]:
+        if row["dropped"] and not row["solved"] and row["stage"] is not None:
+            dropped_by_band[row["stage"]] = dropped_by_band.get(row["stage"], 0) + 1
 
     return {
         "arm": arm,
@@ -881,21 +1045,28 @@ def _collect_run(arm_hint: str, run_dir: Path, now: float) -> dict[str, Any]:
         "started": timestamp,
         "started_utc": _started_label(timestamp),
         "elapsed_seconds": round(elapsed, 1) if elapsed is not None else None,
-        "status": _status(eval_payload, run_dir / METRICS_NAME, now),
+        "status": _status(eval_payload, run_dir / METRICS_NAME, now, alive),
         "metrics_age_seconds": _metrics_age(run_dir / METRICS_NAME, now),
         "steps_done": _steps_done(rows),
         "target_steps": _target_steps(meta),
+        "start_batch_prompts": _start_batch_prompts(meta),
+        "prompt_samples": _prompt_samples(rows),
+        "prompt_sample_target": _prompt_sample_target(meta),
+        "entropy_every_steps": _entropy_every_steps(meta),
         "stage": _string(rows[-1].get("stage")) if rows else None,
         "bands": _band_pass_rates(run_dir),
-        "stage_progress": _stage_progress(run_dir, meta),
+        "stage_progress": _stage_progress(run_dir, meta, dropped_by_band),
         "latest": _latest(rows),
         "series": _series(rows),
         "pass_at_1": _pass_at_1_series(eval_payload),
         "evaluations": _evaluations(eval_payload),
         "distributions": _distributions(run_dir),
-        "questions": _questions(run_dir, meta, dropped),
+        "questions": questions,
         "dropped": dropped,
     }
+
+
+_GPU_NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)")
 
 
 def _gpu_number(value: str) -> float | None:
@@ -903,17 +1074,41 @@ def _gpu_number(value: str) -> float | None:
 
     nvidia-smi prints text tokens such as N/A, [N/A], [Not Supported] and
     [Unknown Error] for a field it cannot report, so anything that does not
-    parse as a finite number becomes None.
+    start with a number becomes None. A number with a unit still parses, so a
+    format that keeps `%` or `MiB` does not silently zero the field. Zero is a
+    real reading and stays zero.
     """
-    try:
-        return _number(float(value.strip()))
-    except ValueError:
+    text = value.strip()
+    if not text:
         return None
+    match = _GPU_NUMBER.match(text)
+    if match is None:
+        return None
+    return _number(float(match.group(0)))
+
+
+def _nvidia_smi() -> str:
+    """The nvidia-smi binary by PATH, then by the usual install paths."""
+    found = shutil.which("nvidia-smi")
+    if found:
+        return found
+    for candidate in NVIDIA_SMI_PATHS:
+        if Path(candidate).is_file():
+            return candidate
+    return "nvidia-smi"
 
 
 def _gpu_read() -> dict[str, Any] | None:
+    """One nvidia-smi reading for every GPU, or None when nothing was read.
+
+    One CSV row per GPU. Utilisation and temperature take the hottest GPU and
+    memory is the sum over all of them, so a multi-GPU host reports the whole
+    machine rather than an arbitrary card. A row with a field nvidia-smi cannot
+    report keeps that field as None. A reading where every field is None is a
+    failure, not a sample, so it is not recorded or counted.
+    """
     command = [
-        "nvidia-smi",
+        _nvidia_smi(),
         "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
         "--format=csv,noheader,nounits",
     ]
@@ -923,18 +1118,43 @@ def _gpu_read() -> dict[str, Any] | None:
         return None
     if completed.returncode != 0:
         return None
-    lines = completed.stdout.strip().splitlines()
-    if not lines:
+    rows: list[dict[str, float | None]] = []
+    for line in completed.stdout.strip().splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 4:
+            continue
+        rows.append(
+            {
+                "utilization": _gpu_number(parts[0]),
+                "memory_used": _gpu_number(parts[1]),
+                "memory_total": _gpu_number(parts[2]),
+                "temperature": _gpu_number(parts[3]),
+            }
+        )
+    if not rows:
         return None
-    parts = [part.strip() for part in lines[0].split(",")]
-    if len(parts) < 4:
-        return None
-    return {
-        "utilization": _gpu_number(parts[0]),
-        "memory_used": _gpu_number(parts[1]),
-        "memory_total": _gpu_number(parts[2]),
-        "temperature": _gpu_number(parts[3]),
+
+    def total(name: str) -> float | None:
+        values = [row[name] for row in rows if row[name] is not None]
+        if not values:
+            return None
+        return float(sum(values))
+
+    def highest(name: str) -> float | None:
+        values = [row[name] for row in rows if row[name] is not None]
+        if not values:
+            return None
+        return float(max(values))
+
+    sample = {
+        "utilization": highest("utilization"),
+        "memory_used": total("memory_used"),
+        "memory_total": total("memory_total"),
+        "temperature": highest("temperature"),
     }
+    if all(value is None for value in sample.values()):
+        return None
+    return sample
 
 
 def sample_gpu(now: float | None = None) -> None:
@@ -942,7 +1162,9 @@ def sample_gpu(now: float | None = None) -> None:
 
     The sample is kept in the rolling history. A sample younger than
     `GPU_SAMPLE_SECONDS` is reused, so the 404 and HTML paths do not run
-    nvidia-smi and a fast poll does not either.
+    nvidia-smi and a fast poll does not either. A failed read adds nothing and
+    does not reset the last sample time, so the strip can show how long ago the
+    last real reading was.
     """
     current = time.time() if now is None else now
     if _gpu_history:
@@ -955,17 +1177,26 @@ def sample_gpu(now: float | None = None) -> None:
         _gpu_history.append(sample)
 
 
-def _gpu_state() -> dict[str, Any]:
+def _gpu_state(now: float | None = None) -> dict[str, Any]:
+    """The current sample, the history, and the age of the last reading.
+
+    `age_seconds` is None when no reading has ever succeeded. The page shows
+    that age next to the sample count, so a sampler that has stopped returning
+    readings is visible instead of looking like a quiet GPU.
+    """
     if not _gpu_history:
-        return {"current": None, "history": []}
+        return {"current": None, "history": [], "age_seconds": None}
     latest = {key: value for key, value in _gpu_history[-1].items() if key != "t"}
-    return {"current": latest, "history": list(_gpu_history)}
+    current = time.time() if now is None else now
+    age = round(current - _gpu_history[-1].get("t", current), 1)
+    return {"current": latest, "history": list(_gpu_history), "age_seconds": age}
 
 
 def collect_dashboard(paths: Iterable[str | Path]) -> dict[str, Any]:
     """Collect the dashboard data for every run under the given paths."""
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     now = datetime.now(timezone.utc).timestamp()
+    live_arms = _process_arms()
     runs: list[dict[str, Any]] = []
     seen: set[str] = set()
     for arm, run_dir in _resolve_paths(paths):
@@ -976,8 +1207,12 @@ def collect_dashboard(paths: Iterable[str | Path]) -> dict[str, Any]:
         if key in seen:
             continue
         seen.add(key)
-        runs.append(_collect_run(arm, run_dir, now))
-    return {"generated_at": generated_at, "runs": runs, "gpu": _gpu_state()}
+        runs.append(_collect_run(arm, run_dir, now, live_arms))
+    return {
+        "generated_at": generated_at,
+        "runs": runs,
+        "gpu": _gpu_state(now),
+    }
 
 
 def _embed_json(data: Mapping[str, Any]) -> str:

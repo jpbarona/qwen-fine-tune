@@ -4,7 +4,11 @@ import App from './App'
 import './index.css'
 import type { Dashboard } from './types'
 
-const empty: Dashboard = { generated_at: '', runs: [], gpu: { current: null, history: [] } }
+const empty: Dashboard = {
+  generated_at: '',
+  runs: [],
+  gpu: { current: null, history: [], age_seconds: null },
+}
 
 function readInitial(): Dashboard {
   const element = document.getElementById('initial-data')

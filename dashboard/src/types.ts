@@ -30,6 +30,7 @@ export interface StageProgress {
   band: string | null
   solved: number
   total: number
+  dropped: number
   percent: number | null
   points: StagePoint[]
 }
@@ -101,6 +102,10 @@ export interface Run {
   status: string
   steps_done: number
   target_steps: number | null
+  start_batch_prompts: number | null
+  prompt_samples: number
+  prompt_sample_target: number | null
+  entropy_every_steps: number | null
   stage: string | null
   bands: BandRate[]
   stage_progress: StageProgress
@@ -125,7 +130,7 @@ export interface GpuSample {
 export interface Dashboard {
   generated_at: string
   runs: Run[]
-  gpu: { current: GpuSample | null; history: GpuSample[] }
+  gpu: { current: GpuSample | null; history: GpuSample[]; age_seconds: number | null }
 }
 
 declare global {
