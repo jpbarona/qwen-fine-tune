@@ -440,6 +440,105 @@ def test_shipped_lfm_profiles_use_pinned_model_and_hf() -> None:
 
 
 @pytest.mark.parametrize("family", ["lfm2", "qwen3"])
+def test_cached_logprobs_match_masked_rollout_batch(monkeypatch, family) -> None:
+    """Single-sequence convolution forwards must omit masked rollout padding."""
+    torch = pytest.importorskip("torch")
+    transformers = pytest.importorskip("transformers")
+    peft = pytest.importorskip("peft")
+    if family == "lfm2" and int(transformers.__version__.split(".")[0]) < 5:
+        pytest.skip("LFM2.5 requires the optional Transformers 5 environment")
+    from types import SimpleNamespace
+    from transformers import AutoModelForCausalLM
+    from rlvr.experiment import Prompt
+    from rlvr.model_profiles import LFM2, QWEN3
+    from rlvr.qwen import CausalLMGenerator
+
+    torch.manual_seed(17)
+    model_options = dict(
+        vocab_size=12, hidden_size=16, intermediate_size=32,
+        num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1,
+        max_position_embeddings=64, initializer_range=0.5,
+        pad_token_id=0, eos_token_id=1, bos_token_id=3,
+    )
+    if family == "lfm2":
+        from transformers import Lfm2Config
+        profile = LFM2
+        config = Lfm2Config(
+            **model_options, full_attn_idxs=[1],
+            block_multiple_of=1, block_auto_adjust_ff_dim=False,
+        )
+    else:
+        from transformers import Qwen3Config
+        profile = QWEN3
+        config = Qwen3Config(**model_options, head_dim=8)
+    model = peft.get_peft_model(
+        AutoModelForCausalLM.from_config(config),
+        peft.LoraConfig(
+            r=2, lora_alpha=4, target_modules=list(profile.attention_targets),
+            task_type=peft.TaskType.CAUSAL_LM, lora_dropout=0.0,
+        ),
+    )
+    with torch.no_grad():
+        model.get_input_embeddings().weight[0].fill_(0.5)
+        for name, parameter in model.named_parameters():
+            if ".lora_B." in name:
+                parameter.normal_(std=0.1)
+    trainer = object.__new__(CausalLMGenerator)
+    trainer._torch = torch
+    trainer._device = torch.device("cpu")
+    trainer.model = model
+    trainer.profile = profile
+    trainer.think_end_token_id = 5
+    trainer.kl_beta = 0.1
+    trainer.clip_epsilon = 0.2
+    trainer.tokenizer = SimpleNamespace(eos_token_id=1, decode=lambda *args, **kwargs: "code")
+    prompt_ids = [[0, 0, 3, 6, 7, 4], [3, 6, 7, 6, 7, 4]]
+    prompt_masks = [[0, 0, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1]]
+    completion = [6, 5, 7, 1]
+    batch = torch.tensor([row + completion for row in prompt_ids])
+    masks = torch.tensor([row + [1] * len(completion) for row in prompt_masks])
+    with torch.no_grad():
+        logits = model(batch, attention_mask=masks, use_cache=False).logits[0]
+        expected_policy = trainer._completion_logprobs_from_logits(logits, 6, completion)
+        with model.disable_adapter():
+            logits = model(batch, attention_mask=masks, use_cache=False).logits[0]
+        expected_reference = trainer._completion_logprobs_from_logits(logits, 6, completion)
+
+    _, entries = trainer._decode_group(
+        Prompt(prompt_id="short", problem="write code"), prompt_ids[0], prompt_masks[0], 6,
+        prompt_truncated=False, completion_rows=[completion], caching=True,
+    )
+    entry = entries[0]
+    torch.testing.assert_close(torch.tensor(entry.old_logprobs), expected_policy)
+    torch.testing.assert_close(torch.tensor(entry.reference_logprobs), expected_reference)
+    assert not torch.allclose(expected_policy, expected_reference)
+    if family == "lfm2":
+        assert entry.input_ids == [3, 6, 7, 4] + completion
+        assert entry.prompt_length == 4
+        assert entry.attention_mask == [1] * len(entry.input_ids)
+    else:
+        assert entry.input_ids == prompt_ids[0] + completion
+        assert entry.prompt_length == 6
+        assert entry.attention_mask == masks[0].tolist()
+
+    observed = []
+    original = trainer._completion_logprobs_from_logits
+
+    def record_new_logprobs(logits, prompt_length, token_ids):
+        result = original(logits, prompt_length, token_ids)
+        observed.append(result.detach())
+        return result
+
+    monkeypatch.setattr(trainer, "_completion_logprobs_from_logits", record_new_logprobs)
+    surrogate, kl, _, _ = trainer._group_terms(entry, torch.tensor(1.0), True)
+    torch.testing.assert_close(observed[-1], expected_policy)
+    (-surrogate + trainer.kl_beta * kl).backward()
+    gradients = [parameter.grad for parameter in model.parameters() if parameter.requires_grad]
+    assert all(gradient is not None and torch.isfinite(gradient).all() for gradient in gradients)
+    assert all(parameter.grad is None for parameter in model.parameters() if not parameter.requires_grad)
+
+
+@pytest.mark.parametrize("family", ["lfm2", "qwen3"])
 def test_tiny_model_generate_update_and_resume(tmp_path, family) -> None:
     """Exercise the actual optional runtime without downloading model weights."""
     torch = pytest.importorskip("torch")
