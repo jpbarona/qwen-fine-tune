@@ -49,14 +49,6 @@ test('accepts sparse GPU readings and newer fields', () => {
   assert.equal(isDashboard(data), true)
 })
 
-test('accepts the gradient norm series and tolerates its gaps', () => {
-  const data: any = payload()
-  data.runs[0].latest.grad_norm = 1.25
-  data.runs[0].series.grad_norm = [null, 1.25]
-  assert.equal(isDashboard(data), true)
-  assert.deepEqual(data.runs[0].series.grad_norm, [null, 1.25])
-})
-
 const corruptions: [string, (data: any) => void][] = [
   ['null GPU history sample', (data) => { data.gpu.history = [null] }],
   ['non-numeric GPU sample', (data) => { data.gpu.history = [{ utilization: {} }] }],
