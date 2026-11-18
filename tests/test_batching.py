@@ -331,6 +331,12 @@ def test_settle_keeps_the_largest_size_that_fit() -> None:
     assert policy.current == 2
 
 
+def test_oom_shrinks_a_settled_batch_that_previously_fit() -> None:
+    policy = BatchSizePolicy(current=4, largest_fit=4, settled=True)
+    policy.settle(failed_prompts=4)
+    assert policy.current == 3
+    assert policy.largest_fit == 3
+
 def test_cuda_out_of_memory_is_detected_without_torch() -> None:
     class OutOfMemoryError(RuntimeError):
         pass
@@ -544,6 +550,18 @@ def test_a_cuda_oom_settles_the_batch_and_continues(tmp_path) -> None:
     # The first step asked for two prompts, hit the guard, and retried at one.
     assert [row["prompts"] for row in store.metrics] == [1, 1]
     assert result.stop_reason == "completed"
+
+
+def test_a_cuda_oom_retries_without_skipping_prompts(tmp_path) -> None:
+    generator = OomOnceGenerator()
+    experiment, store = run_experiment(
+        tmp_path, prompts=make_prompts(4), steps=2, generator=generator,
+    )
+    experiment.run()
+    assert [prompt_id for prompt_id, _ in generator.groups] == [
+        "mbpp-0000", "mbpp-0001"
+    ]
+    assert experiment._prompt_cursor == 2
 
 
 def test_a_cuda_oom_at_one_prompt_stops_cleanly(tmp_path) -> None:

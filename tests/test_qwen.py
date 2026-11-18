@@ -152,13 +152,17 @@ def test_clipped_surrogate_leaves_a_unit_ratio_unchanged() -> None:
 def test_qwen_module_imports_without_importing_torch() -> None:
     # The real trainer imports torch lazily so the CPU suite can import the
     # module. This test fails if a top-level torch import is ever added.
-    import importlib
+    import os
+    from pathlib import Path
+    import subprocess
     import sys
 
-    sys.modules.pop("torch", None)
-    module = importlib.import_module("rlvr.qwen")
-    assert "torch" not in sys.modules
-    assert module.extract_code_from_answer("```python\nx = 1\n```") == "x = 1"
+    source_root = Path(__file__).resolve().parents[1] / "src"
+    subprocess.run(
+        [sys.executable, "-c", "import sys\nimport rlvr.qwen\nassert 'torch' not in sys.modules"],
+        env={**os.environ, "PYTHONPATH": str(source_root)},
+        check=True,
+    )
 
 
 def test_completion_logprobs_skips_the_prompt_positions() -> None:
@@ -340,3 +344,226 @@ def test_mean_token_loss_equal_means_gives_that_mean() -> None:
 
 def test_mean_token_loss_is_zero_for_an_empty_group() -> None:
     assert mean_token_loss([]) == 0.0
+
+
+def test_profiles_use_the_architecture_output_projection() -> None:
+    from rlvr.model_profiles import LFM2, QWEN3, model_profile
+
+    assert model_profile("Qwen/Qwen3-0.6B") == QWEN3
+    assert model_profile("LiquidAI/LFM2.5-2.6B") == LFM2
+    assert model_profile("/local/model", model_type="lfm2") == LFM2
+    assert LFM2.attention_targets == (
+        "self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.out_proj"
+    )
+    with pytest.raises(ValueError, match="unsupported model architecture"):
+        model_profile("/local/model", model_type="other")
+
+
+def test_lfm_requires_its_transformers_5_tokenizer_runtime() -> None:
+    from rlvr.model_profiles import LFM2, QWEN3, validate_transformers_version
+
+    validate_transformers_version(QWEN3, "4.57.1")
+    validate_transformers_version(LFM2, "5.0.0")
+    with pytest.raises(ValueError, match="pip install -e.*lfm"):
+        validate_transformers_version(LFM2, "4.57.1")
+
+
+def test_prompt_template_owns_tokenization_and_lfm_always_thinks() -> None:
+    from rlvr.experiment import Prompt
+    from rlvr.model_profiles import LFM2, QWEN3
+    from rlvr.qwen import QwenGenerator
+
+    calls = []
+
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            calls.append(kwargs)
+            return [1, 2, 3]
+
+    generator = object.__new__(QwenGenerator)
+    generator.tokenizer = Tokenizer()
+    generator.profile = LFM2
+    generator.max_prompt_tokens = 10
+    prompt = Prompt(prompt_id="p", problem="Write a function")
+    assert generator.encode_prompt(prompt, thinking=False) == ([1, 2, 3], False)
+    assert calls[-1] == {"tokenize": True, "add_generation_prompt": True}
+    generator.profile = QWEN3
+    generator.encode_prompt(prompt, thinking=False)
+    assert calls[-1]["enable_thinking"] is False
+
+
+def test_reasoning_split_uses_the_loaded_tokenizer_marker() -> None:
+    from rlvr.qwen import QwenGenerator
+
+    generator = object.__new__(QwenGenerator)
+    generator.think_end_token_id = 7
+    assert generator._split_at_think_end([1, 7, 151668, 3]) == 2
+
+
+def test_checkpoint_model_and_adapter_identity_is_checked() -> None:
+    from rlvr.model_profiles import LFM2
+    from rlvr.qwen import QwenGenerator
+
+    generator = object.__new__(QwenGenerator)
+    generator.model_name = "LiquidAI/LFM2.5-2.6B"
+    generator.revision = "revision"
+    generator.profile = LFM2
+    generator.lora_rank = 32
+    generator.lora_alpha = 64
+    adapter = {
+        "base_model_name_or_path": generator.model_name,
+        "r": 32,
+        "lora_alpha": 64,
+        "target_modules": list(LFM2.attention_targets),
+    }
+    generator._validate_checkpoint_identity(adapter, {})  # legacy optimizer state
+    with pytest.raises(ValueError, match="base model"):
+        generator._validate_checkpoint_identity(
+            dict(adapter, base_model_name_or_path="Qwen/Qwen3-0.6B"), {}
+        )
+    with pytest.raises(ValueError, match="model_revision"):
+        generator._validate_checkpoint_identity(adapter, {"model_revision": "wrong"})
+    with pytest.raises(ValueError, match="target modules"):
+        generator._validate_checkpoint_identity(dict(adapter, target_modules=["o_proj"]), {})
+
+
+def test_shipped_lfm_profiles_use_pinned_model_and_hf() -> None:
+    from pathlib import Path
+    from rlvr.config import load_config
+
+    root = Path(__file__).resolve().parents[1]
+    for name in ("lfm.toml", "lfm-smoke.toml"):
+        config = load_config(root / "configs" / name)
+        assert config.model_name == "LiquidAI/LFM2.5-2.6B"
+        assert len(config.model_revision) == 40
+        assert config.engine == "hf"
+
+
+@pytest.mark.parametrize("family", ["lfm2", "qwen3"])
+def test_tiny_model_generate_update_and_resume(tmp_path, family) -> None:
+    """Exercise the actual optional runtime without downloading model weights."""
+    torch = pytest.importorskip("torch")
+    transformers = pytest.importorskip("transformers")
+    pytest.importorskip("peft")
+    if family == "lfm2" and int(transformers.__version__.split(".")[0]) < 5:
+        pytest.skip("LFM2.5 requires the optional Transformers 5 environment")
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import Whitespace
+    from transformers import AutoModelForCausalLM, PreTrainedTokenizerFast
+    from rlvr.experiment import Prompt
+    from rlvr.qwen import CausalLMGenerator, _ThinkingBudgetProcessor
+
+    vocabulary = {
+        "<pad>": 0, "<eos>": 1, "<unk>": 2, "<bos>": 3,
+        "<think>": 4, "</think>": 5, "write": 6, "code": 7,
+    }
+    backend = Tokenizer(WordLevel(vocabulary, unk_token="<unk>"))
+    backend.pre_tokenizer = Whitespace()
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=backend, pad_token="<pad>", eos_token="<eos>",
+        unk_token="<unk>", bos_token="<bos>",
+        additional_special_tokens=["<think>", "</think>"],
+        chat_template="{{ bos_token }}{{ messages[0]['content'] }}<think>",
+    )
+    folder = tmp_path / f"tiny-{family}"
+    tokenizer.save_pretrained(folder)
+    model_options = dict(
+        vocab_size=len(vocabulary), hidden_size=16, intermediate_size=32,
+        num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1,
+        max_position_embeddings=64,
+        pad_token_id=0, eos_token_id=1, bos_token_id=3,
+    )
+    if family == "lfm2":
+        from transformers import Lfm2Config
+        config = Lfm2Config(
+            **model_options, full_attn_idxs=[1],
+            block_multiple_of=1, block_auto_adjust_ff_dim=False,
+        )
+    else:
+        from transformers import Qwen3Config
+        config = Qwen3Config(**model_options, head_dim=8)
+    AutoModelForCausalLM.from_config(config).save_pretrained(folder)
+    trainer = CausalLMGenerator(
+        model_name=str(folder), revision="main", lora_rank=2, lora_alpha=4,
+        learning_rate=1e-3, max_prompt_tokens=16, max_completion_tokens=4,
+        clip_epsilon=0.2, kl_beta=0.1, seed=0,
+    )
+    prompt = Prompt(prompt_id="tiny", problem="write code")
+    assert trainer.think_end_token_id == 5
+    assert trainer.profile.model_type == family
+    if family == "lfm2":
+        lora_parameters = [
+            name for name, _ in trainer.model.named_parameters() if "lora_" in name
+        ]
+        assert len(lora_parameters) == 8  # A and B for four attention projections
+        assert all(".self_attn." in name for name in lora_parameters)
+        assert not any(".conv." in name for name in lora_parameters)
+    # Emulate a failure halfway through the first group's backward pass.
+    parameter = next(p for p in trainer.model.parameters() if p.requires_grad)
+    parameter.grad = torch.ones_like(parameter)
+    assert trainer._accumulated_groups == 0
+    group = trainer.generate(prompt, n=2, temperature=0.9)
+    assert parameter.grad is None
+    pending = trainer._pending_groups
+    trainer.generate(prompt, n=1, temperature=0.0)
+    assert trainer._pending_groups is pending
+    before = [p.detach().clone() for p in trainer.model.parameters() if p.requires_grad]
+    trainer.update(prompt, group, [0.0, 1.0], measure_entropy=True)
+    assert trainer.step == 1
+    after = [p.detach().clone() for p in trainer.model.parameters() if p.requires_grad]
+    assert any(not torch.equal(a, b) for a, b in zip(before, after))
+    checkpoint = tmp_path / "checkpoint"
+    trainer.save_checkpoint(checkpoint)
+    base_identity = id(trainer.base_model)
+    trainer.load_checkpoint(checkpoint)
+    assert id(trainer.base_model) == base_identity
+    assert trainer.step == 1
+    assert all(torch.equal(a, b) for a, b in zip(after, [
+        p.detach() for p in trainer.model.parameters() if p.requires_grad
+    ]))
+    group = trainer.generate(prompt, n=2, temperature=0.9)
+    trainer.update(prompt, group, [1.0, 0.0])
+    assert trainer.step == 2
+
+    from safetensors import SafetensorError
+    from safetensors.torch import load_file, save_file
+
+    adapter_file = checkpoint / "adapter_model.safetensors"
+    saved_weights = load_file(adapter_file)
+    current_weights = {
+        name: value.detach().clone() for name, value in trainer.model.state_dict().items()
+    }
+    for corruption in ("missing", "unexpected", "shape", "truncated"):
+        # Also change valid tensors, so validation must precede any model load.
+        damaged = {name: value + 1 for name, value in saved_weights.items()}
+        key = next(iter(damaged))
+        if corruption == "missing":
+            damaged.pop(key)
+        elif corruption == "unexpected":
+            damaged["unexpected_adapter_tensor"] = torch.zeros(1)
+        elif corruption == "shape":
+            damaged[key] = damaged[key][:1]
+        if corruption == "truncated":
+            adapter_file.write_bytes(b"invalid safetensors")
+        else:
+            save_file(damaged, adapter_file)
+        with pytest.raises((ValueError, SafetensorError)):
+            trainer.load_checkpoint(checkpoint)
+        assert trainer.step == 2
+        assert all(
+            torch.equal(current_weights[name], value)
+            for name, value in trainer.model.state_dict().items()
+        )
+    save_file(saved_weights, adapter_file)
+
+    shorter = Prompt(prompt_id="shorter", problem="write")
+    assert len(trainer.generate_batch([prompt, shorter], n=1, temperature=0.0)) == 2
+
+    processor = _ThinkingBudgetProcessor(
+        prompt_length=1, budget=2, marker_id=5, eos_token_id=1
+    )
+    scores = processor(torch.tensor([[6, 4, 7], [6, 5, 7]]), torch.zeros(2, 8))
+    assert scores[0, 1] == 0
+    assert torch.isneginf(scores[0]).sum() == 7
+    assert torch.equal(scores[1], torch.zeros(8))

@@ -70,6 +70,12 @@ kl_beta = 0.0
 # group's measured footprint, in MiB, then stays at the largest size that fit.
 # Never a percentage, never below one prompt.
 memory_floor_mib = 512
+# Bound concurrent sandboxed test containers. Each keeps its own limits.
+test_workers = 4
+# Greedy evaluation questions decoded together. OOM retries halve this size.
+eval_batch_size = 8
+# Score the next generated prompt group while the current group backpropagates.
+prefetch_scoring = true
 
 [budget]
 # Hard caps. Unset means the run trains every planned step. These stop the loop
@@ -78,7 +84,7 @@ memory_floor_mib = 512
 # max_judge_calls = 100000
 
 [run]
-# One checkpoint every 20 steps. The ten newest are kept in the run folder:
+# One checkpoint every 20 steps. Fifteen are kept in the run folder:
 # the latest five consecutive, then older ones at doubling gaps.
 checkpoint_every_steps = 20
 # Checkpoint evaluation: every N steps, on a fixed subset of the test pool,

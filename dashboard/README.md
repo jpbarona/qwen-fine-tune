@@ -7,7 +7,8 @@ owns `/data.json`. This app only draws the payload.
 
 ```
 cd dashboard
-npm install
+npm ci
+npm test
 npm run build
 ```
 
@@ -43,3 +44,19 @@ write older than fifteen minutes is reported as stopped by the server.
 No CDN, no web fonts, no chart library. Tailwind v4 is compiled at build time,
 React is bundled, numbers use tabular figures. Add a dependency only if the SVG
 charts cannot express the panel.
+
+## Source and refresh behavior
+
+`src/App.tsx` owns the page shell. `src/components/` contains run panels,
+questions, and the system strip. `src/useDashboard.ts` owns polling and
+`src/validateDashboard.ts` validates the nested collections used by the page.
+Both the initial embedded payload and refresh responses pass through that
+validator. Older runs can omit timing metrics and optional question and drop
+collections. Invalid responses keep the last received data visible and show a
+retry control.
+
+Requests run one at a time with a 15-second timeout. Live refresh waits five
+seconds after each request completes, and pauses while the page is hidden.
+Pausing or leaving the page cancels its request. `npm test` uses Node 22's
+built-in test runner and TypeScript stripping to exercise malformed responses,
+sparse GPU readings, historical metrics, and waiting runs.
