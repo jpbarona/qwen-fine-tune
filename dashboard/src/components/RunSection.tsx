@@ -284,7 +284,7 @@ export default function RunSection({ run }: { run: Run }) {
           <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.mean_reward) }]} />
         </Panel>
         <Panel title="pass rate per step" right={rate(latest.pass_rate)}>
-          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.pass_rate) }]} yMin={0} format={percentTick} />
+          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.pass_rate) }]} format={percentTick} />
         </Panel>
         {hasPassAtOne ? (
           <Panel
@@ -301,7 +301,6 @@ export default function RunSection({ run }: { run: Run }) {
                 { color: MUTED, dots: true, points: checkpointPoints },
                 { color: ACCENT, dots: true, points: finalPoints },
               ]}
-              yMin={0}
               format={percentTick}
             />
           </Panel>
@@ -319,7 +318,7 @@ export default function RunSection({ run }: { run: Run }) {
           />
         </Panel>
         <Panel title="truncation rate per step" right={rate(latest.truncation_rate)}>
-          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.truncation_rate) }]} yMin={0} format={percentTick} />
+          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.truncation_rate) }]} format={percentTick} />
         </Panel>
         <Panel
           title="prompts and sequences per step"
@@ -340,7 +339,7 @@ export default function RunSection({ run }: { run: Run }) {
           />
         </Panel>
         <Panel title="stage completion per step (%)" right={run.stage_progress.band ?? undefined}>
-          <LineChart series={stageSegments(run.stage_progress.points)} yMin={0} yMax={100} format={(value) => `${value.toFixed(0)}%`} />
+          <LineChart series={stageSegments(run.stage_progress.points)} format={(value) => `${value.toFixed(0)}%`} />
         </Panel>
         <Panel
           title="gpu memory per step (GiB)"
