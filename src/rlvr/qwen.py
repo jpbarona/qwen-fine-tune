@@ -454,11 +454,11 @@ def seed_rngs(seed: int) -> None:
 class _GroupEntry:
     """One sampled completion kept for the next GRPO update.
 
-    `input_ids` is the padded prompt plus generated tokens, so the leading pads
-    are in the sequence the model saw. `attention_mask` marks those pads with 0,
-    and the update pass feeds the same mask back, so the logprobs match the
-    sampling forward pass. `prompt_length` is the padded prompt width, which is
-    where the completion starts. `old_logprobs` holds the per-token policy
+    `input_ids` is the prompt plus generated tokens. Qwen entries keep the
+    rollout batch's leading padding and its attention mask. LFM entries remove
+    leading padding so single-sequence convolution forwards match the masked
+    rollout batch. `prompt_length` is the width of the stored prompt, where the
+    completion starts. `old_logprobs` holds the per-token policy
     logprobs of the completion at temperature 1.0, captured at generation time
     and detached. `reference_logprobs` is the same under the base model with the
     adapter disabled, present only when the KL coefficient is positive.
@@ -821,6 +821,15 @@ class QwenGenerator:
         torch = self._torch
         eos = self.tokenizer.eos_token_id
         real_prompt_length = sum(attention_mask)
+        # Transformers 5.0 LFM convolution masks padding only for batch sizes
+        # above one. Teacher forcing runs one sequence at a time, so retaining
+        # a rollout batch's left pads would change its convolution states.
+        cache_offset = (
+            prompt_length - real_prompt_length
+            if self.profile.model_type == "lfm2"
+            else 0
+        )
+        cache_prompt_length = prompt_length - cache_offset
         group: list[Generation] = []
         entries: list[_GroupEntry] = []
         for raw_ids in completion_rows:
@@ -854,22 +863,22 @@ class QwenGenerator:
             )
 
             if caching:
-                entry_ids = list(padded_ids) + generated_ids
-                entry_mask = list(attention_mask) + [1] * len(generated_ids)
+                entry_ids = list(padded_ids)[cache_offset:] + generated_ids
+                entry_mask = list(attention_mask)[cache_offset:] + [1] * len(generated_ids)
                 with torch.no_grad():
                     sequence = torch.tensor([entry_ids], device=self._device)
                     old_logprobs = self._completion_logprobs(
-                        sequence, prompt_length, entry_mask
+                        sequence, cache_prompt_length, entry_mask
                     ).tolist()
                 reference_logprobs = self._reference_logprobs(
-                    entry_ids, prompt_length, entry_mask, generated_ids
+                    entry_ids, cache_prompt_length, entry_mask, generated_ids
                 )
                 entries.append(
                     _GroupEntry(
                         prompt_id=prompt.prompt_id,
                         input_ids=entry_ids,
                         attention_mask=entry_mask,
-                        prompt_length=prompt_length,
+                        prompt_length=cache_prompt_length,
                         old_logprobs=old_logprobs,
                         reference_logprobs=reference_logprobs,
                     )
@@ -886,9 +895,9 @@ class QwenGenerator:
         """Per-token logprobs of the completion under the policy at temperature 1.0.
 
         This is the only path used for both the old and the new logprobs, so the
-        ratio is 1.0 on the first update when the policy has not changed. The
-        mask is the one the sampling forward pass saw, so the leading pads do
-        not enter the attention.
+        ratio is 1.0 on the first update when the policy has not changed. Qwen
+        keeps the rollout mask, and LFM uses an unpadded sequence to preserve
+        the masked rollout batch's convolution states.
         """
         kwargs: dict[str, Any] = {}
         if attention_mask is not None:
