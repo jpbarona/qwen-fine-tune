@@ -9,7 +9,7 @@ Interfaces, frozen for later tasks:
     Generator.generate(prompt, *, n, temperature) -> list[Generation]
     Generator.generate_batch(prompts, *, n, temperature) -> list[list[Generation]]
     Generator.accumulate(prompt, generations, rewards, *, measure_entropy) -> float | None
-    Generator.apply_update() -> None
+    Generator.apply_update() -> float | None
     Generator.save_checkpoint(directory) -> None
     Generator.load_checkpoint(directory) -> None
     TestRunner.run(prompt, code) -> Outcome
@@ -206,7 +206,7 @@ class Generator(Protocol):
         measure_entropy: bool = False,
     ) -> float | None: ...
 
-    def apply_update(self) -> None: ...
+    def apply_update(self) -> float | None: ...
 
     def save_checkpoint(self, directory: Path) -> None: ...
 
@@ -277,6 +277,7 @@ class StepResult:
     truncated: int
     prompt_truncated: int
     mean_entropy: float | None
+    grad_norm: float | None
     mastered: tuple[Prompt, ...]
     timings: Mapping[str, float] = field(default_factory=dict)
 
@@ -515,6 +516,7 @@ class Experiment:
                     truncated=result.truncated,
                     prompt_truncated=result.prompt_truncated,
                     mean_entropy=result.mean_entropy,
+                    grad_norm=result.grad_norm,
                     memory=memory,
                     timings=result.timings,
                 )
@@ -869,7 +871,7 @@ class Experiment:
         # Optimizer allocation failures can leave some parameters updated. They
         # cannot safely be retried as another sample from the previous policy.
         try:
-            self.generator.apply_update()
+            grad_norm = self.generator.apply_update()
         except Exception as error:
             if is_cuda_out_of_memory(error):
                 raise RuntimeError(
@@ -893,6 +895,7 @@ class Experiment:
             truncated=truncated,
             prompt_truncated=prompt_truncated,
             mean_entropy=sum(entropies) / len(entropies) if entropies else None,
+            grad_norm=grad_norm,
             mastered=tuple(mastered),
             timings=timings,
         )
@@ -1181,6 +1184,7 @@ class Experiment:
         truncated: int = 0,
         prompt_truncated: int = 0,
         mean_entropy: float | None = None,
+        grad_norm: float | None = None,
         memory: MemoryReport | None = None,
         timings: Mapping[str, float] | None = None,
     ) -> dict[str, Any]:
@@ -1188,7 +1192,8 @@ class Experiment:
 
         `prompts` is the prompt groups in the batch and `sequences` is the
         sampled completions across them. `rollouts` keeps the old name for the
-        sequence count, so an older reader keeps working.
+        sequence count, so an older reader keeps working. `grad_norm` is null
+        when the generator has no gradients, as the fake does.
         """
         count = len(records)
         passed = sum(
@@ -1209,6 +1214,7 @@ class Experiment:
             "cache_hits": sum(1 for record in records if record.cache_hit),
             "truncation_rate": truncated / count,
             "prompt_truncation_rate": prompt_truncated / count,
+            "grad_norm": grad_norm,
         }
         row.update(timings or {})
         seconds = row.get("step_seconds", 0.0)

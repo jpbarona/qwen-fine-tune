@@ -15,6 +15,7 @@ from rlvr.qwen import (
     completion_truncated,
     entropy_positions,
     extract_code_from_answer,
+    gradient_norm,
     group_advantages,
     k3_divergence,
     log_softmax,
@@ -111,6 +112,45 @@ def test_entropy_positions_rejects_bad_arguments() -> None:
         entropy_positions(-1)
     with pytest.raises(ValueError, match="max_tokens"):
         entropy_positions(4, max_tokens=0)
+
+
+class _Gradient:
+    """A stand-in for a tensor gradient with one 2-norm call."""
+
+    def __init__(self, *values: float) -> None:
+        self.values = values
+
+    def detach(self) -> "_Gradient":
+        return self
+
+    def norm(self, order: int) -> float:
+        assert order == 2
+        return math.sqrt(sum(value * value for value in self.values))
+
+
+class _Parameter:
+    """A stand-in for a trainable parameter."""
+
+    def __init__(self, grad, requires_grad: bool = True) -> None:
+        self.grad = grad
+        self.requires_grad = requires_grad
+
+
+def test_gradient_norm_is_the_euclidean_norm_over_parameters() -> None:
+    parameters = [
+        _Parameter(_Gradient(3.0, 0.0)),
+        _Parameter(_Gradient(0.0, 4.0)),
+    ]
+    assert gradient_norm(parameters) == pytest.approx(5.0)
+
+
+def test_gradient_norm_ignores_a_parameter_with_a_null_gradient() -> None:
+    parameters = [
+        _Parameter(_Gradient(3.0, 0.0)),
+        _Parameter(None),
+        _Parameter(_Gradient(0.0, 4.0)),
+    ]
+    assert gradient_norm(parameters) == pytest.approx(5.0)
 
 
 def test_group_advantages_are_mean_zero_unit_std() -> None:

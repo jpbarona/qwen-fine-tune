@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -54,6 +54,7 @@ __all__ = [
     "completion_truncated",
     "entropy_positions",
     "extract_code_from_answer",
+    "gradient_norm",
     "group_advantages",
     "k3_divergence",
     "log_softmax",
@@ -241,6 +242,25 @@ def mean_token_loss(per_token_losses: Sequence[Sequence[float]]) -> float:
     if count == 0:
         return 0.0
     return total / count
+
+
+def gradient_norm(parameters: Iterable[Any]) -> float:
+    """The total L2 norm of the gradients on the parameters that train.
+
+    A parameter that does not require grad, or whose gradient is null, adds
+    nothing. Each tensor's own 2-norm is exact, and `math.hypot` combines them
+    without overflowing on a large model. This is the value logged for one
+    optimizer update.
+    """
+    norm = 0.0
+    for parameter in parameters:
+        if not getattr(parameter, "requires_grad", False):
+            continue
+        gradient = getattr(parameter, "grad", None)
+        if gradient is None:
+            continue
+        norm = math.hypot(norm, float(gradient.detach().norm(2)))
+    return norm
 
 
 def clipped_surrogate(ratio: float, advantage: float, epsilon: float) -> float:
@@ -520,6 +540,7 @@ class QwenGenerator:
         self.trainable = trainable
         self.profile = model_profile(model_name)
         self.step = 0
+        self.last_grad_norm: float | None = None
         self._pending_groups: list[list[_GroupEntry]] | None = None
         self._accumulated_groups = 0
 
@@ -1072,13 +1093,15 @@ class QwenGenerator:
             return entropy_total / entropy_tokens
         return None
 
-    def apply_update(self) -> None:
+    def apply_update(self) -> float:
         """Step the optimizer once over every group accumulated since the last call.
 
         The accumulated gradient is divided by the group count first, so the
         update is the mean over the prompt batch instead of a sum that grows
-        with the batch size. The weight update counter moves once per call,
-        which is also the step number a checkpoint stores.
+        with the batch size. The total L2 norm of those mean gradients is
+        stored on the instance and returned, so the step metric records what
+        the optimizer was about to apply. The weight update counter moves once
+        per call, which is also the step number a checkpoint stores.
         """
         if not self.trainable:
             raise RuntimeError(
@@ -1092,11 +1115,13 @@ class QwenGenerator:
             if parameter.requires_grad and parameter.grad is not None:
                 parameter.grad.div_(count)
 
+        self.last_grad_norm = gradient_norm(self.model.parameters())
         self.optimizer.step()
         self.optimizer.zero_grad()
         self.step += 1
         self._accumulated_groups = 0
         self._pending_groups = None
+        return self.last_grad_norm
 
     def update(
         self,

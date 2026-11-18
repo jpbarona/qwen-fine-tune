@@ -215,13 +215,18 @@ class FakeGenerator:
         seed = _value(prompt.prompt_id, "entropy")
         return round(((seed >> 24) % 180) / 100 + 0.05, 4)
 
-    def apply_update(self) -> None:
-        """Count one weight update over the groups accumulated since the last call."""
+    def apply_update(self) -> float | None:
+        """Count one weight update over the groups accumulated since the last call.
+
+        The fake holds no weights and no gradients, so there is no norm to
+        report.
+        """
         if self._accumulated < 1:
             raise RuntimeError("apply_update called with no accumulated groups")
         self.update_groups.append(self._accumulated)
         self._accumulated = 0
         self.step += 1
+        return None
 
     def update(
         self,

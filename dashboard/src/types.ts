@@ -5,6 +5,7 @@ export interface SeriesMap {
   mean_reward: Nullable[]
   pass_rate: Nullable[]
   mean_entropy: Nullable[]
+  grad_norm: Nullable[]
   mean_completion_tokens: Nullable[]
   truncation_rate: Nullable[]
   cache_hits: Nullable[]
