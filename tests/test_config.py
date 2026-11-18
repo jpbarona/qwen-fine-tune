@@ -413,3 +413,27 @@ def test_a_bad_curriculum_setting_is_named(tmp_path, line: str) -> None:
     path.write_text(GOOD + f"\n[curriculum]\n{line}\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="curriculum"):
         load_config(path)
+
+
+def test_throughput_settings_have_bounded_defaults(write_config) -> None:
+    config = load_config(write_config(GOOD))
+    assert config.test_workers == 4
+    assert config.eval_batch_size == 8
+    assert config.prefetch_scoring is True
+
+
+@pytest.mark.parametrize(
+    "setting",
+    ["test_workers = 0", "test_workers = true", "eval_batch_size = -1",
+     "eval_batch_size = 1.5", "prefetch_scoring = 1", 'prefetch_scoring = "true"'],
+)
+def test_throughput_settings_reject_invalid_values(write_config, setting) -> None:
+    with pytest.raises(ConfigError, match=setting.split()[0]):
+        load_config(write_config(GOOD + "\n[training]\n" + setting))
+
+
+def test_throughput_settings_can_be_overridden(write_config) -> None:
+    config = load_config(write_config(
+        GOOD + "\n[training]\ntest_workers = 2\neval_batch_size = 3\nprefetch_scoring = false\n"
+    ))
+    assert (config.test_workers, config.eval_batch_size, config.prefetch_scoring) == (2, 3, False)

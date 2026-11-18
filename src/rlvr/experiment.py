@@ -42,7 +42,9 @@ so a resume starts at the batch after the checkpoint.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from . import repro
@@ -276,6 +278,14 @@ class StepResult:
     prompt_truncated: int
     mean_entropy: float | None
     mastered: tuple[Prompt, ...]
+    timings: Mapping[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _ScoredGroup:
+    records: tuple[RolloutRecord, ...]
+    solved: bool
+    seconds: float
 
 
 @dataclass
@@ -506,6 +516,7 @@ class Experiment:
                     prompt_truncated=result.prompt_truncated,
                     mean_entropy=result.mean_entropy,
                     memory=memory,
+                    timings=result.timings,
                 )
             )
             policy.observe(memory, prompts=result.prompts)
@@ -653,6 +664,9 @@ class Experiment:
                 "gradient_accumulation": config.generations_per_prompt,
                 "optimizer_updates_per_step": 1,
                 "memory_floor_mib": config.memory_floor_mib,
+                "test_workers": config.test_workers,
+                "eval_batch_size": config.eval_batch_size,
+                "prefetch_scoring": config.prefetch_scoring,
             },
             "checkpoint_dir": str(self.store.checkpoints_dir),
         }
@@ -731,47 +745,31 @@ class Experiment:
         stage: str,
         thinking_budget: int | None = None,
     ) -> tuple[StepResult, int] | None:
-        """Run one step and shrink once if CUDA runs out of memory.
+        """Retry CUDA allocation failures at a strictly smaller prompt count.
 
-        The policy settles at the largest batch that fit, the allocator cache is
-        released, and the step is retried at the smaller size. When the batch is
-        already at one prompt and still cannot fit, None is returned so the run
-        stops cleanly with `stop_reason` `"out_of_memory"` instead of crashing.
+        Failed attempts restore the prompt cursor and never advance the stage.
+        A previously successful size may fail on longer completions, so the
+        retry must also shrink when the policy has already settled.
         """
-        prompts, start = self._plan_step(
-            policy, staged=staged, stage_pool=stage_pool, stage_step=stage_step
-        )
-        try:
-            return (
-                self._training_step(
-                    step, prompts, stage, thinking_budget=thinking_budget
-                ),
-                start,
-            )
-        except Exception as error:
-            if not is_cuda_out_of_memory(error):
-                raise
-            policy.settle()
-            _empty_cuda_cache()
-            available = len(stage_pool) if staged else len(self.prompts)
-            if policy.count(available) >= len(prompts):
-                return None
+        cursor = self._prompt_cursor
+        while True:
+            self._prompt_cursor = cursor
             prompts, start = self._plan_step(
                 policy, staged=staged, stage_pool=stage_pool, stage_step=stage_step
             )
             try:
-                return (
-                self._training_step(
+                result = self._training_step(
                     step, prompts, stage, thinking_budget=thinking_budget
-                ),
-                start,
-            )
-            except Exception as retry_error:
-                if not is_cuda_out_of_memory(retry_error):
+                )
+                return result, start
+            except Exception as error:
+                if not is_cuda_out_of_memory(error):
                     raise
-                policy.settle()
+                self._prompt_cursor = cursor
+                policy.settle(failed_prompts=len(prompts))
                 _empty_cuda_cache()
-                return None
+                if len(prompts) == 1:
+                    return None
 
     def _first_open_stage(self, index: int) -> int:
         """The first stage at or after `index` that has training questions."""
@@ -797,6 +795,7 @@ class Experiment:
         The entropy flag is the same for every group in a step. The step value
         is the mean over the groups that returned one.
         """
+        started = perf_counter()
         measure_entropy = self._measures_entropy(step)
         batches = self.generator.generate_batch(
             list(prompts),
@@ -804,6 +803,7 @@ class Experiment:
             temperature=self.config.temperature,
             thinking_budget=thinking_budget,
         )
+        generation_seconds = perf_counter() - started
         self._check_batch_shape(prompts, batches)
 
         records: list[RolloutRecord] = []
@@ -811,31 +811,90 @@ class Experiment:
         mastered: list[Prompt] = []
         truncated = 0
         prompt_truncated = 0
+        scoring_seconds = 0.0
+        scoring_wait_seconds = 0.0
+        update_seconds = 0.0
 
-        for prompt, generations in zip(prompts, batches):
-            group, group_truncated, group_prompt_truncated, entropy, passed = (
-                self._prompt_group(step, prompt, stage, generations, measure_entropy)
-            )
-            records.extend(group)
-            truncated += group_truncated
-            prompt_truncated += group_prompt_truncated
-            if passed:
-                mastered.append(prompt)
-            if entropy is not None:
-                entropies.append(entropy)
+        # Only scoring runs on the worker. Model calls, gradient accumulation,
+        # record writes and optimizer updates remain on the training thread.
+        # One group ahead bounds discarded judge work if accumulation fails.
+        pool = (
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix="rlvr-scoring")
+            if self.config.prefetch_scoring else None
+        )
+        future = None
+        try:
+            if pool is not None:
+                future = pool.submit(
+                    self._score_prompt_group, step, prompts[0], stage, batches[0]
+                )
+            for index, (prompt, generations) in enumerate(zip(prompts, batches)):
+                wait_started = perf_counter()
+                scored = (
+                    future.result() if future is not None else
+                    self._score_prompt_group(step, prompt, stage, generations)
+                )
+                scoring_wait_seconds += perf_counter() - wait_started
+                scoring_seconds += scored.seconds
+                if pool is not None and index + 1 < len(prompts):
+                    future = pool.submit(
+                        self._score_prompt_group,
+                        step,
+                        prompts[index + 1],
+                        stage,
+                        batches[index + 1],
+                    )
+                update_started = perf_counter()
+                entropy = self.generator.accumulate(
+                    prompt,
+                    generations,
+                    [record.reward for record in scored.records],
+                    measure_entropy=measure_entropy,
+                )
+                update_seconds += perf_counter() - update_started
+                records.extend(scored.records)
+                truncated += sum(generation.truncated for generation in generations)
+                prompt_truncated += sum(
+                    generation.prompt_truncated for generation in generations
+                )
+                if scored.solved:
+                    mastered.append(prompt)
+                if entropy is not None:
+                    entropies.append(entropy)
+        finally:
+            if pool is not None:
+                pool.shutdown(wait=True, cancel_futures=True)
 
-        # One optimizer step for the whole batch, after every group has added
-        # its gradient. This is the only weight update in the step.
-        self.generator.apply_update()
-
-        mean_entropy = sum(entropies) / len(entropies) if entropies else None
+        update_started = perf_counter()
+        # Optimizer allocation failures can leave some parameters updated. They
+        # cannot safely be retried as another sample from the previous policy.
+        try:
+            self.generator.apply_update()
+        except Exception as error:
+            if is_cuda_out_of_memory(error):
+                raise RuntimeError(
+                    "optimizer allocation failed; resume from the last checkpoint "
+                    "because the update may be partial"
+                ) from error
+            raise
+        update_seconds += perf_counter() - update_started
+        timings = {
+            "generation_seconds": generation_seconds,
+            "scoring_seconds": scoring_seconds,
+            "scoring_wait_seconds": scoring_wait_seconds,
+            "update_seconds": update_seconds,
+            "step_seconds": perf_counter() - started,
+        }
+        if self.fake:
+            timings = {name: 0.0 for name in timings}
         return StepResult(
             records=tuple(records),
             prompts=len(prompts),
             truncated=truncated,
             prompt_truncated=prompt_truncated,
-            mean_entropy=mean_entropy,
+            mean_entropy=sum(entropies) / len(entropies) if entropies else None,
             mastered=tuple(mastered),
+            timings=timings,
         )
 
     def _check_batch_shape(
@@ -870,18 +929,45 @@ class Experiment:
         generations: Sequence[Generation],
         measure_entropy: bool,
     ) -> tuple[list[RolloutRecord], int, int, float | None, bool]:
-        """Test, judge, and accumulate one prompt group.
+        """Score and accumulate one group through the synchronous seam."""
+        scored = self._score_prompt_group(step, prompt, stage, generations)
+        entropy = self.generator.accumulate(
+            prompt,
+            generations,
+            [record.reward for record in scored.records],
+            measure_entropy=measure_entropy,
+        )
+        return (
+            list(scored.records),
+            sum(generation.truncated for generation in generations),
+            sum(generation.prompt_truncated for generation in generations),
+            entropy,
+            scored.solved,
+        )
 
-        All 8 generations are tested. The passing ones are judged in two batch
-        calls, one for output scores and one for process scores, so the judge
-        concurrency is used. A failed rollout still costs no judge call. The
-        group's rewards are accumulated once, with the entropy flag the step
-        asked for. Only a group where every generation passes removes the question
-        from a stage pool.
-        """
-        outcomes = [
-            self.test_runner.run(prompt, generation.code) for generation in generations
-        ]
+    def _run_tests(self, items: Sequence[tuple[Prompt, str]]) -> list[Outcome]:
+        """Use a runner's bounded batch seam, with legacy runner support."""
+        run_batch = getattr(self.test_runner, "run_batch", None)
+        outcomes = (
+            list(run_batch(items)) if run_batch is not None else
+            [self.test_runner.run(prompt, code) for prompt, code in items]
+        )
+        if len(outcomes) != len(items):
+            raise ValueError("test runner returned a different number of outcomes")
+        return outcomes
+
+    def _score_prompt_group(
+        self,
+        step: int,
+        prompt: Prompt,
+        stage: str,
+        generations: Sequence[Generation],
+    ) -> _ScoredGroup:
+        """Run tests and judges without touching the generator or store."""
+        started = perf_counter()
+        outcomes = self._run_tests(
+            [(prompt, generation.code) for generation in generations]
+        )
         passing = [
             index
             for index, outcome in enumerate(outcomes)
@@ -923,18 +1009,9 @@ class Experiment:
             for index, (generation, outcome) in enumerate(zip(generations, outcomes))
         ]
 
-        rewards = [record.reward for record in records]
-        entropy = self.generator.accumulate(
-            prompt,
-            generations,
-            rewards,
-            measure_entropy=measure_entropy,
+        return _ScoredGroup(
+            records=tuple(records), solved=solved, seconds=perf_counter() - started
         )
-        truncated = sum(1 for generation in generations if generation.truncated)
-        prompt_truncated = sum(
-            1 for generation in generations if generation.prompt_truncated
-        )
-        return records, truncated, prompt_truncated, entropy, solved
 
     def _measures_entropy(self, step: int) -> bool:
         """Whether this step is an entropy measurement step.
@@ -1105,6 +1182,7 @@ class Experiment:
         prompt_truncated: int = 0,
         mean_entropy: float | None = None,
         memory: MemoryReport | None = None,
+        timings: Mapping[str, float] | None = None,
     ) -> dict[str, Any]:
         """One metrics row. Entropy is present only on a measurement step.
 
@@ -1132,6 +1210,13 @@ class Experiment:
             "truncation_rate": truncated / count,
             "prompt_truncation_rate": prompt_truncated / count,
         }
+        row.update(timings or {})
+        seconds = row.get("step_seconds", 0.0)
+        if seconds > 0.0:
+            row["sequences_per_second"] = count / seconds
+            row["completion_tokens_per_second"] = (
+                sum(record.completion_tokens for record in records) / seconds
+            )
         row.update((memory or MemoryReport.zeros()).as_metrics())
         if mean_entropy is not None:
             row["mean_entropy"] = mean_entropy
@@ -1178,17 +1263,39 @@ class Experiment:
         subset: Mapping[str, Any] | None,
         stage: str | None = None,
     ) -> dict[str, Any]:
-        """Greedy pass@1 over `prompts`. One generation per question."""
+        """Greedy pass@1 in bounded batches, shrinking on CUDA OOM."""
+        started = perf_counter()
         prompt_ids: list[str] = []
         passed: list[bool] = []
-        for prompt in prompts:
-            generation = self.generator.generate(prompt, n=1, temperature=EVAL_TEMPERATURE)[0]
-            result = self.test_runner.run(prompt, generation.code)
-            prompt_ids.append(prompt.prompt_id)
-            passed.append(all_tests_passed(result.tests_passed, result.tests_total))
+        batch_size = self.config.eval_batch_size
+        offset = 0
+        while offset < len(prompts):
+            chunk = list(prompts[offset : offset + batch_size])
+            try:
+                groups = self.generator.generate_batch(
+                    chunk, n=1, temperature=EVAL_TEMPERATURE
+                )
+            except Exception as error:
+                if not is_cuda_out_of_memory(error) or len(chunk) == 1:
+                    raise
+                _empty_cuda_cache()
+                batch_size = max(1, len(chunk) // 2)
+                continue
+            if len(groups) != len(chunk) or any(len(group) != 1 for group in groups):
+                raise ValueError("evaluation needs exactly one generation per prompt")
+            outcomes = self._run_tests(
+                [(prompt, group[0].code) for prompt, group in zip(chunk, groups)]
+            )
+            prompt_ids.extend(prompt.prompt_id for prompt in chunk)
+            passed.extend(
+                all_tests_passed(result.tests_passed, result.tests_total)
+                for result in outcomes
+            )
+            offset += len(chunk)
         point: dict[str, Any] = {
             "step": step,
             "kind": kind,
+            "evaluation_seconds": 0.0 if self.fake else perf_counter() - started,
             "pass_at_1": pass_at_1(passed),
             "count": len(prompt_ids),
             "prompt_ids": prompt_ids,

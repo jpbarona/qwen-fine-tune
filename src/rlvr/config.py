@@ -37,6 +37,9 @@ Optional keys, with the defaults shown:
     [training] length_penalty_per_token = 0.001
     [training] length_penalty_floor = 0.2
     [training] memory_floor_mib = 512
+    [training] test_workers = 4
+    [training] eval_batch_size = 8
+    [training] prefetch_scoring = true
     [training] seed = 0
 
     [budget] max_steps = (unset: run all of fake.steps)
@@ -109,7 +112,7 @@ DEFAULT_CHECKPOINT_EVERY_STEPS = 20
 DEFAULT_STEPS = 1
 
 #: Defaults for the optional [training] table. These match SPEC.md and are only
-#: read by the real Qwen trainer. The fake path ignores them.
+#: read by the shared causal language model trainer. The fake path ignores them.
 DEFAULT_GENERATIONS_PER_PROMPT = 8
 DEFAULT_EPOCHS = 5
 DEFAULT_TEMPERATURE = 0.9
@@ -167,6 +170,9 @@ class Config:
     length_penalty_per_token: float = DEFAULT_LENGTH_PENALTY_PER_TOKEN
     length_penalty_floor: float = DEFAULT_LENGTH_PENALTY_FLOOR
     memory_floor_mib: int = DEFAULT_MEMORY_FLOOR_MIB
+    test_workers: int = 4
+    eval_batch_size: int = 8
+    prefetch_scoring: bool = True
     seed: int = DEFAULT_SEED
     stage: str = DEFAULT_STAGE
     carry_over_ratio: float = DEFAULT_CARRY_OVER_RATIO
@@ -247,6 +253,13 @@ def _optional_non_negative_int(raw: dict[str, Any], dotted: str, default: int) -
     if _optional(raw, dotted, None) is None:
         return default
     return _non_negative_int(raw, dotted)
+
+
+def _optional_bool(raw: dict[str, Any], dotted: str, default: bool) -> bool:
+    value = _optional(raw, dotted, default)
+    if not isinstance(value, bool):
+        raise ConfigError(f"config: '{dotted}' must be a bool, got {_shown(value)}")
+    return value
 
 
 def _optional_float(raw: dict[str, Any], dotted: str, default: float, *, positive: bool) -> float:
@@ -415,6 +428,9 @@ def load_config(path: str | Path) -> Config:
         memory_floor_mib=_optional_non_negative_int(
             raw, "training.memory_floor_mib", DEFAULT_MEMORY_FLOOR_MIB
         ),
+        test_workers=_optional_positive_int(raw, "training.test_workers", 4),
+        eval_batch_size=_optional_positive_int(raw, "training.eval_batch_size", 8),
+        prefetch_scoring=_optional_bool(raw, "training.prefetch_scoring", True),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
         stage=_band(raw, "curriculum.stage", DEFAULT_STAGE),
         carry_over_ratio=_optional_unit_float(

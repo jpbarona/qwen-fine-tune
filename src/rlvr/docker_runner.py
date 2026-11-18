@@ -35,6 +35,7 @@ import os
 import subprocess
 import tempfile
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -55,6 +56,9 @@ DEFAULT_IMAGE = "python:3.12-slim"
 
 #: Wall-clock limit for one candidate, including container startup.
 DEFAULT_TIMEOUT_SECONDS = 5.0
+
+#: Bound concurrent candidate containers to keep host work off the GPU path.
+DEFAULT_WORKERS = 4
 
 #: Stable error class names. `pass` means every test passed.
 ERROR_CLASSES: tuple[str, ...] = (
@@ -181,6 +185,12 @@ def docker_command(
         "--user",
         CONTAINER_USER,
         "--read-only",
+        "--pids-limit",
+        "64",
+        "--memory",
+        "256m",
+        "--cpus",
+        "1",
         "--tmpfs",
         "/tmp:rw,size=16m",
         "--volume",
@@ -216,12 +226,16 @@ class DockerTestRunner:
         image: str = DEFAULT_IMAGE,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         docker_bin: str = "docker",
+        workers: int = DEFAULT_WORKERS,
     ) -> None:
         if timeout <= 0:
             raise ValueError(f"timeout must be positive, got {timeout}")
         self.image = image
         self.timeout = float(timeout)
         self.docker_bin = docker_bin
+        if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+            raise ValueError(f"workers must be a positive integer, got {workers!r}")
+        self.workers = workers
         self._questions: dict[str, MBPPQuestion] = {}
         for question in questions:
             key = prompt_id_for(question)
@@ -290,6 +304,24 @@ class DockerTestRunner:
                 return self._runner_error(tests_total)
 
         return self._parse(completed, tests_total)
+
+    def run_batch(self, items: Sequence[tuple[Prompt, str]]) -> list[Outcome]:
+        """Run independent containers concurrently and keep candidate order.
+
+        Every candidate retains its own isolation and timeout. All workers join
+        before returning, including after an error, so control edits between
+        steps cannot race with the preceding batch.
+        """
+        if not items:
+            return []
+        if self.workers == 1 or len(items) == 1:
+            return [self.run(prompt, code) for prompt, code in items]
+        with ThreadPoolExecutor(
+            max_workers=min(self.workers, len(items)),
+            thread_name_prefix="rlvr-tests",
+        ) as pool:
+            futures = [pool.submit(self.run, prompt, code) for prompt, code in items]
+            return [future.result() for future in futures]
 
     def _kill(self, container_name: str) -> None:
         for args in (["kill", container_name], ["rm", "-f", container_name]):

@@ -180,7 +180,7 @@ class BatchSizePolicy:
         self.settled = True
         self.current = max(self.largest_fit, MIN_PROMPTS)
 
-    def settle(self) -> None:
+    def settle(self, *, failed_prompts: int | None = None) -> None:
         """Stop growing and keep the largest batch that fit.
 
         Called after a CUDA out-of-memory error. The failed size was too large,
@@ -189,3 +189,8 @@ class BatchSizePolicy:
         """
         self.settled = True
         self.current = max(self.largest_fit, MIN_PROMPTS)
+        if failed_prompts is not None:
+            if failed_prompts < MIN_PROMPTS:
+                raise ValueError("failed prompt count must be positive")
+            self.current = max(MIN_PROMPTS, min(self.current, failed_prompts - 1))
+            self.largest_fit = min(self.largest_fit, self.current)

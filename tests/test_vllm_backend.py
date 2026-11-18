@@ -282,3 +282,11 @@ def test_set_adapter_needs_an_engine_to_hand_the_adapter_to() -> None:
 
     with pytest.raises(RuntimeError, match="llm_engine"):
         engine.set_adapter("/tmp/adapter")
+
+
+def test_lfm_uses_hf_until_vllm_adapter_runtime_is_supported() -> None:
+    from rlvr.model_profiles import validate_inference_engine
+
+    validate_inference_engine("LiquidAI/LFM2.5-2.6B", "hf")
+    with pytest.raises(ValueError, match='training.engine = "hf"'):
+        validate_inference_engine("LiquidAI/LFM2.5-2.6B", "vllm")
