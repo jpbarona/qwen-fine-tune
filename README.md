@@ -27,6 +27,64 @@ The driver must support CUDA 12.8. The `train` extra pins
 samples with vLLM. Set `engine = "hf"` to use the Hugging Face loop instead,
 which works on the cu126 build.
 
+## LFM2.5-2.6B
+
+LFM uses the same GRPO trainer, reward arms, curriculum, evaluation, controls,
+and checkpoint workflow. Its model profile selects the tokenizer behavior and
+attention projection names. Use an isolated environment because the LFM
+Transformers 5 stack has different pins from the Qwen vLLM stack.
+
+```bash
+python3 -m venv .venv-lfm
+.venv-lfm/bin/pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+.venv-lfm/bin/pip install -e ".[lfm]"
+RLVR_VENV=.venv-lfm ./run.sh code-score --config configs/lfm-smoke.toml --runs-root runs-lfm-smoke
+RLVR_VENV=.venv-lfm ./run.sh code-score --config configs/lfm.toml --runs-root runs-lfm
+```
+
+Use separate run roots for the smoke and full runs if both need to be resumed.
+Add `--resume` with the original config and run root to continue a checkpoint.
+Model identity, revision, split seed, and fake/real mode are checked against
+saved metadata before run records are truncated.
+
+The LFM profile pins `LiquidAI/LFM2.5-2.6B` at revision
+`7141b56cd4650af95c7c7b86983443aed050c96a`. It uses `engine = "hf"`.
+The native LFM template always opens a reasoning block, including for screening
+and evaluation. The comparison starts from Qwen's hyperparameters and adapts
+attention projections only. Full-weight GPU performance still needs measurement.
+The assumptions, implementation details, and validation are recorded in
+[the pass notes](docs/6.1-sol-xhigh-pass.md).
+
+## Development and throughput
+
+```bash
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pytest -q
+cd dashboard
+npm ci
+npm run build
+```
+
+The dashboard build embeds JavaScript and CSS in `src/rlvr/web/index.html`.
+Commit this generated file with frontend changes. Pull request checks run the
+CPU suite and rebuild the dashboard to detect stale embedded assets.
+
+Training can run up to `training.test_workers` isolated test containers at once
+(default 4). `training.prefetch_scoring` defaults to true and scores the next
+already-generated group while the current group runs its backward pass.
+`training.eval_batch_size` defaults to 8 and shrinks on CUDA memory exhaustion.
+The training thread owns model calls and optimizer updates, with one optimizer
+step per generated prompt batch.
+
+Metrics record generation time, scoring time, time waiting for scores, update
+time, step time, and completion tokens per second. Scoring and update times can
+overlap. Step time covers generation through the optimizer update. Evaluation
+records its own duration. Use these together with the dashboard's GPU samples
+when comparing runs on the same GPU and profile.
+
+The source map and GPU validation procedure are in
+[the pass notes](docs/6.1-sol-xhigh-pass.md).
+
 ## Run the fake pipeline
 
 The fake path needs no GPU, no network, no Docker, and no model download. It is

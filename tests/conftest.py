@@ -74,6 +74,7 @@ def run_fake(tmp_path: Path):
             generator=FakeGenerator(),
             judge=FakeJudge(),
             test_runner=FakeTestRunner(),
+            fake=True,
             store=store,
             prompts=fake_prompts(2),
             eval_prompts=fake_eval_prompts(2),

@@ -1,0 +1,57 @@
+# LFM2.5-2.6B uses the shared GRPO workflow and attention-only LoRA.
+# Install .[lfm] in an isolated environment. Its native template always thinks.
+# Hyperparameters match the Qwen profile as a comparison starting point.
+
+# Small step and evaluation counts for validating LFM on a training GPU.
+# Full-weight GPU timing and memory requirements still need measurement.
+
+[model]
+name = "LiquidAI/LFM2.5-2.6B"
+revision = "7141b56cd4650af95c7c7b86983443aed050c96a"
+
+[judge]
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash-1017"
+base_url = "https://openrouter.ai/api/v1/chat/completions"
+api_key_env = "OPENROUTER_API_KEY"
+temperature = 0.0
+concurrency = 8
+max_attempts = 2
+timeout_seconds = 60
+cache_dir = "judge-cache"
+
+[data]
+name = "mbpp"
+dataset = "data/mbpp_full.jsonl"
+split_seed = 1234
+train_size = 714
+test_size = 250
+
+[training]
+method = "grpo"
+engine = "hf"
+generations_per_prompt = 8
+temperature = 0.9
+learning_rate = 1e-5
+epochs = 1
+lora_rank = 32
+lora_alpha = 64
+max_prompt_tokens = 512
+max_completion_tokens = 2048
+entropy_every_steps = 500
+clip_epsilon = 0.2
+kl_beta = 0.0
+seed = 0
+
+# The step budget caps the run at 8 steps. A step takes at least two prompt
+# groups, so the judge cap is set for 16 rollouts per step.
+[budget]
+max_steps = 8
+max_judge_calls = 128
+
+[run]
+checkpoint_every_steps = 4
+eval_every_steps = 4
+eval_questions = 4
+eval_final_questions = 8
+eval_subset_seed = 2026

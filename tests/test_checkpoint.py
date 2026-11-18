@@ -153,6 +153,17 @@ def test_select_keeps_every_checkpoint_when_under_the_total() -> None:
     assert select_checkpoints_to_keep([20, 40, 60]) == [20, 40, 60]
 
 
+def test_latest_skips_a_manifest_that_names_a_different_step(tmp_path) -> None:
+    for directory_step, manifest_step in ((10, 10), (20, 19)):
+        write_checkpoint_manifest(
+            tmp_path / checkpoint_dir_name(directory_step),
+            step=manifest_step, arm="code-score", timestamp="t",
+        )
+    latest = find_latest_checkpoint(tmp_path)
+    assert latest is not None
+    assert latest.step == 10
+
+
 def test_select_keeps_fifteen_of_forty_at_doubling_gaps() -> None:
     steps = [20 * index for index in range(1, 41)]
     kept = select_checkpoints_to_keep(steps)

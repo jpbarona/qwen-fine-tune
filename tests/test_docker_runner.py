@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
+from threading import Barrier, Lock
 
 import pytest
 
@@ -17,6 +18,7 @@ from rlvr.docker_runner import (
     docker_command,
 )
 from rlvr.experiment import Prompt
+from rlvr.experiment import Outcome
 
 PROMPT_ID = "mbpp-1"
 
@@ -103,6 +105,39 @@ def test_docker_command_has_the_isolation_flags(tmp_path) -> None:
     volume = command[command.index("--volume") + 1]
     assert volume.endswith(":/task:ro")
     assert str(tmp_path) in volume
+    assert command[command.index("--pids-limit") + 1] == "64"
+    assert command[command.index("--memory") + 1] == "256m"
+    assert command[command.index("--cpus") + 1] == "1"
+
+
+def test_candidate_batches_overlap_with_a_bounded_worker_count(monkeypatch) -> None:
+    runner = DockerTestRunner([question("assert f() == 1")], workers=2)
+    barrier = Barrier(2, timeout=3)
+    lock = Lock()
+    active = 0
+    peak = 0
+
+    def candidate(prompt, code):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        barrier.wait()
+        with lock:
+            active -= 1
+        return Outcome(int(code), 4, "pass")
+
+    monkeypatch.setattr(runner, "run", candidate)
+    outcomes = runner.run_batch([(prompt(), str(index)) for index in range(4)])
+    assert [outcome.tests_passed for outcome in outcomes] == [0, 1, 2, 3]
+    assert peak == 2
+    assert active == 0
+
+
+@pytest.mark.parametrize("workers", [0, -1, True, 1.5])
+def test_invalid_worker_limits_are_rejected(workers) -> None:
+    with pytest.raises(ValueError, match="workers"):
+        DockerTestRunner([], workers=workers)
 
 
 def test_docker_command_passes_no_parent_environment(tmp_path) -> None:

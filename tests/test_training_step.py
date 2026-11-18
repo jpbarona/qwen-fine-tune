@@ -9,6 +9,8 @@ and the step counter that must match the number of weight updates.
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
+from threading import Event, get_ident
 
 import pytest
 
@@ -200,10 +202,105 @@ def test_a_step_samples_every_prompt_in_one_batch_call(tmp_path) -> None:
         store=store,
     ).run()
 
-    assert generator.batches == [("mbpp-0000", "mbpp-0001", "mbpp-0002")]
+    # One training call and one final greedy evaluation call.
+    assert generator.batches == [("mbpp-0000", "mbpp-0001", "mbpp-0002")] * 2
     assert result.steps == 1
     assert store.metrics[0]["prompts"] == 3
     assert store.metrics[0]["sequences"] == 24
+
+
+def test_scoring_the_next_group_overlaps_accumulation(tmp_path) -> None:
+    next_scoring = Event()
+    accumulating = Event()
+    training_thread = get_ident()
+
+    class OverlapRunner(PassCountRunner):
+        def run(self, prompt, code):
+            if prompt.prompt_id == "mbpp-0001" and not accumulating.is_set():
+                next_scoring.set()
+                assert accumulating.wait(3), "scoring blocked the training thread"
+            return super().run(prompt, code)
+
+    class OverlapGenerator(RecordingGenerator):
+        def accumulate(self, prompt, generations, rewards, *, measure_entropy=False):
+            assert get_ident() == training_thread
+            if prompt.prompt_id == "mbpp-0000":
+                assert next_scoring.wait(3), "next group was not prefetched"
+                accumulating.set()
+            return super().accumulate(
+                prompt, generations, rewards, measure_entropy=measure_entropy
+            )
+
+    experiment = build(
+        tmp_path, generator=OverlapGenerator(), runner=OverlapRunner(),
+        prompts=make_prompts(2), steps=1, per_step=2,
+    )
+    experiment.run()
+    row = experiment.store.metrics[0]
+    assert row["step_seconds"] > 0
+    assert row["scoring_wait_seconds"] >= 0
+    assert row["completion_tokens_per_second"] > 0
+    assert row["sequences_per_second"] > 0
+
+
+def test_synchronous_scoring_can_be_selected(tmp_path) -> None:
+    training_thread = get_ident()
+
+    class MainThreadRunner(PassCountRunner):
+        def run(self, prompt, code):
+            assert get_ident() == training_thread
+            return super().run(prompt, code)
+
+    experiment = build(
+        tmp_path, generator=RecordingGenerator(), runner=MainThreadRunner(),
+        prompts=make_prompts(2), steps=1, per_step=2,
+    )
+    experiment.config = replace(experiment.config, prefetch_scoring=False)
+    experiment.run()
+
+
+def test_an_optimizer_oom_is_not_retried_on_partially_updated_weights(tmp_path) -> None:
+    class PartialUpdateGenerator(RecordingGenerator):
+        def apply_update(self):
+            self.updates += 1
+            raise RuntimeError("CUDA out of memory")
+
+    generator = PartialUpdateGenerator()
+    experiment = build(
+        tmp_path, generator=generator, prompts=make_prompts(2), steps=1,
+    )
+    with pytest.raises(RuntimeError, match="resume from the last checkpoint"):
+        experiment.run()
+    assert generator.updates == 1
+
+
+def test_greedy_evaluation_batches_and_retries_the_same_prompts_after_oom(tmp_path) -> None:
+    class EvalGenerator(RecordingGenerator):
+        def __init__(self):
+            super().__init__()
+            self.eval_batches = []
+
+        def generate_batch(self, prompts, *, n, temperature, thinking_budget=None):
+            if temperature == 0:
+                self.eval_batches.append(tuple(prompt.prompt_id for prompt in prompts))
+                if len(prompts) > 2:
+                    raise RuntimeError("CUDA out of memory")
+            return super().generate_batch(
+                prompts, n=n, temperature=temperature, thinking_budget=thinking_budget
+            )
+
+    generator = EvalGenerator()
+    experiment = build(tmp_path, generator=generator, prompts=make_prompts(5), steps=1)
+    point = experiment._evaluate(1, make_prompts(5), kind="final", subset=None)
+    assert generator.eval_batches == [
+        tuple(prompt.prompt_id for prompt in make_prompts(5)),
+        ("mbpp-0000", "mbpp-0001"),
+        ("mbpp-0002", "mbpp-0003"),
+        ("mbpp-0004",),
+    ]
+    assert point["prompt_ids"] == [prompt.prompt_id for prompt in make_prompts(5)]
+    assert point["count"] == 5
+    assert point["evaluation_seconds"] > 0
 
 
 def test_a_step_applies_exactly_one_optimizer_update(tmp_path) -> None:

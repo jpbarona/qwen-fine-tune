@@ -5,6 +5,7 @@ end to end to prove extra arguments pass through."""
 from __future__ import annotations
 
 import subprocess
+import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -75,3 +76,18 @@ def test_run_sh_honors_a_caller_supplied_config(tmp_path) -> None:
     # Two steps proves the caller config (steps = 2) was used, not the default
     # real.toml (no [fake] table, so one step).
     assert metric_steps == [1, 2]
+
+
+def test_run_sh_selects_an_isolated_model_environment(tmp_path) -> None:
+    environment = tmp_path / "LFM environment"
+    (environment / "bin").mkdir(parents=True)
+    (environment / "bin" / "rlvr").symlink_to(REPO_ROOT / ".venv" / "bin" / "rlvr")
+    runs_root = tmp_path / "runs"
+    result = subprocess.run(
+        ["bash", "run.sh", "code-score", "--", "--fake", "--config",
+         "configs/lfm-smoke.toml", "--runs-root", str(runs_root)],
+        env={**os.environ, "RLVR_VENV": str(environment)},
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (runs_root / "code-score").is_dir()

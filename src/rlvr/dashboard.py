@@ -31,13 +31,16 @@ import re
 import shutil
 import subprocess
 import time
-from collections import deque
+from copy import deepcopy
+from threading import RLock
+from collections import OrderedDict, deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 from urllib.parse import urlsplit
 
+from .dashboard_io import _all_rollout_records, _read_json, _read_jsonl, _read_tail_lines
 from .memory import MEMORY_METRIC_FIELDS
 from .stages import BANDS
 
@@ -111,7 +114,15 @@ SERIES_FIELDS: tuple[str, ...] = (
     "cache_hits",
     "prompts",
     "sequences",
-) + MEMORY_METRIC_FIELDS
+) + MEMORY_METRIC_FIELDS + (
+    "generation_seconds",
+    "scoring_seconds",
+    "scoring_wait_seconds",
+    "update_seconds",
+    "step_seconds",
+    "completion_tokens_per_second",
+    "sequences_per_second",
+)
 
 #: Fields that are whole counts and are read as integers, not floats.
 COUNT_SERIES_FIELDS: tuple[str, ...] = ("cache_hits", "prompts", "sequences")
@@ -120,6 +131,7 @@ LATEST_FIELDS: tuple[str, ...] = SERIES_FIELDS + ("rollouts",)
 
 #: The last 120 GPU samples, one per data request.
 _gpu_history: deque[dict[str, Any]] = deque(maxlen=120)
+_gpu_lock = RLock()
 
 
 def _number(value: Any) -> float | None:
@@ -166,14 +178,6 @@ def _started_label(value: str | None) -> str | None:
     return parsed.strftime("%Y-%m-%d %H:%M:%SZ")
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
 def _read_meta(run_dir: Path) -> dict[str, Any]:
     return _read_json(run_dir / META_NAME)
 
@@ -182,48 +186,8 @@ def _read_eval(run_dir: Path) -> dict[str, Any]:
     return _read_json(run_dir / EVAL_NAME)
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    """Read a JSONL file, skipping a line that is still being written."""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    rows: list[dict[str, Any]] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
-
-
 def _read_metrics(path: Path) -> list[dict[str, Any]]:
     return _read_jsonl(path)
-
-
-def _read_tail_lines(path: Path, max_bytes: int) -> list[str]:
-    """The last bytes of a file, as lines. The first partial line is dropped."""
-    try:
-        size = path.stat().st_size
-    except OSError:
-        return []
-    if size == 0:
-        return []
-    try:
-        with path.open("rb") as handle:
-            if size > max_bytes:
-                handle.seek(size - max_bytes)
-            data = handle.read()
-    except OSError:
-        return []
-    lines = data.decode("utf-8", errors="replace").splitlines()
-    if size > max_bytes and lines:
-        lines = lines[1:]
-    return lines
 
 
 def _rollout_records(path: Path) -> Iterator[dict[str, Any]]:
@@ -237,29 +201,6 @@ def _rollout_records(path: Path) -> Iterator[dict[str, Any]]:
             continue
         if isinstance(record, dict):
             yield record
-
-
-def _all_rollout_records(path: Path) -> Iterator[dict[str, Any]]:
-    """Yield every rollout record, one line at a time.
-
-    Used by the panels that report totals over the whole run. The file is read
-    as a stream, so a long run costs one line of memory at a time, not the
-    whole file. A line still being written is skipped as a JSON error.
-    """
-    try:
-        handle = path.open("r", encoding="utf-8", errors="replace")
-    except OSError:
-        return
-    with handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict):
-                yield record
 
 
 def _looks_like_run(path: Path) -> bool:
@@ -1166,15 +1107,16 @@ def sample_gpu(now: float | None = None) -> None:
     does not reset the last sample time, so the strip can show how long ago the
     last real reading was.
     """
-    current = time.time() if now is None else now
-    if _gpu_history:
-        age = current - _gpu_history[-1].get("t", 0.0)
-        if age < GPU_SAMPLE_SECONDS:
-            return
-    sample = _gpu_read()
-    if sample is not None:
-        sample["t"] = current
-        _gpu_history.append(sample)
+    with _gpu_lock:
+        current = time.time() if now is None else now
+        if _gpu_history:
+            age = current - _gpu_history[-1].get("t", 0.0)
+            if age < GPU_SAMPLE_SECONDS:
+                return
+        sample = _gpu_read()
+        if sample is not None:
+            sample["t"] = current
+            _gpu_history.append(sample)
 
 
 def _gpu_state(now: float | None = None) -> dict[str, Any]:
@@ -1184,12 +1126,59 @@ def _gpu_state(now: float | None = None) -> dict[str, Any]:
     that age next to the sample count, so a sampler that has stopped returning
     readings is visible instead of looking like a quiet GPU.
     """
-    if not _gpu_history:
+    with _gpu_lock:
+        history = [dict(sample) for sample in _gpu_history]
+    if not history:
         return {"current": None, "history": [], "age_seconds": None}
-    latest = {key: value for key, value in _gpu_history[-1].items() if key != "t"}
+    latest = {key: value for key, value in history[-1].items() if key != "t"}
     current = time.time() if now is None else now
-    age = round(current - _gpu_history[-1].get("t", current), 1)
-    return {"current": latest, "history": list(_gpu_history), "age_seconds": age}
+    age = round(current - history[-1].get("t", current), 1)
+    return {"current": latest, "history": history, "age_seconds": age}
+
+
+
+# Reuse unchanged run summaries across five-second polls. The rollout panels
+# each scan the complete history, so rebuilding only after a file changes keeps
+# monitoring work off the CPU while training is generating or updating.
+_RUN_CACHE_LIMIT = 16
+_run_cache: OrderedDict[str, tuple[tuple[Any, ...], dict[str, Any]]] = OrderedDict()
+_run_cache_lock = RLock()
+
+
+def _file_signature(path: Path) -> tuple[Any, ...]:
+    try:
+        stat = path.stat()
+        return str(path), stat.st_ino, stat.st_mtime_ns, stat.st_size
+    except OSError:
+        return str(path), None
+
+
+def _cached_collect_run(
+    arm_hint: str, run_dir: Path, now: float, live_arms: set[str] | None,
+) -> dict[str, Any]:
+    watched = (META_NAME, EVAL_NAME, METRICS_NAME, ROLLOUTS_NAME, CONTROL_NAME, CONTROL_EVENTS_NAME)
+    signature = tuple(_file_signature(run_dir / name) for name in watched)
+    signature += tuple(_file_signature(path) for _, path in _question_text_files())
+    key = str(run_dir.resolve())
+    with _run_cache_lock:
+        cached = _run_cache.get(key)
+        if cached is None or cached[0] != signature:
+            snapshot = _collect_run(arm_hint, run_dir, now, live_arms)
+            _run_cache[key] = signature, snapshot
+        else:
+            snapshot = cached[1]
+        _run_cache.move_to_end(key)
+        while len(_run_cache) > _RUN_CACHE_LIMIT:
+            _run_cache.popitem(last=False)
+        result = deepcopy(snapshot)
+
+    # Process state and ages can change while every run file stays unchanged.
+    result["metrics_age_seconds"] = _metrics_age(run_dir / METRICS_NAME, now)
+    alive = None if live_arms is None else result["arm"] in live_arms
+    result["status"] = _status(_read_eval(run_dir), run_dir / METRICS_NAME, now, alive)
+    started = _parse_timestamp(result["started"])
+    result["elapsed_seconds"] = round(now - started, 1) if started is not None else None
+    return result
 
 
 def collect_dashboard(paths: Iterable[str | Path]) -> dict[str, Any]:
@@ -1207,7 +1196,7 @@ def collect_dashboard(paths: Iterable[str | Path]) -> dict[str, Any]:
         if key in seen:
             continue
         seen.add(key)
-        runs.append(_collect_run(arm, run_dir, now, live_arms))
+        runs.append(_cached_collect_run(arm, run_dir, now, live_arms))
     return {
         "generated_at": generated_at,
         "runs": runs,

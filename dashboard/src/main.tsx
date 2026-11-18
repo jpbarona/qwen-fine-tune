@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import './index.css'
 import type { Dashboard } from './types'
+import { isDashboard } from './validateDashboard'
 
 const empty: Dashboard = {
   generated_at: '',
@@ -14,7 +15,8 @@ function readInitial(): Dashboard {
   const element = document.getElementById('initial-data')
   if (!element?.textContent) return empty
   try {
-    return JSON.parse(element.textContent) as Dashboard
+    const payload: unknown = JSON.parse(element.textContent)
+    return isDashboard(payload) ? payload : empty
   } catch {
     return empty
   }

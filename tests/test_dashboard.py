@@ -1348,3 +1348,54 @@ def test_the_page_has_the_dropped_wording(tmp_path) -> None:
     assert "hide dropped (" in html
     assert "solved, then dropped" in html
     assert " at step " in html
+
+
+def test_unchanged_poll_reuses_rollout_summary_but_refreshes_process_status(tmp_path, monkeypatch):
+    import rlvr.dashboard as dashboard
+
+    run_dir = write_run(tmp_path / "runs", evaluations=[])
+    metrics = run_dir / "metrics.jsonl"
+    now = dashboard.time.time()
+    import os
+    os.utime(metrics, (now - 200, now - 200))
+    monkeypatch.setattr(dashboard, "_process_arms", lambda: {"code-score"})
+    first = collect_dashboard([run_dir])
+    assert first["runs"][0]["status"] == "running"
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("unchanged runs must reuse their full-file summary")
+
+    monkeypatch.setattr(dashboard, "_collect_run", refuse)
+    monkeypatch.setattr(dashboard, "_process_arms", lambda: set())
+    second = collect_dashboard([run_dir])
+    assert second["runs"][0]["status"] == "stopped"
+    first["runs"][0]["series"]["steps"].append(999)
+    assert 999 not in second["runs"][0]["series"]["steps"]
+
+
+def test_changed_metrics_invalidate_dashboard_summary(tmp_path):
+    run_dir = write_run(tmp_path / "runs")
+    assert collect_dashboard([run_dir])["runs"][0]["steps_done"] == 2
+    with (run_dir / "metrics.jsonl").open("a") as handle:
+        handle.write(json.dumps({"step": 3, "step_seconds": 12.5, "scoring_wait_seconds": 1.2}) + "\n")
+    latest = collect_dashboard([run_dir])["runs"][0]
+    assert latest["steps_done"] == 3
+    assert latest["latest"]["step_seconds"] == 12.5
+    assert latest["series"]["scoring_wait_seconds"] == [None, None, 1.2]
+
+
+def test_snapshot_cache_is_bounded(tmp_path, monkeypatch):
+    import rlvr.dashboard as dashboard
+
+    monkeypatch.setattr(dashboard, "_RUN_CACHE_LIMIT", 2)
+    for index in range(3):
+        collect_dashboard([write_run(tmp_path / str(index))])
+    assert len(dashboard._run_cache) == 2
+
+
+def test_dashboard_tolerates_invalid_utf8_during_file_writes(tmp_path):
+    run_dir = write_run(tmp_path / "runs")
+    (run_dir / "meta.json").write_bytes(b'{"arm":"\xff')
+    with (run_dir / "metrics.jsonl").open("ab") as handle:
+        handle.write(b'{"step":3,"message":"\xff')
+    assert collect_dashboard([run_dir])["runs"][0]["steps_done"] == 2

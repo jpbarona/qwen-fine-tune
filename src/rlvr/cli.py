@@ -7,7 +7,7 @@
     rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
 
 This build runs both the fake path and, on a GPU host with the `train` extra
-installed, the real Qwen generator, Docker runner, and GRPO trainer. The judge
+installed, the shared causal language model generator, Docker runner, and GRPO trainer. The judge
 backend is chosen before the run folder is made, so a judge arm with no key
 fails at startup. `--resume` continues the latest run folder from its last
 checkpoint.
@@ -65,6 +65,13 @@ from .reward import (
     uses_output_judge,
     uses_process_judge,
 )
+from .resume import (
+    ResumeError,
+    manifest_count as _manifest_count,
+    resume_batch_policy as _resume_batch_policy,
+    resume_stage as _resume_stage,
+    validate_resume,
+)
 from .runs import RunStore
 from .screening import ScreenError, screen as run_screen
 from .stages import (
@@ -115,71 +122,6 @@ class UnusedJudge:
 
     def score_processes(self, items) -> list[JudgeResult]:
         raise AssertionError("this arm must never call the process judge")
-
-
-def _resume_batch_policy(config: Config, manifest: dict) -> BatchSizePolicy | None:
-    """The saved batch policy, or None for an older manifest.
-
-    A manifest written before batching has no `batch` table. A corrupt table is
-    ignored so the run still resumes from the step, which is the part that
-    matters most.
-    """
-    batch = manifest.get("batch")
-    if not isinstance(batch, dict):
-        return None
-    current = batch.get("current")
-    largest_fit = batch.get("largest_fit", 0)
-    settled = batch.get("settled", False)
-    if (
-        isinstance(current, bool)
-        or not isinstance(current, int)
-        or current < 1
-        or isinstance(largest_fit, bool)
-        or not isinstance(largest_fit, int)
-        or largest_fit < 0
-        or not isinstance(settled, bool)
-    ):
-        return None
-    return BatchSizePolicy(
-        floor_mib=config.memory_floor_mib,
-        current=current,
-        largest_fit=largest_fit,
-        settled=settled,
-    )
-
-
-def _resume_stage(manifest: dict) -> tuple[int | None, int, list[str] | None]:
-    """The saved curriculum position, or defaults for an older manifest.
-
-    `None` for the index and the pool means "start the curriculum from the
-    beginning", which is what a pre-batching manifest gets.
-    """
-    stage = manifest.get("stage")
-    if not isinstance(stage, dict):
-        return None, 0, None
-    index = stage.get("index")
-    step = stage.get("step", 0)
-    pool = stage.get("pool")
-    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
-        return None, 0, None
-    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
-        return None, 0, None
-    if not isinstance(pool, list) or not all(isinstance(item, str) for item in pool):
-        return index, step, None
-    return index, step, list(pool)
-
-
-def _manifest_count(manifest: dict, name: str, default: int) -> int:
-    """A non-negative checkpoint manifest field, or the default.
-
-    A field absent from an older manifest falls back to the default. A corrupt
-    value does the same rather than stopping the resume, because the step and
-    arm are the only fields a checkpoint needs to be usable.
-    """
-    value = manifest.get(name, default)
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return default
-    return value
 
 
 def build_judge(arm: str, config: Config, *, fake: bool) -> Judge:
@@ -463,7 +405,7 @@ def build_test_runner(config: Config, *, fake: bool):
     questions = list(split.train) + list(split.test) + list(load_synthetic_rows())
     from .docker_runner import DockerTestRunner
 
-    return DockerTestRunner(questions)
+    return DockerTestRunner(questions, workers=config.test_workers)
 
 
 def _qwen_generator(config: Config, *, trainable: bool):
@@ -489,6 +431,8 @@ def _qwen_generator(config: Config, *, trainable: bool):
             "the real generator needs torch, transformers, and peft. "
             f"install the train extra or pass --fake. ({error})"
         ) from error
+    except ValueError as error:
+        raise UsageError(f"cannot configure the model: {error}") from error
 
 
 def build_generator(config: Config, *, fake: bool, trainable: bool = True):
@@ -501,6 +445,13 @@ def build_generator(config: Config, *, fake: bool, trainable: bool = True):
     """
     if fake:
         return FakeGenerator()
+    from .model_profiles import validate_inference_engine
+
+    if trainable:
+        try:
+            validate_inference_engine(config.model_name, config.engine)
+        except ValueError as error:
+            raise UsageError(str(error)) from error
     if not trainable or config.engine == "hf":
         return _qwen_generator(config, trainable=trainable)
 
@@ -522,8 +473,15 @@ def build_generator(config: Config, *, fake: bool, trainable: bool = True):
             'set engine = "hf" under [training]. '
             f"({error})"
         ) from error
-    trainer = _qwen_generator(config, trainable=True)
-    return VLLMGenerator(trainer=trainer, engine=engine)
+    try:
+        trainer = _qwen_generator(config, trainable=True)
+        return VLLMGenerator(trainer=trainer, engine=engine)
+    except BaseException:
+        try:
+            engine.close()
+        except Exception:
+            pass  # Preserve the model startup failure if cleanup also fails.
+        raise
 
 
 def build_screen_test_runner(questions, *, fake: bool):
@@ -587,21 +545,29 @@ def run_command(args: argparse.Namespace) -> int:
             raise UsageError(
                 f"no checkpoint found for arm {args.arm!r} under {store.run_dir}"
             )
+        validate_resume(store.meta_path, config, arm=args.arm, fake=args.fake)
         manifest = read_checkpoint_manifest(checkpoint.directory)
+        if manifest["arm"] != args.arm:
+            raise UsageError(f"checkpoint arm mismatch: {manifest['arm']!r}")
         resume_prompt_cursor = _manifest_count(manifest, "prompt_cursor", 0)
         resume_stage_index, resume_stage_step, resume_stage_pool = _resume_stage(
             manifest
         )
         batch_policy = _resume_batch_policy(config, manifest)
-        store.truncate_to_step(checkpoint.step)
-        prior_evaluations = store.read_evaluations()
         resume_step = checkpoint.step
 
     # Build the generator before the run folder is created, so a failed model
     # load leaves no empty folder behind. Resume loads the checkpoint afterwards.
     generator = build_generator(config, fake=args.fake)
     if args.resume:
-        generator.load_checkpoint(checkpoint.directory)
+        try:
+            generator.load_checkpoint(checkpoint.directory)
+        except Exception as error:
+            raise UsageError(f"cannot load checkpoint {checkpoint.directory}: {error}") from error
+        # Loading can fail for an incomplete adapter or incompatible model.
+        # Keep the recorded run intact until weights and optimizer are loaded.
+        store.truncate_to_step(checkpoint.step)
+        prior_evaluations = store.read_evaluations()
 
     if not args.resume:
         try:
@@ -766,7 +732,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "publish":
             return publish_command(args)
         raise UsageError(f"unknown command {args.command!r}")
-    except (UsageError, ConfigError, MissingAPIKeyError) as error:
+    except (UsageError, ConfigError, ResumeError, MissingAPIKeyError) as error:
         print(f"rlvr: {error}", file=sys.stderr)
         return USAGE_ERROR
 

@@ -230,8 +230,10 @@ def find_latest_checkpoint(checkpoints_dir: str | Path) -> Checkpoint | None:
         if step is None:
             continue
         try:
-            read_checkpoint_manifest(child)
+            manifest = read_checkpoint_manifest(child)
         except CheckpointError:
+            continue
+        if manifest["step"] != step:
             continue
         if best is None or step > best.step:
             best = Checkpoint(step=step, directory=child)
