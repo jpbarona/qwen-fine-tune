@@ -15,6 +15,9 @@
 # Resume from the last checkpoint after a crash:
 #
 #   ./run.sh code-score --resume
+#
+# Select an isolated model environment with RLVR_VENV, for example
+# RLVR_VENV=.venv-lfm ./run.sh code-score --config configs/lfm.toml
 
 set -euo pipefail
 
@@ -25,6 +28,9 @@ fi
 
 arm="$1"
 shift
+if [ "${1:-}" = "--" ]; then
+  shift
+fi
 
 case "$arm" in
   code-score|hybrid|gated-judge|gated-process) ;;
@@ -45,4 +51,5 @@ if [ "$has_config" = false ]; then
   set -- --config configs/real.toml "$@"
 fi
 
-exec .venv/bin/rlvr run --arm "$arm" "$@"
+rlvr_venv="${RLVR_VENV:-.venv}"
+exec "$rlvr_venv/bin/rlvr" run --arm "$arm" "$@"

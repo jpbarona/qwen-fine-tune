@@ -3,6 +3,9 @@ runs/
 __pycache__/
 *.pyc
 .venv/
+.venv-lfm/
+runs-lfm/
+runs-lfm-smoke/
 judge-cache/
 *.egg-info/
 .pytest_cache/

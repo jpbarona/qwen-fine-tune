@@ -1,7 +1,7 @@
-"""The real Qwen generator and GRPO trainer.
+"""The shared Qwen3 and LFM2 causal language model GRPO trainer.
 
 This module is the concrete `Generator` for GPU runs. It loads
-`Qwen/Qwen3-0.6B` with thinking enabled, wraps it in a LoRA adapter over the
+the configured model with thinking enabled, wraps it in a LoRA adapter over the
 attention projections, and implements one GRPO weight update per training step.
 A step samples several prompt groups in one `generate_batch` call, accumulates
 the gradient of every group, and steps the optimizer once at the end. Advantage
@@ -31,18 +31,22 @@ sees. Entropy is logged, not rewarded, and the update pass stores nothing for it
 
 from __future__ import annotations
 
+import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from .budget import budget_stop_is_truncation, row_should_force_end
+from .budget import budget_stop_is_truncation
 from .experiment import Generation, Prompt
+from .model_profiles import model_profile, validate_transformers_version
 
 __all__ = [
     "ATTENTION_TARGET_MODULES",
     "QwenGenerator",
+    "CausalLMGenerator",
     "categorical_entropy",
     "check_attention_mask",
     "clipped_surrogate",
@@ -156,10 +160,9 @@ class _ThinkingBudgetProcessor:
         if length < self.budget:
             return scores
         closed = (generated == self.marker_id).any(dim=1)
-        for row in range(int(input_ids.shape[0])):
-            if row_should_force_end(length, self.budget, bool(closed[row])):
-                scores[row, :] = float("-inf")
-                scores[row, self.eos_token_id] = 0.0
+        force_end = ~closed
+        scores.masked_fill_(force_end.unsqueeze(1), float("-inf"))
+        scores[:, self.eos_token_id].masked_fill_(force_end, 0.0)
         return scores
 
 
@@ -451,11 +454,11 @@ def seed_rngs(seed: int) -> None:
 class _GroupEntry:
     """One sampled completion kept for the next GRPO update.
 
-    `input_ids` is the padded prompt plus generated tokens, so the leading pads
-    are in the sequence the model saw. `attention_mask` marks those pads with 0,
-    and the update pass feeds the same mask back, so the logprobs match the
-    sampling forward pass. `prompt_length` is the padded prompt width, which is
-    where the completion starts. `old_logprobs` holds the per-token policy
+    `input_ids` is the prompt plus generated tokens. Qwen entries keep the
+    rollout batch's leading padding and its attention mask. LFM entries remove
+    leading padding so single-sequence convolution forwards match the masked
+    rollout batch. `prompt_length` is the width of the stored prompt, where the
+    completion starts. `old_logprobs` holds the per-token policy
     logprobs of the completion at temperature 1.0, captured at generation time
     and detached. `reference_logprobs` is the same under the base model with the
     adapter disabled, present only when the KL coefficient is positive.
@@ -515,6 +518,7 @@ class QwenGenerator:
         self.kl_beta = float(kl_beta)
         self.seed = seed
         self.trainable = trainable
+        self.profile = model_profile(model_name)
         self.step = 0
         self._pending_groups: list[list[_GroupEntry]] | None = None
         self._accumulated_groups = 0
@@ -527,11 +531,18 @@ class QwenGenerator:
         self._torch = torch
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        from transformers import AutoModelForCausalLM, AutoTokenizer  # lazy
+        import transformers  # lazy
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        validate_transformers_version(self.profile, transformers.__version__)
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision)
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        marker_ids = self.tokenizer.encode("</think>", add_special_tokens=False)
+        if len(marker_ids) != 1 or marker_ids[0] == self.tokenizer.unk_token_id:
+            raise ValueError("the model tokenizer must encode </think> as one known token")
+        self.think_end_token_id = marker_ids[0]
 
         self.base_model = AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -539,6 +550,10 @@ class QwenGenerator:
             dtype=torch.bfloat16,
             device_map="auto",
         ).eval()
+        self.profile = model_profile(
+            model_name, model_type=self.base_model.config.model_type
+        )
+        validate_transformers_version(self.profile, transformers.__version__)
 
         if not trainable:
             self.model = self.base_model
@@ -554,7 +569,7 @@ class QwenGenerator:
             lora_dropout=0.0,
             bias="none",
             task_type=TaskType.CAUSAL_LM,
-            target_modules=list(ATTENTION_TARGET_MODULES),
+            target_modules=list(self.profile.attention_targets),
         )
         self.model = get_peft_model(self.base_model, lora_config)
         self.model.train()
@@ -611,16 +626,15 @@ class QwenGenerator:
         prompt_list = list(prompts)
         if not prompt_list:
             raise ValueError("generate_batch needs at least one prompt")
-        if self._accumulated_groups:
-            # A previous step stopped before apply_update, for example on a CUDA
-            # out-of-memory error that the caller is retrying at a smaller batch.
-            # Sampling a new batch drops the partial gradients.
-            self.optimizer.zero_grad()
-            self._accumulated_groups = 0
-        self._pending_groups = None
         torch = self._torch
         do_sample = temperature > 0.0
         caching = do_sample and self.trainable
+        if caching:
+            # A failed backward can leave gradients before a whole group has
+            # accumulated. A new training sample always starts a fresh step.
+            self.optimizer.zero_grad()
+            self._accumulated_groups = 0
+            self._pending_groups = None
 
         if caching:
             self.model.train()
@@ -658,7 +672,7 @@ class QwenGenerator:
                 _ThinkingBudgetProcessor(
                     prompt_length=prompt_length,
                     budget=thinking_budget,
-                    marker_id=THINK_END_TOKEN_ID,
+                    marker_id=self.think_end_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
                 )
             ]
@@ -707,13 +721,18 @@ class QwenGenerator:
         self, prompt: Prompt, *, thinking: bool
     ) -> tuple[list[int], bool]:
         """Chat template, tokenize, and truncate one prompt to the token cap."""
-        text = self.tokenizer.apply_chat_template(
+        template_options = {}
+        if self.profile.supports_thinking_toggle:
+            template_options["enable_thinking"] = thinking
+        # The template owns BOS and other control tokens. Tokenizing its text a
+        # second time with add_special_tokens=True duplicates the LFM BOS.
+        encoded = self.tokenizer.apply_chat_template(
             [{"role": "user", "content": prompt.problem}],
-            tokenize=False,
+            tokenize=True,
             add_generation_prompt=True,
-            enable_thinking=thinking,
+            **template_options,
         )
-        raw_ids = self.tokenizer(text, return_tensors="pt")["input_ids"][0].tolist()
+        raw_ids = encoded["input_ids"] if isinstance(encoded, Mapping) else encoded
         return truncate_prompt(raw_ids, self.max_prompt_tokens)
 
     def build_generation_batch(
@@ -749,11 +768,12 @@ class QwenGenerator:
             raise RuntimeError(
                 "this generator was built without an adapter and cannot cache groups"
             )
-        if self._accumulated_groups:
-            # A previous step stopped before apply_update. Sampling a new batch
-            # drops the partial gradients.
+        if cache:
+            # Match generate_batch, including an interrupted first group's
+            # backward pass, which leaves the completed group counter at zero.
             self.optimizer.zero_grad()
             self._accumulated_groups = 0
+            self._pending_groups = None
         if cache:
             self.model.train()
         else:
@@ -777,7 +797,8 @@ class QwenGenerator:
             generations.append(group)
             cached_groups.append(entries)
 
-        self._pending_groups = cached_groups if cache else None
+        if cache:
+            self._pending_groups = cached_groups
         return generations
 
     def _decode_group(
@@ -800,6 +821,15 @@ class QwenGenerator:
         torch = self._torch
         eos = self.tokenizer.eos_token_id
         real_prompt_length = sum(attention_mask)
+        # Transformers 5.0 LFM convolution masks padding only for batch sizes
+        # above one. Teacher forcing runs one sequence at a time, so retaining
+        # a rollout batch's left pads would change its convolution states.
+        cache_offset = (
+            prompt_length - real_prompt_length
+            if self.profile.model_type == "lfm2"
+            else 0
+        )
+        cache_prompt_length = prompt_length - cache_offset
         group: list[Generation] = []
         entries: list[_GroupEntry] = []
         for raw_ids in completion_rows:
@@ -833,22 +863,22 @@ class QwenGenerator:
             )
 
             if caching:
-                entry_ids = list(padded_ids) + generated_ids
-                entry_mask = list(attention_mask) + [1] * len(generated_ids)
+                entry_ids = list(padded_ids)[cache_offset:] + generated_ids
+                entry_mask = list(attention_mask)[cache_offset:] + [1] * len(generated_ids)
                 with torch.no_grad():
                     sequence = torch.tensor([entry_ids], device=self._device)
                     old_logprobs = self._completion_logprobs(
-                        sequence, prompt_length, entry_mask
+                        sequence, cache_prompt_length, entry_mask
                     ).tolist()
                 reference_logprobs = self._reference_logprobs(
-                    entry_ids, prompt_length, entry_mask, generated_ids
+                    entry_ids, cache_prompt_length, entry_mask, generated_ids
                 )
                 entries.append(
                     _GroupEntry(
                         prompt_id=prompt.prompt_id,
                         input_ids=entry_ids,
                         attention_mask=entry_mask,
-                        prompt_length=prompt_length,
+                        prompt_length=cache_prompt_length,
                         old_logprobs=old_logprobs,
                         reference_logprobs=reference_logprobs,
                     )
@@ -857,7 +887,7 @@ class QwenGenerator:
 
     def _split_at_think_end(self, generated_ids: list[int]) -> int:
         """The index just past the last closing reasoning marker, or 0 when absent."""
-        return thinking_marker_index(generated_ids, THINK_END_TOKEN_ID)
+        return thinking_marker_index(generated_ids, self.think_end_token_id)
 
     def _completion_logprobs(
         self, sequence: Any, prompt_length: int, attention_mask: list[int] | None = None
@@ -865,16 +895,16 @@ class QwenGenerator:
         """Per-token logprobs of the completion under the policy at temperature 1.0.
 
         This is the only path used for both the old and the new logprobs, so the
-        ratio is 1.0 on the first update when the policy has not changed. The
-        mask is the one the sampling forward pass saw, so the leading pads do
-        not enter the attention.
+        ratio is 1.0 on the first update when the policy has not changed. Qwen
+        keeps the rollout mask, and LFM uses an unpadded sequence to preserve
+        the masked rollout batch's convolution states.
         """
         kwargs: dict[str, Any] = {}
         if attention_mask is not None:
             kwargs["attention_mask"] = self._torch.tensor(
                 [attention_mask], dtype=self._torch.long, device=sequence.device
             )
-        logits = self.model(sequence, **kwargs).logits[0]
+        logits = self.model(sequence, use_cache=False, **kwargs).logits[0]
         token_ids = sequence[0][prompt_length:].tolist()
         return self._completion_logprobs_from_logits(logits, prompt_length, token_ids)
 
@@ -883,11 +913,11 @@ class QwenGenerator:
     ) -> Any:
         """Completion logprobs from logits the update pass already computed."""
         torch = self._torch
-        log_probs = torch.log_softmax(logits[:-1], dim=-1)
+        start = prompt_length - 1
+        completion_logits = logits[start : start + len(token_ids)]
+        log_probs = torch.log_softmax(completion_logits, dim=-1)
         ids = torch.tensor(list(token_ids), device=logits.device)
-        positions = torch.arange(
-            prompt_length - 1, prompt_length - 1 + len(token_ids), device=logits.device
-        )
+        positions = torch.arange(len(token_ids), device=logits.device)
         return log_probs[positions, ids]
 
     def _sampled_entropy(
@@ -945,15 +975,10 @@ class QwenGenerator:
         )
         with torch.no_grad():
             with self.model.disable_adapter():
-                logits = self.model(inputs, attention_mask=mask).logits[0]
-        log_probs = torch.log_softmax(logits[:-1], dim=-1)
-        token_ids_t = torch.tensor(token_ids, device=logits.device)
-        positions = torch.arange(
-            prompt_length - 1,
-            prompt_length - 1 + len(token_ids),
-            device=logits.device,
-        )
-        return log_probs[positions, token_ids_t].tolist()
+                logits = self.model(inputs, attention_mask=mask, use_cache=False).logits[0]
+        return self._completion_logprobs_from_logits(
+            logits, prompt_length, token_ids
+        ).tolist()
 
     # --- the GRPO update -------------------------------------------------
 
@@ -1107,7 +1132,7 @@ class QwenGenerator:
         mask = torch.tensor(
             [entry.attention_mask], dtype=torch.long, device=self._device
         )
-        logits = self.model(inputs, attention_mask=mask).logits[0]
+        logits = self.model(inputs, attention_mask=mask, use_cache=False).logits[0]
         token_ids = entry.input_ids[entry.prompt_length :]
         new_logprobs = self._completion_logprobs_from_logits(
             logits, entry.prompt_length, token_ids
@@ -1152,7 +1177,12 @@ class QwenGenerator:
         folder.mkdir(parents=True, exist_ok=True)
         self.model.save_pretrained(str(folder))
         torch.save(
-            {"step": self.step, "optimizer": self.optimizer.state_dict()},
+            {
+                "step": self.step,
+                "optimizer": self.optimizer.state_dict(),
+                "model_name": self.model_name,
+                "model_revision": self.revision,
+            },
             folder / OPTIMIZER_STATE_NAME,
         )
 
@@ -1174,29 +1204,55 @@ class QwenGenerator:
                 "this generator was built without an adapter and cannot load a checkpoint"
             )
         import torch  # lazy
-        from peft import PeftModel  # lazy
-        from transformers import AutoModelForCausalLM  # lazy
+        from peft import get_peft_model_state_dict, set_peft_model_state_dict  # lazy
+        from peft.utils.save_and_load import load_peft_weights
 
         folder = Path(directory)
-        self.base_model = AutoModelForCausalLM.from_pretrained(
-            self.model_name,
-            revision=self.revision,
-            dtype=torch.bfloat16,
-            device_map="auto",
-        ).eval()
-        # `is_trainable` is what unfreezes the adapter. The default is False,
-        # which freezes every parameter and leaves AdamW with an empty list on
-        # the next line. A checkpoint carries `inference_mode: true` in its
-        # adapter config, so the saved value cannot be relied on either.
-        self.model = PeftModel.from_pretrained(
-            self.base_model, str(folder), is_trainable=True
-        )
-        self.model.train()
-
         state = torch.load(folder / OPTIMIZER_STATE_NAME, map_location="cpu")
-        trainable = [param for param in self.model.parameters() if param.requires_grad]
-        self.optimizer = torch.optim.AdamW(trainable, lr=self.learning_rate)
+        adapter_config = json.loads((folder / "adapter_config.json").read_text())
+        self._validate_checkpoint_identity(adapter_config, state)
+        weights = load_peft_weights(str(folder), device="cpu")
+        expected_weights = get_peft_model_state_dict(self.model, adapter_name="default")
+        missing = sorted(expected_weights.keys() - weights.keys())
+        unexpected = sorted(weights.keys() - expected_weights.keys())
+        if missing or unexpected:
+            raise ValueError(
+                f"checkpoint adapter tensor keys differ; missing={missing}, "
+                f"unexpected={unexpected}"
+            )
+        for name, tensor in weights.items():
+            if tensor.shape != expected_weights[name].shape:
+                raise ValueError(f"checkpoint adapter tensor shape differs for {name!r}")
+        # Reuse the already-loaded base and trainable adapter. Loading another
+        # full base model temporarily doubles VRAM during every resume.
+        set_peft_model_state_dict(self.model, weights, adapter_name="default")
         self.optimizer.load_state_dict(state["optimizer"])
+        self.optimizer.zero_grad()
+        self.model.train()
         self.step = int(state["step"])
         self._pending_groups = None
         self._accumulated_groups = 0
+
+    def _validate_checkpoint_identity(self, adapter_config: dict, state: dict) -> None:
+        """Accept older checkpoints while rejecting a different model or LoRA shape."""
+        base_name = adapter_config.get("base_model_name_or_path")
+        if base_name and base_name != self.model_name:
+            raise ValueError(
+                f"checkpoint base model {base_name!r} differs from {self.model_name!r}"
+            )
+        expected = {
+            "model_name": self.model_name,
+            "model_revision": self.revision,
+        }
+        for field, value in expected.items():
+            if field in state and state[field] != value:
+                raise ValueError(f"checkpoint {field} differs from the configured model")
+        for field, value in (("r", self.lora_rank), ("lora_alpha", self.lora_alpha)):
+            if adapter_config.get(field) != value:
+                raise ValueError(f"checkpoint adapter {field} differs from the configured LoRA")
+        if set(adapter_config.get("target_modules", [])) != set(self.profile.attention_targets):
+            raise ValueError("checkpoint LoRA target modules differ from the model architecture")
+
+
+# Retain the established import and class name for callers and old integrations.
+CausalLMGenerator = QwenGenerator

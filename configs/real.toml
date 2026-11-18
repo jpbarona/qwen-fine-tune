@@ -1,9 +1,8 @@
-# Full training config for one arm. Five epochs over the 714 train questions,
-# one prompt group of 8 generations per step. The step budget is computed by
-# the CLI as [training] epochs times the train size, so no step count appears
-# here. Checkpoints every 20 steps, checkpoint evaluation every 20 steps, and
-# ten checkpoints are kept: the five newest consecutive, then older ones at
-# doubling gaps.
+# Full training profile for one reward arm. Prompt batches grow from two
+# groups as memory permits, with eight generations per prompt. The CLI derives
+# the step budget from epochs and the initial number of prompt batches.
+# Save every 10 steps and evaluate every 20. Retain fifteen checkpoints with
+# the newest five consecutive and older ones at doubling gaps.
 
 [model]
 name = "Qwen/Qwen3-0.6B"
@@ -57,6 +56,12 @@ length_penalty_floor = 0.2
 # floor and at or above one prompt group's measured footprint, in MiB. The
 # largest size that fit is kept. Never below one prompt.
 memory_floor_mib = 512
+# Bound concurrent sandboxed test containers. Each keeps its own limits.
+test_workers = 4
+# Greedy evaluation questions decoded together. OOM retries halve this size.
+eval_batch_size = 8
+# Score the next generated prompt group while the current group backpropagates.
+prefetch_scoring = true
 seed = 0
 
 [run]

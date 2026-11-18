@@ -853,3 +853,49 @@ def test_a_control_path_can_be_given(config_path, tmp_path) -> None:
         ]
     )
     assert _json.loads(control.read_text(encoding="utf-8")) == {"drop": [], "tests": {}}
+
+
+@pytest.mark.parametrize(
+    "old, new, expected",
+    [('Qwen/Qwen3-0.6B', 'LiquidAI/LFM2.5-2.6B', 'model.name'),
+     ('revision = "r"', 'revision = "different"', 'model.revision'),
+     ('split_seed = 7', 'split_seed = 8', 'data.split_seed')],
+)
+def test_resume_rejects_changed_identity_before_changing_records(tmp_path, capsys, old, new, expected):
+    config_path = tmp_path / "resume.toml"
+    config_path.write_text(RESUME_CONFIG, encoding="utf-8")
+    runs_root = tmp_path / "runs"
+    args = ["run", "--arm", "code-score", "--fake", "--config", str(config_path),
+            "--runs-root", str(runs_root)]
+    assert main(args) == 0
+    capsys.readouterr()
+    run_dir = next((runs_root / "code-score").iterdir())
+    before = {p.name: p.read_bytes() for p in run_dir.iterdir() if p.is_file()}
+    changed = RESUME_CONFIG.replace(old, new)
+    assert changed != RESUME_CONFIG
+    config_path.write_text(changed, encoding="utf-8")
+    assert main(args + ["--resume"]) == 2
+    assert expected in capsys.readouterr().err
+    assert before == {p.name: p.read_bytes() for p in run_dir.iterdir() if p.is_file()}
+
+
+@pytest.mark.parametrize("error_type", [ValueError, RuntimeError, EOFError])
+def test_failed_checkpoint_load_preserves_existing_records(tmp_path, monkeypatch, capsys, error_type):
+    from rlvr import cli
+
+    config_path = tmp_path / "resume.toml"
+    config_path.write_text(RESUME_CONFIG, encoding="utf-8")
+    runs_root = tmp_path / "runs"
+    args = ["run", "--arm", "code-score", "--fake", "--config", str(config_path),
+            "--runs-root", str(runs_root)]
+    assert main(args) == 0
+    run_dir = next((runs_root / "code-score").iterdir())
+    before = {p.name: p.read_bytes() for p in run_dir.iterdir() if p.is_file()}
+
+    def fail_load(self, directory):
+        raise error_type("incomplete checkpoint")
+
+    monkeypatch.setattr(cli.FakeGenerator, "load_checkpoint", fail_load)
+    assert main(args + ["--resume"]) == 2
+    assert "incomplete checkpoint" in capsys.readouterr().err
+    assert before == {p.name: p.read_bytes() for p in run_dir.iterdir() if p.is_file()}

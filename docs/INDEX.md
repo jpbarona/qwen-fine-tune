@@ -1,9 +1,10 @@
 # rl-grpo docs index
 
-Qwen3-0.6B GRPO reward study. Documentation lives here. Code and data stay in the repo root.
+Qwen3-0.6B and LFM2.5-2.6B GRPO reward study. Documentation lives here. Code and data stay in the repo root.
 
 Docs, all in this folder:
 
+- [6.1-sol-xhigh-pass.md](6.1-sol-xhigh-pass.md) — repository organization, LFM support, throughput changes, assumptions, and validation.
 - `DECISIONS.md` — decisions as they are made, newest last.
 - `journal.md` — running problem and fix chunks, 10 to 12 words each.
 - `SPEC.md` — the deferred four-arm study design.
@@ -18,14 +19,14 @@ Repo items, relative to this folder:
 - `../issues/10` to `../issues/17` — the implemented tickets.
 - `../issues/18-reward-and-checkpoint-fixes.md` — the reward and checkpoint fix plan.
 - `../README.md` — install, run, and test commands.
-- `../configs/` — `real.toml` and `smoke.toml`.
+- `../configs/` — `real.toml`, `smoke.toml`, `lfm.toml`, and `lfm-smoke.toml`.
 - `../dashboard/` — React and Tailwind source for the live dashboard.
 - `../src/rlvr/web/index.html` — the committed single file build.
 - `../data/mbpp_full.jsonl` — 964 MBPP rows, fixed 714 and 250 split.
 - `../data/difficulty_labels.jsonl` — one band per training row.
 - `../data/synthetic_easy.jsonl` — 50 very easy rows for the first stage.
 - `../src/rlvr/` — package source.
-- `../tests/` — 899 tests, no GPU tests.
+- `../tests/` — CPU regression tests and optional model-runtime and Docker integration checks.
 - `../runs/` — run folders, kept as study data.
 
 Pulled run data lives outside this repo, in
