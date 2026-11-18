@@ -153,6 +153,71 @@ def test_gradient_norm_ignores_a_parameter_with_a_null_gradient() -> None:
     assert gradient_norm(parameters) == pytest.approx(5.0)
 
 
+def test_apply_update_measures_the_divided_gradient_before_the_step() -> None:
+    # Two groups of gradients 3 and 4. The mean over the groups is 1.5 and 2.0,
+    # whose norm is 2.5. The raw norm before the divide would be 5.0. The norm
+    # calls are recorded in order, so a norm taken after the step is visible.
+    from types import SimpleNamespace
+
+    from rlvr.qwen import QwenGenerator
+
+    events: list[str] = []
+
+    class Gradient:
+        def __init__(self, value: float) -> None:
+            self.value = value
+
+        def div_(self, count: int) -> None:
+            self.value /= count
+
+        def detach(self) -> "Gradient":
+            return self
+
+        def norm(self, order: int) -> float:
+            assert order == 2
+            events.append(f"norm:{self.value:.1f}")
+            return abs(self.value)
+
+    class Parameter:
+        requires_grad = True
+
+        def __init__(self, value: float) -> None:
+            self.grad = Gradient(value)
+
+    class Optimizer:
+        def __init__(self) -> None:
+            self.seen: list[float] = []
+
+        def step(self) -> None:
+            events.append("step")
+            self.seen = [parameter.grad.value for parameter in parameters]
+
+        def zero_grad(self) -> None:
+            events.append("zero")
+
+    parameters = [Parameter(3.0), Parameter(4.0)]
+    optimizer = Optimizer()
+    generator = SimpleNamespace(
+        trainable=True,
+        model=SimpleNamespace(parameters=lambda: iter(parameters)),
+        optimizer=optimizer,
+        step=0,
+        last_grad_norm=None,
+        _accumulated_groups=2,
+        _pending_groups=[],
+    )
+
+    norm = QwenGenerator.apply_update(generator)
+
+    # The return value catches a norm taken before the divide, which is 5.0.
+    assert norm == pytest.approx(2.5)
+    assert generator.last_grad_norm == pytest.approx(2.5)
+    # The norm is read before the step, which catches a norm taken after it.
+    assert events[:3] == ["norm:1.5", "norm:2.0", "step"]
+    # The optimizer applies the mean gradient, not the accumulated sum.
+    assert optimizer.seen == pytest.approx([1.5, 2.0])
+
+
 def test_group_advantages_are_mean_zero_unit_std() -> None:
     advantages = group_advantages([0.0, 0.5, 1.0])
     assert sum(advantages) == pytest.approx(0.0)
