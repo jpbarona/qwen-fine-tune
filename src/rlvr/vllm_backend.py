@@ -256,10 +256,15 @@ class VLLMGenerator:
             measure_entropy=measure_entropy,
         )
 
-    def apply_update(self) -> None:
-        """Step the optimizer once, then hand the new adapter to the engine."""
-        self._trainer.apply_update()
+    def apply_update(self) -> float | None:
+        """Step the optimizer once, then hand the new adapter to the engine.
+
+        The trainer owns the gradients, so its norm is passed straight back to
+        the caller.
+        """
+        grad_norm = self._trainer.apply_update()
         self._sync_adapter()
+        return grad_norm
 
     def save_checkpoint(self, directory) -> None:
         """Delegate the checkpoint write to the trainer."""

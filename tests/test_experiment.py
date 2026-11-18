@@ -105,6 +105,7 @@ class StubGenerator:
         self.update_calls: list[tuple[str, tuple[float, ...]]] = []
         self.measure_flags: list[bool] = []
         self.updates = 0
+        self.grad_norm: float | None = None
 
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
         self.calls.append((prompt.prompt_id, temperature))
@@ -137,8 +138,9 @@ class StubGenerator:
         self.measure_flags.append(measure_entropy)
         return 0.5 if measure_entropy else None
 
-    def apply_update(self) -> None:
+    def apply_update(self) -> float | None:
         self.updates += 1
+        return self.grad_norm
 
     def save_checkpoint(self, directory) -> None:
         pass
@@ -814,6 +816,31 @@ def test_metrics_rows_summarize_the_step(tmp_path) -> None:
     assert row["pass_rate"] == pytest.approx(0.0)
     assert row["mean_entropy"] == pytest.approx(0.5)
     assert row["mean_completion_tokens"] == pytest.approx(20.0)
+
+
+def test_metric_row_carries_the_gradient_norm(tmp_path) -> None:
+    generator = StubGenerator()
+    generator.grad_norm = 1.25
+    store = RecordingStore()
+    build("code-score", tmp_path, generator=generator, store=store).run()
+    assert store.metrics[0]["grad_norm"] == pytest.approx(1.25)
+
+
+def test_a_fake_run_writes_a_null_gradient_norm(tmp_path) -> None:
+    from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
+
+    store = RecordingStore()
+    build(
+        "code-score",
+        tmp_path,
+        generator=FakeGenerator(),
+        judge=FakeJudge(),
+        runner=FakeTestRunner(),
+        store=store,
+        prompts=fake_prompts(6),
+    ).run()
+    assert store.metrics
+    assert all(row["grad_norm"] is None for row in store.metrics)
 
 
 def test_entropy_is_measured_only_on_the_configured_cadence(tmp_path) -> None:
