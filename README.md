@@ -34,13 +34,22 @@ and checkpoint workflow. Its model profile selects the tokenizer behavior and
 attention projection names. Use an isolated environment because the LFM
 Transformers 5 stack has different pins from the Qwen vLLM stack.
 
+The environment lives at `.venv-lfm` in the repository root and is built by
+`scripts/setup-lfm-env.sh`. The script creates the venv, installs torch 2.7.1
+from the cu128 index, installs the `lfm` extra, installs pytest, and prints the
+versions. It reuses an existing venv, so a second run is safe.
+
 ```bash
-python3 -m venv .venv-lfm
-.venv-lfm/bin/pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
-.venv-lfm/bin/pip install -e ".[lfm]"
+./scripts/setup-lfm-env.sh            # writes .venv-lfm
+./scripts/setup-lfm-env.sh /path/to/venv   # or an explicit path
 RLVR_VENV=.venv-lfm ./run.sh code-score --config configs/lfm-smoke.toml --runs-root runs-lfm-smoke
 RLVR_VENV=.venv-lfm ./run.sh code-score --config configs/lfm.toml --runs-root runs-lfm
+.venv-lfm/bin/python -m pytest tests/test_qwen.py -q
 ```
+
+Do not run `python3 -m venv .venv-lfm` by hand on a host without
+`python3.12-venv`. That venv creation fails at ensurepip, and the script falls
+back to `--without-pip` plus the system pip when it hits that.
 
 Use separate run roots for the smoke and full runs if both need to be resumed.
 Add `--resume` with the original config and run root to continue a checkpoint.
