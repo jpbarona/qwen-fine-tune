@@ -105,3 +105,8 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 58. Checkpoints every 10 steps, fifteen kept per run
 90. AdamW hides the gradient norm, so the weight update norm is logged too
 91. A non-finite norm is recorded as null, not written as a crash
+92. Run 17 doubled pass@1 from 12 to 24 of 100
+93. The flat curve was an artefact of starting at step 20
+94. 1e-3 diverges within two steps, answers pinned at the cap
+95. 1e-4 is safe but no faster after twenty steps
+96. Gradient norm cannot separate rates under AdamW, update norm can

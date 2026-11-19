@@ -19,7 +19,7 @@ Repo items, relative to this folder:
 - `../issues/10` to `../issues/17` — the implemented tickets.
 - `../issues/18-reward-and-checkpoint-fixes.md` — the reward and checkpoint fix plan.
 - `../README.md` — install, run, and test commands.
-- `../configs/` — `real.toml`, `smoke.toml`, `lfm.toml`, and `lfm-smoke.toml`.
+- `../configs/` — `real.toml`, `smoke.toml`, `lfm.toml`, `lfm-smoke.toml`, and the two twenty step probe configs `probe-1e4.toml` and `probe-1e3.toml`.
 - `../dashboard/` — React and Tailwind source for the live dashboard.
 - `../src/rlvr/web/index.html` — the committed single file build.
 - `../data/mbpp_full.jsonl` — 964 MBPP rows, fixed 714 and 250 split.
@@ -31,6 +31,9 @@ Repo items, relative to this folder:
 
 Pulled run data lives outside this repo, in
 `/home/opencode/Work/rl-grpo-data/`, one folder per pull.
+
+The run 17 postmortem and the learning rate probe data live in
+`/tmp/opencode/pm/`, with `README.md` there as their index.
 
 To update the docs, say "go and update the docs". That means: bring
 `DECISIONS.md` and `journal.md` up to date, keep this index accurate, and leave
