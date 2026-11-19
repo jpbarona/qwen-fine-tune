@@ -103,3 +103,5 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 56. Prompt states the test arity directly → fewer invented signatures
 57. One output rule ends the code-fence debate in the prompt
 58. Checkpoints every 10 steps, fifteen kept per run
+90. AdamW hides the gradient norm, so the weight update norm is logged too
+91. A non-finite norm is recorded as null, not written as a crash
