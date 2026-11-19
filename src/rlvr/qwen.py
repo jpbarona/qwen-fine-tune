@@ -1296,6 +1296,11 @@ class QwenGenerator:
         # full base model temporarily doubles VRAM during every resume.
         set_peft_model_state_dict(self.model, weights, adapter_name="default")
         self.optimizer.load_state_dict(state["optimizer"])
+        # The saved optimizer carries the rate it trained with. The config is
+        # the authority on resume, so a run can be slowed or stopped by editing
+        # the rate and resuming from the last checkpoint.
+        for group in self.optimizer.param_groups:
+            group["lr"] = self.learning_rate
         self.optimizer.zero_grad()
         self.model.train()
         self.step = int(state["step"])

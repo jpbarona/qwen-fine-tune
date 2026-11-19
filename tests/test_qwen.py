@@ -886,6 +886,12 @@ def test_tiny_model_generate_update_and_resume(tmp_path, family) -> None:
     trainer.load_checkpoint(checkpoint)
     assert id(trainer.base_model) == base_identity
     assert trainer.step == 1
+    # A resume takes the configured rate, not the one saved with the optimizer.
+    trainer.learning_rate = 5e-5
+    trainer.load_checkpoint(checkpoint)
+    assert all(group["lr"] == 5e-5 for group in trainer.optimizer.param_groups)
+    trainer.learning_rate = 1e-3
+    trainer.load_checkpoint(checkpoint)
     assert all(torch.equal(a, b) for a, b in zip(after, [
         p.detach() for p in trainer.model.parameters() if p.requires_grad
     ]))
