@@ -306,6 +306,24 @@ needs no network. Rebuild after changing the UI:
 cd dashboard && npm install && npm run build
 ```
 
+## Measuring a short run
+
+Two optional keys make a short experiment cheap. `[budget] max_steps` caps a
+real run, and `training.eval_every_steps` sets the evaluation cadence, so a
+twenty step probe is a config copy with a changed learning rate and
+`max_steps = 20`. `configs/probe-1e4.toml` and `configs/probe-1e3.toml` are
+that copy.
+
+Every step row carries two norm fields. `grad_norm` is the L2 norm of the
+trainable gradients, taken after the accumulated gradient is divided by the
+group count and before the optimiser step. `update_norm` is the L2 norm of the
+parameter delta that the step produced. Both are null when the value is not
+finite.
+
+Read `update_norm` when comparing learning rates. AdamW normalises the step by
+the gradient history, so `grad_norm` stays close across rates and only shows a
+collapse. `update_norm` tracks how far the weights actually moved.
+
 ## Editing a run in place
 
 Each run folder holds `control.json`. Edit it while training runs and the change

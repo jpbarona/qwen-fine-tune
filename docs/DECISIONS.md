@@ -403,3 +403,52 @@ failure already seen twice. The workable version keeps the rule by judging the
 first 8 rollouts and letting the extra generations feed only the advantage.
 
 Not decided, not built.
+
+## D22. Every run measures the base model at step 0
+
+Status: done by hand for run 17, not built into the runner. The run's own
+evaluations began at step 20, which made a 300 step curve look flat: the
+untrained model solved 12 of the 100 held-out questions, step 20 solved 32 and
+step 300 solved 37. Two thirds of the gain happened before the first data point.
+
+Reason: a curve with no starting point cannot show improvement, and the
+conclusion drawn from run 17 was wrong because of it. A base evaluation on the
+same cohort costs about five minutes.
+
+The cheap version of this, for a run that has not started, is one greedy
+evaluation of the base model on the run's own held-out ids, saved beside the
+run folder.
+
+## D23. Log the weight update norm, not only the gradient norm
+
+Status: implemented. Every step records `grad_norm`, the L2 norm of the
+trainable gradients after the group divide and before the optimiser step, and
+`update_norm`, the L2 norm of the parameter delta the step produced. Both write
+null when the value is not finite, so a diverging run records a row instead of
+crashing the metrics write.
+
+Reason: AdamW normalises each parameter's step by its gradient history, so the
+gradient norm barely moves between learning rates. In the probe it read 0.11 to
+0.33 at 1e-4 and 0.05 to 0.59 at 1e-3, overlapping. The update norm read 0.08
+against 0.7 to 2.2, a gap of 25 times. Only the second number answers "is this
+rate moving the weights too far".
+
+No gradient clipping was added. Clipping would not stop a rate that is simply
+too large under AdamW, and it would hide the divergence the probe is looking
+for.
+
+## D24. Learning rate: 1e-4 is safe, 1e-3 diverges
+
+Status: measured with two 20 step probes on separate cards, same config, same
+cohort, each capped with `[budget] max_steps = 20`.
+
+- 1e-4: reward stayed between 0.44 and 0.91, pass@1 at step 20 was 0.31,
+  update norm 0.08.
+- 1e-3: collapsed at step 2. By step 14 the reward was -0.99, the pass rate
+  zero, and every answer ran to the 2,048 token cap. The probe was stopped at
+  step 16.
+- 1e-5, from run 17: pass@1 0.32 at step 20, 0.33 at step 60.
+
+So a 10x rate is safe but has bought nothing after 20 steps, and a 100x rate
+destroys the policy. The next question is whether 1e-4 pulls ahead over 60
+steps, which is one resume of the probe checkpoint.
