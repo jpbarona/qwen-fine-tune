@@ -4,6 +4,7 @@ Qwen3-0.6B and LFM2.5-2.6B GRPO reward study. Documentation lives here. Code and
 
 Docs, all in this folder:
 
+- [postmortem-run17.md](postmortem-run17.md) — why the 313 step curve looked flat, and what the model actually did.
 - [6.1-sol-xhigh-pass.md](6.1-sol-xhigh-pass.md) — repository organization, LFM support, throughput changes, assumptions, and validation.
 - `DECISIONS.md` — decisions as they are made, newest last.
 - `journal.md` — running problem and fix chunks, 10 to 12 words each.
@@ -31,9 +32,6 @@ Repo items, relative to this folder:
 
 Pulled run data lives outside this repo, in
 `/home/opencode/Work/rl-grpo-data/`, one folder per pull.
-
-The run 17 postmortem and the learning rate probe data live in
-`/tmp/opencode/pm/`, with `README.md` there as their index.
 
 To update the docs, say "go and update the docs". That means: bring
 `DECISIONS.md` and `journal.md` up to date, keep this index accurate, and leave
