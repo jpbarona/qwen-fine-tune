@@ -469,13 +469,16 @@ Training goes from 714 rows to 711.
 
 ## D26. All-linear LoRA at rank 16, alpha 32
 
-LFM2.5-2.6B and the Qwen baseline both adapt every linear layer: attention
-projections, both MLP matrices, and the two convolution projections in each LFM
-block. Rank 16, alpha 32.
+LFM2.5-2.6B and the Qwen baseline both adapt every linear layer. On LFM this
+covers the attention projections, both MLP matrices, and the two linear
+projections in each convolution block, `in_proj` and `out_proj`. PEFT
+`all-linear` covers those two `nn.Linear` projections and not the depthwise
+`nn.Conv1d` kernel. Rank 16, alpha 32.
 
-Why. The committed code gives LFM only the four attention projections, which
-leaves 22 of 30 blocks frozen. Every framework checked defaults to all-linear
-for RL: verl, OpenRLHF, TRL. Placement mattered more than rank in the Thinking
+Why. The code before this change gave LFM only the four attention projections,
+which left 22 of 30 blocks frozen. The default is still `attention`, set by
+`lora_targets`, and `all-linear` is opt-in. Every framework checked defaults to
+all-linear for RL: verl, OpenRLHF, TRL. Placement mattered more than rank in the Thinking
 Machines experiments, where attention-only at a matched parameter count lost to
 all-linear.
 
