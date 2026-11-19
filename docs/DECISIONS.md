@@ -496,3 +496,33 @@ every existing Qwen config keeps its committed behaviour. A 60 step Qwen
 all-linear run at rank 16 supplies the matched baseline for the model
 comparison.
 
+## D27. `eval-band` scores one labelled band, with a training contamination caveat
+
+Status: built and covered by CPU tests. The scoring loop has not run on a GPU.
+
+`rlvr eval-band --band <band> [--count N] [--seed N] [--checkpoint DIR] [--out PATH]`
+scores one difficulty band from the training split and prints one JSON line
+with `pass_at_1` for that band. The bands are `very easy`, `medium`, `hard`, and
+`very hard`, the same names the curriculum uses. The default count is 100 and
+the default seed is 2026, so the same command picks the same prompts. It loads
+one adapter checkpoint or the base model, runs greedy generation at the
+evaluation temperature, and builds no run folder. The test split is not read.
+
+Why a band command. The final evaluation covers the whole test pool, which
+reports one pass@1 for all difficulties. A run can improve the easy questions
+and lose the hard ones, and the mean hides that. The screen already labels every
+training row into a band, so a per band score gives the same breakdown without
+spending GPU time on the 250 test questions.
+
+The contamination caveat. The labels live on the training split because the
+curriculum needs them there. Those prompts are the ones training samples, so
+they stop being held out as soon as training uses them. A band score from a
+trained checkpoint measures fit on seen prompts, not generalization. Read it
+before training as a baseline, or read it as a progress signal within a band.
+Do not report it as held-out performance. The held-out number stays the final
+evaluation on the test split.
+
+A band that holds fewer prompts than `--count` exits 2 rather than scoring a
+smaller set, so two band scores with the same count cover the same number of
+questions.
+

@@ -23,7 +23,7 @@ Repo items, relative to this folder:
 - `../issues/09-spec-single-arm-curriculum.md` — current spec, single arm.
 - `../issues/10` to `../issues/17` — the implemented tickets.
 - `../issues/18-reward-and-checkpoint-fixes.md` — the reward and checkpoint fix plan.
-- `../README.md` — install, run, and test commands.
+- `../README.md` — install, run, and test commands, including `rlvr eval-band`.
 - `../configs/` — `real.toml`, `smoke.toml`, `lfm.toml`, `lfm-smoke.toml`, the two twenty step Qwen probes `probe-1e4.toml` and `probe-1e3.toml`, the two LFM probes `lfm-probe-1e4.toml` and `lfm-probe-1e3.toml`, and the sixty step Qwen baseline `qwen-alllinear-60.toml`.
 - `../dashboard/` — React and Tailwind source for the live dashboard.
 - `../src/rlvr/web/index.html` — the committed single file build.
