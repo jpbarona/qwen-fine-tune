@@ -110,6 +110,7 @@ SERIES_FIELDS: tuple[str, ...] = (
     "pass_rate",
     "mean_entropy",
     "grad_norm",
+    "update_norm",
     "mean_completion_tokens",
     "truncation_rate",
     "cache_hits",

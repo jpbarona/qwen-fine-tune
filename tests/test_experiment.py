@@ -6,6 +6,8 @@ scores the reasoning trace and the code with separate judge calls.
 
 from __future__ import annotations
 
+import json
+import math
 from dataclasses import fields
 from pathlib import Path
 
@@ -106,6 +108,8 @@ class StubGenerator:
         self.measure_flags: list[bool] = []
         self.updates = 0
         self.grad_norm: float | None = None
+        self.update_norm: float | None = None
+        self.last_update_norm: float | None = None
 
     def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
         self.calls.append((prompt.prompt_id, temperature))
@@ -140,6 +144,7 @@ class StubGenerator:
 
     def apply_update(self) -> float | None:
         self.updates += 1
+        self.last_update_norm = self.update_norm
         return self.grad_norm
 
     def save_checkpoint(self, directory) -> None:
@@ -818,15 +823,32 @@ def test_metrics_rows_summarize_the_step(tmp_path) -> None:
     assert row["mean_completion_tokens"] == pytest.approx(20.0)
 
 
-def test_metric_row_carries_the_gradient_norm(tmp_path) -> None:
+def test_metric_row_carries_the_gradient_and_update_norms(tmp_path) -> None:
     generator = StubGenerator()
     generator.grad_norm = 1.25
+    generator.update_norm = 0.5
     store = RecordingStore()
     build("code-score", tmp_path, generator=generator, store=store).run()
     assert store.metrics[0]["grad_norm"] == pytest.approx(1.25)
+    assert store.metrics[0]["update_norm"] == pytest.approx(0.5)
 
 
-def test_a_fake_run_writes_a_null_gradient_norm(tmp_path) -> None:
+def test_metric_row_writes_null_for_non_finite_norms(tmp_path) -> None:
+    generator = StubGenerator()
+    generator.grad_norm = math.inf
+    generator.update_norm = math.nan
+    store = RecordingStore()
+    build("code-score", tmp_path, generator=generator, store=store).run()
+
+    row = store.metrics[0]
+    assert row["grad_norm"] is None
+    assert row["update_norm"] is None
+    # The real metrics writer uses allow_nan=False, so this would raise on a
+    # non-finite value and leave the step without a metric row.
+    json.dumps(row, allow_nan=False)
+
+
+def test_a_fake_run_writes_null_norms(tmp_path) -> None:
     from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 
     store = RecordingStore()
@@ -841,6 +863,7 @@ def test_a_fake_run_writes_a_null_gradient_norm(tmp_path) -> None:
     ).run()
     assert store.metrics
     assert all(row["grad_norm"] is None for row in store.metrics)
+    assert all(row["update_norm"] is None for row in store.metrics)
 
 
 def test_entropy_is_measured_only_on_the_configured_cadence(tmp_path) -> None:

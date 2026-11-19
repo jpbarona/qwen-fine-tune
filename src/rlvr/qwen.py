@@ -65,6 +65,7 @@ __all__ = [
     "split_thinking_and_code",
     "thinking_marker_index",
     "truncate_prompt",
+    "update_norm",
 ]
 
 #: LoRA is applied to the self-attention projections only, per the spec.
@@ -244,13 +245,13 @@ def mean_token_loss(per_token_losses: Sequence[Sequence[float]]) -> float:
     return total / count
 
 
-def gradient_norm(parameters: Iterable[Any]) -> float:
+def gradient_norm(parameters: Iterable[Any]) -> float | None:
     """The total L2 norm of the gradients on the parameters that train.
 
     A parameter that does not require grad, or whose gradient is null, adds
     nothing. Each tensor's own 2-norm is exact, and `math.hypot` combines them
-    without overflowing on a large model. This is the value logged for one
-    optimizer update.
+    without overflowing on a large model. A non-finite result is returned as
+    None, so a diverged step leaves a metric row the JSON writer can write.
     """
     norm = 0.0
     for parameter in parameters:
@@ -260,7 +261,22 @@ def gradient_norm(parameters: Iterable[Any]) -> float:
         if gradient is None:
             continue
         norm = math.hypot(norm, float(gradient.detach().norm(2)))
-    return norm
+    return norm if math.isfinite(norm) else None
+
+
+def update_norm(changes: Iterable[tuple[Any, Any]]) -> float | None:
+    """The total L2 norm of the weight change made by one optimizer step.
+
+    Each pair is a parameter after the step and a snapshot taken before it.
+    The delta is the elementwise difference, and its 2-norm is combined with
+    `math.hypot`. A non-finite result is returned as None, matching the
+    gradient norm, so a diverged step still writes a readable metric row.
+    """
+    norm = 0.0
+    for parameter, before in changes:
+        delta = parameter.detach() - before
+        norm = math.hypot(norm, float(delta.norm(2)))
+    return norm if math.isfinite(norm) else None
 
 
 def clipped_surrogate(ratio: float, advantage: float, epsilon: float) -> float:
@@ -541,6 +557,7 @@ class QwenGenerator:
         self.profile = model_profile(model_name)
         self.step = 0
         self.last_grad_norm: float | None = None
+        self.last_update_norm: float | None = None
         self._pending_groups: list[list[_GroupEntry]] | None = None
         self._accumulated_groups = 0
 
@@ -1093,15 +1110,18 @@ class QwenGenerator:
             return entropy_total / entropy_tokens
         return None
 
-    def apply_update(self) -> float:
+    def apply_update(self) -> float | None:
         """Step the optimizer once over every group accumulated since the last call.
 
         The accumulated gradient is divided by the group count first, so the
         update is the mean over the prompt batch instead of a sum that grows
         with the batch size. The total L2 norm of those mean gradients is
         stored on the instance and returned, so the step metric records what
-        the optimizer was about to apply. The weight update counter moves once
-        per call, which is also the step number a checkpoint stores.
+        the optimizer was about to apply. AdamW hides how far the weights
+        moved, so the trainable weights are snapshotted before the step and
+        the norm of their change is stored as `last_update_norm`. Both norms
+        are null when they are not finite. The weight update counter moves
+        once per call, which is also the step number a checkpoint stores.
         """
         if not self.trainable:
             raise RuntimeError(
@@ -1115,8 +1135,17 @@ class QwenGenerator:
             if parameter.requires_grad and parameter.grad is not None:
                 parameter.grad.div_(count)
 
+        # AdamW normalises each step by the second moment of the gradient, so
+        # the gradient norm stays close across learning rates. The change in
+        # the weights is what shows that the rate reached them.
+        before = [
+            (parameter, parameter.detach().clone())
+            for parameter in self.model.parameters()
+            if parameter.requires_grad
+        ]
         self.last_grad_norm = gradient_norm(self.model.parameters())
         self.optimizer.step()
+        self.last_update_norm = update_norm(before)
         self.optimizer.zero_grad()
         self.step += 1
         self._accumulated_groups = 0

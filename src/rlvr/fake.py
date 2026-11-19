@@ -135,6 +135,7 @@ class FakeGenerator:
         self.save_calls: list[str] = []
         self.load_calls: list[str] = []
         self.step = 0
+        self.last_update_norm: float | None = None
         self._accumulated = 0
 
     def generate(
@@ -218,8 +219,8 @@ class FakeGenerator:
     def apply_update(self) -> float | None:
         """Count one weight update over the groups accumulated since the last call.
 
-        The fake holds no weights and no gradients, so there is no norm to
-        report.
+        The fake holds no weights and no gradients, so there is no gradient or
+        update norm to report.
         """
         if self._accumulated < 1:
             raise RuntimeError("apply_update called with no accumulated groups")

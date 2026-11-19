@@ -80,6 +80,7 @@ class FakeTrainer:
         self.accumulated: list[tuple[str, int]] = []
         self.updates = 0
         self.step = 0
+        self.last_update_norm: float | None = None
         self.adapter_saves: list[str] = []
         self.checkpoint_calls: list[tuple[str, object]] = []
 
@@ -119,6 +120,7 @@ class FakeTrainer:
     def apply_update(self) -> None:
         self.updates += 1
         self.step += 1
+        self.last_update_norm = 0.75
 
     def save_lora_adapter(self, directory):
         folder = Path(directory)
@@ -175,6 +177,7 @@ def test_one_adapter_handoff_per_optimizer_step_not_per_prompt(tmp_path) -> None
 
     assert len(engine.adapters) == 2
     assert trainer.updates == 1
+    assert generator.last_update_norm == pytest.approx(0.75)
     assert trainer.accumulated == [("p-0", 2), ("p-1", 2)]
 
 
