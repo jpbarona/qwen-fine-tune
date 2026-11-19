@@ -8,6 +8,7 @@ Docs, all in this folder:
 - [postmortem-run17.pdf](postmortem-run17.pdf) — the same report with three charts, three pages.
 - [6.1-sol-xhigh-pass.md](6.1-sol-xhigh-pass.md) — repository organization, LFM support, throughput changes, assumptions, and validation.
 - `DECISIONS.md` — decisions as they are made, newest last.
+- [IDEAS.md](IDEAS.md) — proposals that are not built, with their cost and the file they would touch.
 - `journal.md` — running problem and fix chunks, 10 to 12 words each.
 - `SPEC.md` — the deferred four-arm study design.
 - `PLAN.md` — the original ticket breakdown.
