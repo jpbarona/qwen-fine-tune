@@ -74,4 +74,4 @@ eval_subset_seed = 2026
 
 [budget]
 # Twenty steps for the learning rate probe.
-max_steps = 20
+max_steps = 15
