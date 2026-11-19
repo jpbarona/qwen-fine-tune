@@ -526,3 +526,13 @@ A band that holds fewer prompts than `--count` exits 2 rather than scoring a
 smaller set, so two band scores with the same count cover the same number of
 questions.
 
+## D28. A resumed run takes the configured learning rate
+
+Checkpoints store optimizer state, and PyTorch restores the saved learning rate
+with it. That made the config rate a lie on resume, so a bad run could not be
+slowed without starting over.
+
+`load_checkpoint` now writes the configured rate into every parameter group
+after the restore. Stopping at a checkpoint, editing `learning_rate`, and
+resuming applies the new rate to the restored weights and optimizer state.
+
