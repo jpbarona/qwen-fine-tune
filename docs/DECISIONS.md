@@ -552,3 +552,17 @@ The run rate was then set to 1e-4, the rate already validated on Qwen, since
 Stop rule: if the pinned 100 has not moved above 0.51 by step 40, stop the run.
 D28 allows the rate to be changed on resume.
 
+## D30. The 1e-4 run stopped at step 40
+
+The pinned 100 read 0.51 before training, 0.55 at step 20, and 0.47 at step 40.
+That is the stop rule in D29, so the run was stopped at step 40.
+
+The step 20 gain is inside the five-point noise of a 100-question cohort, and it
+did not hold. Steps 21 to 40 trained on the medium stage after the six stuck
+very easy prompts were dropped, so the last twenty steps used prompts the model
+fails on 8 of 8 attempts. Whether the fall comes from those prompts or from the
+rate is not separated by this run.
+
+What this rules out: a long run at 1e-4 on this curriculum reproducing the Qwen
+result. What it does not rule out: a gain at another rate or another placement.
+
