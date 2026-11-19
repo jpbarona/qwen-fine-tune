@@ -2,6 +2,7 @@
 
     rlvr run --arm <code-score|hybrid|gated-judge|gated-process> --fake
     rlvr screen --questions <path> --samples <n> --output <dir> [--fake]
+    rlvr eval-band --band <band> [--count 100] [--seed 2026] [--checkpoint <dir>] [--out <path>]
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
     rlvr dashboard [<run-dir> ...] [--runs-root <runs-root>] [--port 8081]
     rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
@@ -16,6 +17,11 @@ checkpoint.
 It never trains, builds no optimizer, and writes into its own output folder, not
 a run folder. A restart skips the question ids already in the table.
 
+`eval-band` scores one labelled difficulty band from the training split. It
+prints one JSON line with pass@1 for that band, and writes the same line to
+`--out` when that path is given. The test split is not used, and no run folder
+is made.
+
 `summary` reads run folders that already exist. It prints one table per metric
 with arms side by side and writes a static, self-contained HTML report.
 `publish` force-pushes that report to a Pages branch. It needs a remote the
@@ -29,8 +35,10 @@ failed publish. Messages for those cases go to stderr without a traceback.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
+from time import perf_counter
 from typing import Mapping, Sequence
 
 from .batching import START_PROMPTS, BatchSizePolicy
@@ -47,7 +55,14 @@ from .data import (
     load_split,
     prompts_for_questions,
 )
-from .experiment import Experiment, Judge, JudgeResult, Prompt
+from .experiment import (
+    EVAL_TEMPERATURE,
+    Experiment,
+    Judge,
+    JudgeResult,
+    Prompt,
+)
+from .evaluation import band_eval_prompts, pass_at_1
 from .fake import (
     FakeGenerator,
     FakeJudge,
@@ -61,6 +76,7 @@ from .publish import PublishError, publish_report
 from .reward import (
     ARMS,
     ArmNotImplemented,
+    all_tests_passed,
     check_arm_implemented,
     uses_output_judge,
     uses_process_judge,
@@ -92,6 +108,7 @@ __all__ = [
     "build_prompts",
     "build_screen_test_runner",
     "build_test_runner",
+    "eval_band_command",
     "load_synthetic_rows",
     "main",
     "screen_command",
@@ -205,6 +222,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="use the deterministic fake generator and test runner",
     )
     screen_parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="config file to read (default: the packaged config)",
+    )
+
+    eval_band = subparsers.add_parser(
+        "eval-band",
+        help="score one labelled difficulty band from the training split",
+    )
+    eval_band.add_argument(
+        "--band",
+        required=True,
+        help=f"one of: {', '.join(BANDS)}",
+    )
+    eval_band.add_argument(
+        "--count",
+        type=int,
+        default=100,
+        metavar="N",
+        help="prompts to score (default: 100)",
+    )
+    eval_band.add_argument(
+        "--seed",
+        type=int,
+        default=2026,
+        metavar="N",
+        help="subset seed (default: 2026)",
+    )
+    eval_band.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="adapter checkpoint to load (default: the base model)",
+    )
+    eval_band.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="optional JSON file for the result (default: print only)",
+    )
+    eval_band.add_argument(
         "--config",
         type=Path,
         default=None,
@@ -663,6 +724,73 @@ def screen_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def eval_band_command(args: argparse.Namespace) -> int:
+    """Score one labelled difficulty band from the training split."""
+    if args.count < 1:
+        raise UsageError(f"--count must be at least 1, got {args.count}")
+
+    config = load_config(args.config if args.config is not None else default_config_path())
+    try:
+        split = load_split(seed=config.split_seed)
+        labels = load_difficulty_labels(split)
+    except DatasetError as error:
+        raise UsageError(f"cannot load the labelled training split: {error}") from error
+
+    try:
+        prompts = band_eval_prompts(
+            prompts_for_questions(split.train),
+            labels,
+            args.band,
+            args.count,
+            args.seed,
+        )
+    except ValueError as error:
+        raise UsageError(str(error)) from error
+
+    generator = _qwen_generator(config, trainable=False)
+    if args.checkpoint is not None:
+        try:
+            generator.load_checkpoint(args.checkpoint)
+        except Exception as error:
+            raise UsageError(
+                f"cannot load checkpoint {args.checkpoint}: {error}"
+            ) from error
+    test_runner = build_test_runner(config, fake=False)
+
+    started = perf_counter()
+    passed: list[bool] = []
+    offset = 0
+    while offset < len(prompts):
+        chunk = list(prompts[offset : offset + config.eval_batch_size])
+        groups = generator.generate_batch(chunk, n=1, temperature=EVAL_TEMPERATURE)
+        if len(groups) != len(chunk) or any(len(group) != 1 for group in groups):
+            raise UsageError("evaluation needs exactly one generation per prompt")
+        for prompt, group in zip(chunk, groups):
+            outcome = test_runner.run(prompt, group[0].code)
+            passed.append(
+                all_tests_passed(outcome.tests_passed, outcome.tests_total)
+            )
+        offset += len(chunk)
+    seconds = perf_counter() - started
+
+    result = {
+        "model": config.model_name,
+        "band": args.band,
+        "pass_at_1": pass_at_1(passed),
+        "count": len(passed),
+        "passed": sum(1 for value in passed if value),
+        "seconds": seconds,
+    }
+    line = json.dumps(result)
+    print(line)
+    if args.out is not None:
+        try:
+            args.out.write_text(line + "\n", encoding="utf-8")
+        except OSError as error:
+            raise UsageError(f"cannot write {args.out}: {error}") from error
+    return 0
+
+
 def summary_command(args: argparse.Namespace) -> int:
     """Print the metric tables and write the report."""
     try:
@@ -726,6 +854,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_command(args)
         if args.command == "screen":
             return screen_command(args)
+        if args.command == "eval-band":
+            return eval_band_command(args)
         if args.command == "summary":
             return summary_command(args)
         if args.command == "dashboard":
