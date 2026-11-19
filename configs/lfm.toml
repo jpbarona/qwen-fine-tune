@@ -1,6 +1,6 @@
-# LFM2.5-2.6B uses the shared GRPO workflow and attention-only LoRA.
+# LFM2.5-2.6B uses the shared GRPO workflow and all-linear LoRA.
 # Install .[lfm] in an isolated environment. Its native template always thinks.
-# Hyperparameters match the Qwen profile as a comparison starting point.
+# Hyperparameters start from the Qwen profile, with rank 16 and alpha 32.
 
 # Full training profile for one reward arm. Prompt batches grow from two
 # groups as memory permits, with eight generations per prompt. The CLI derives
@@ -36,10 +36,11 @@ method = "grpo"
 engine = "hf"
 generations_per_prompt = 8
 temperature = 0.9
-learning_rate = 1e-5
+learning_rate = 1e-4
 epochs = 5
-lora_rank = 32
-lora_alpha = 64
+lora_rank = 16
+lora_alpha = 32
+lora_targets = "all-linear"
 max_prompt_tokens = 512
 max_completion_tokens = 2048
 # Thinking is capped at this many tokens at the first stage, doubling each

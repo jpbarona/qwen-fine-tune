@@ -1,0 +1,77 @@
+# Sixty step Qwen3-0.6B baseline with all-linear LoRA at rank 16.
+# Full training profile for one reward arm. Prompt batches grow from two
+# groups as memory permits, with eight generations per prompt. The CLI derives
+# the step budget from epochs and the initial number of prompt batches.
+# Save every 10 steps and evaluate every 20. Retain fifteen checkpoints with
+# the newest five consecutive and older ones at doubling gaps.
+
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "c1899de289a04d12100db370d81485cdf75e47ca"
+
+[judge]
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash-1017"
+base_url = "https://openrouter.ai/api/v1/chat/completions"
+api_key_env = "OPENROUTER_API_KEY"
+temperature = 0.0
+concurrency = 32
+max_attempts = 4
+timeout_seconds = 60
+cache_dir = "judge-cache"
+
+[data]
+name = "mbpp"
+dataset = "data/mbpp_full.jsonl"
+split_seed = 1234
+train_size = 711
+test_size = 250
+
+[training]
+method = "grpo"
+# Rollout sampler: "hf" keeps the Hugging Face generate loop, "vllm" samples
+# with vLLM and hands it the LoRA adapter after each optimizer step.
+engine = "vllm"
+generations_per_prompt = 8
+temperature = 0.9
+learning_rate = 1e-4
+epochs = 5
+lora_rank = 16
+lora_alpha = 32
+lora_targets = "all-linear"
+max_prompt_tokens = 512
+max_completion_tokens = 2048
+# Thinking is capped at this many tokens at the first stage, doubling each
+# stage up to max_completion_tokens. A rollout that hits the budget without
+# closing is ended and scored as truncated.
+thinking_budget_start = 768
+# Measure entropy every N training steps. Zero disables it.
+entropy_every_steps = 500
+clip_epsilon = 0.2
+kl_beta = 0.0
+# Length penalty over the whole output, thinking included. Every token above
+# the soft limit costs per_token, and the total is floored at penalty_floor.
+length_soft_limit = 900
+length_penalty_per_token = 0.001
+length_penalty_floor = 0.2
+# Steps start at two prompts and grow while free memory stays at or above this
+# floor and at or above one prompt group's measured footprint, in MiB. The
+# largest size that fit is kept. Never below one prompt.
+memory_floor_mib = 512
+# Bound concurrent sandboxed test containers. Each keeps its own limits.
+test_workers = 4
+# Greedy evaluation questions decoded together. OOM retries halve this size.
+eval_batch_size = 8
+# Score the next generated prompt group while the current group backpropagates.
+prefetch_scoring = true
+seed = 0
+
+[run]
+checkpoint_every_steps = 10
+eval_every_steps = 20
+eval_questions = 100
+eval_subset_seed = 2026
+
+[budget]
+# Sixty steps for the all-linear baseline.
+max_steps = 60

@@ -59,8 +59,11 @@ saved metadata before run records are truncated.
 The LFM profile pins `LiquidAI/LFM2.5-2.6B` at revision
 `7141b56cd4650af95c7c7b86983443aed050c96a`. It uses `engine = "hf"`.
 The native LFM template always opens a reasoning block, including for screening
-and evaluation. The comparison starts from Qwen's hyperparameters and adapts
-attention projections only. Full-weight GPU performance still needs measurement.
+and evaluation. The comparison starts from Qwen's hyperparameters. The
+`[training] lora_targets` key chooses the adapter placement: `attention` adapts
+the four attention projections, and `all-linear` adapts every linear layer. The
+committed LFM and Qwen baseline configs use `all-linear`. Full-weight GPU
+performance still needs measurement.
 The assumptions, implementation details, and validation are recorded in
 [the pass notes](docs/6.1-sol-xhigh-pass.md).
 
