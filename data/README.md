@@ -22,7 +22,7 @@ row cannot move a held-out question. `src/rlvr/data.py` reads it when the config
 seed is 1234. Any other seed gets a fresh cut.
 
 A pinned split keeps past evaluations comparable. Reshuffling after a deletion
-would replace 106 of the 250 held-out questions.
+would replace 187 of the 250 held-out questions.
 
 ## Difficulty labels
 
@@ -30,7 +30,7 @@ would replace 106 of the 250 held-out questions.
 
     {"prompt_id": "mbpp-464", "band": "medium"}
 
-The rows are in the same order as the 714 row training split for seed 1234.
+The rows are in the same order as the 711 row training split for seed 1234.
 Bands are `very easy`, `medium`, `hard`, and `very hard`. They were assigned by
 reading the problem statements in batches of 20, judging the number of concepts,
 edge cases, and steps a correct solution needs. The reference `code` column was

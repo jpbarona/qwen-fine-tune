@@ -9,6 +9,7 @@ import pytest
 
 from rlvr.data import (
     DEFAULT_DATA_PATH,
+    DEFAULT_SPLIT_PATH,
     ARITY_PROMPT_TEMPLATE,
     NAMED_PROMPT_TEMPLATE,
     PROMPT_TEMPLATE,
@@ -22,6 +23,7 @@ from rlvr.data import (
     format_prompt,
     load_dataset,
     load_split,
+    pinned_split,
     prompt_id_for,
     prompt_for_question,
     prompts_for_questions,
@@ -29,6 +31,18 @@ from rlvr.data import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _tiny_questions(*prompt_ids: str) -> list[MBPPQuestion]:
+    return [
+        MBPPQuestion(
+            task_id=9000 + index,
+            text="Write a function to do a thing.",
+            test_list=("assert do_thing() == 1",),
+            prompt_id=prompt_id,
+        )
+        for index, prompt_id in enumerate(prompt_ids)
+    ]
 
 
 def test_committed_dataset_merges_the_three_real_splits() -> None:
@@ -93,7 +107,7 @@ def test_loader_rejects_duplicate_ids(tmp_path: Path) -> None:
         load_dataset(path)
 
 
-def test_split_is_714_train_and_250_test() -> None:
+def test_split_is_711_train_and_250_test() -> None:
     questions = load_dataset(DEFAULT_DATA_PATH)
     split = split_questions(questions, seed=1234)
     assert len(split.train) == TRAIN_SIZE == 711
@@ -142,6 +156,80 @@ def test_every_arm_reads_the_same_split_for_the_same_seed() -> None:
     second = load_split(DEFAULT_DATA_PATH, seed=1234)
     assert [q.task_id for q in first.train] == [q.task_id for q in second.train]
     assert [q.task_id for q in first.test] == [q.task_id for q in second.test]
+
+
+def test_pinned_split_matches_the_stored_id_lists() -> None:
+    questions = load_dataset(DEFAULT_DATA_PATH)
+    stored = json.loads(DEFAULT_SPLIT_PATH.read_text(encoding="utf-8"))
+    split = pinned_split(questions, DEFAULT_SPLIT_PATH)
+    assert [prompt_id_for(q) for q in split.train] == stored["train"]
+    assert [prompt_id_for(q) for q in split.test] == stored["test"]
+
+
+def test_pinned_split_rejects_a_missing_file(tmp_path: Path) -> None:
+    questions = load_dataset(DEFAULT_DATA_PATH)
+    with pytest.raises(DatasetError, match="cannot read split file"):
+        pinned_split(questions, tmp_path / "missing.json")
+
+
+def test_pinned_split_rejects_malformed_json(tmp_path: Path) -> None:
+    path = tmp_path / "split.json"
+    path.write_text("{not json", encoding="utf-8")
+    questions = load_dataset(DEFAULT_DATA_PATH)
+    with pytest.raises(DatasetError, match="cannot read split file"):
+        pinned_split(questions, path)
+
+
+def test_pinned_split_rejects_a_duplicate_id(tmp_path: Path) -> None:
+    path = tmp_path / "split.json"
+    path.write_text(json.dumps({"train": ["a", "a"], "test": ["c"]}), encoding="utf-8")
+    questions = _tiny_questions("a", "b", "c")
+    with pytest.raises(DatasetError, match="repeats an id"):
+        pinned_split(questions, path, train_size=2, test_size=1)
+
+
+def test_pinned_split_rejects_an_overlap_between_the_halves(tmp_path: Path) -> None:
+    path = tmp_path / "split.json"
+    path.write_text(json.dumps({"train": ["a", "b"], "test": ["b"]}), encoding="utf-8")
+    questions = _tiny_questions("a", "b", "c")
+    with pytest.raises(DatasetError, match="both halves"):
+        pinned_split(questions, path, train_size=2, test_size=1)
+
+
+def test_pinned_split_rejects_an_id_missing_from_the_dataset() -> None:
+    questions = load_dataset(DEFAULT_DATA_PATH)
+    stored = json.loads(DEFAULT_SPLIT_PATH.read_text(encoding="utf-8"))
+    missing_id = stored["train"][0]
+    trimmed = [q for q in questions if prompt_id_for(q) != missing_id]
+    with pytest.raises(DatasetError, match="absent from the dataset"):
+        pinned_split(trimmed, DEFAULT_SPLIT_PATH)
+
+
+def test_pinned_split_rejects_wrong_counts(tmp_path: Path) -> None:
+    path = tmp_path / "split.json"
+    path.write_text(json.dumps({"train": ["a"], "test": ["c"]}), encoding="utf-8")
+    questions = _tiny_questions("a", "b", "c")
+    with pytest.raises(DatasetError, match="split file must hold"):
+        pinned_split(questions, path)
+
+
+def test_pinned_split_rejects_dataset_rows_outside_the_lists() -> None:
+    questions = list(load_dataset(DEFAULT_DATA_PATH))
+    questions.append(
+        MBPPQuestion(
+            task_id=999999,
+            text="Write a function to do a thing.",
+            test_list=("assert do_thing() == 1",),
+            prompt_id="mbpp-999999",
+        )
+    )
+    with pytest.raises(DatasetError, match="dataset ids are absent from the split file"):
+        pinned_split(questions, DEFAULT_SPLIT_PATH)
+
+
+def test_load_split_rejects_a_missing_pinned_file(tmp_path: Path) -> None:
+    with pytest.raises(DatasetError, match="split file not found"):
+        load_split(DEFAULT_DATA_PATH, seed=1234, split_path=tmp_path / "missing.json")
 
 
 def test_prompt_format_is_fixed_and_contains_the_problem() -> None:

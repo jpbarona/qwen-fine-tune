@@ -23,7 +23,7 @@ cache_dir = "judge-cache"
 name = "mbpp"
 dataset = "data/mbpp_full.jsonl"
 split_seed = 1234
-train_size = 714
+train_size = 711
 test_size = 250
 
 [training]

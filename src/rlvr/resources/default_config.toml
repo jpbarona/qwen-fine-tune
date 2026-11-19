@@ -33,11 +33,11 @@ cache_dir = "judge-cache"
 
 [data]
 name = "mbpp"
-# Offline merge of the MBPP full configuration: 374 train + 90 validation +
-# 500 test = 964 rows. The 10 few-shot prompt rows are excluded.
+# Offline merge of the MBPP full configuration: 373 train + 88 validation +
+# 500 test = 961 rows. The 10 few-shot prompt rows are excluded.
 dataset = "data/mbpp_full.jsonl"
 split_seed = 1234
-train_size = 714
+train_size = 711
 test_size = 250
 
 [training]

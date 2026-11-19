@@ -459,7 +459,7 @@ steps, which is one resume of the probe checkpoint.
 the control file at step 121. They are removed from `data/mbpp_full.jsonl` and
 from the label file, so no run spends steps on them again.
 
-Deleting rows would reshuffle the seed 1234 cut and replace 106 of the 250
+Deleting rows would reshuffle the seed 1234 cut and replace 187 of the 250
 held-out questions, which breaks every past evaluation. So the split is pinned
 in `data/split_seed1234.json`: 711 train and 250 test, with the same test ids as
 before. `load_split` reads the pinned file when the config seed is 1234 and cuts
