@@ -590,6 +590,7 @@ def test_checkpoint_model_and_adapter_identity_is_checked() -> None:
     generator.profile = LFM2
     generator.lora_rank = 32
     generator.lora_alpha = 64
+    generator.lora_target_modules = LFM2.attention_targets
     adapter = {
         "base_model_name_or_path": generator.model_name,
         "r": 32,
@@ -607,6 +608,44 @@ def test_checkpoint_model_and_adapter_identity_is_checked() -> None:
         generator._validate_checkpoint_identity(dict(adapter, target_modules=["o_proj"]), {})
 
 
+def test_checkpoint_guard_rejects_a_mismatched_lora_placement() -> None:
+    from rlvr.model_profiles import LFM2
+    from rlvr.qwen import QwenGenerator
+
+    attention = list(LFM2.attention_targets)
+    all_linear = attention + [
+        "model.layers.0.conv.in_proj",
+        "model.layers.0.conv.out_proj",
+        "model.layers.0.feed_forward.w1",
+        "model.layers.0.feed_forward.w2",
+        "model.layers.0.feed_forward.w3",
+    ]
+    generator = object.__new__(QwenGenerator)
+    generator.model_name = "LiquidAI/LFM2.5-2.6B"
+    generator.revision = "revision"
+    generator.profile = LFM2
+    generator.lora_rank = 16
+    generator.lora_alpha = 32
+
+    generator.lora_target_modules = tuple(attention)
+    attention_adapter = {
+        "base_model_name_or_path": generator.model_name,
+        "r": 16,
+        "lora_alpha": 32,
+        "target_modules": all_linear,
+    }
+    with pytest.raises(ValueError, match="target modules"):
+        generator._validate_checkpoint_identity(attention_adapter, {})
+
+    generator.lora_target_modules = tuple(all_linear)
+    all_linear_adapter = dict(attention_adapter, target_modules=attention)
+    with pytest.raises(ValueError, match="target modules"):
+        generator._validate_checkpoint_identity(all_linear_adapter, {})
+    generator._validate_checkpoint_identity(
+        dict(attention_adapter, target_modules=all_linear), {}
+    )
+
+
 def test_shipped_lfm_profiles_use_pinned_model_and_hf() -> None:
     from pathlib import Path
     from rlvr.config import load_config
@@ -617,6 +656,55 @@ def test_shipped_lfm_profiles_use_pinned_model_and_hf() -> None:
         assert config.model_name == "LiquidAI/LFM2.5-2.6B"
         assert len(config.model_revision) == 40
         assert config.engine == "hf"
+
+
+def test_all_linear_targets_adapt_the_lfm_convolution_and_mlp(tmp_path) -> None:
+    """The all-linear setting reaches PEFT, on the tiny fake model, no download."""
+    pytest.importorskip("torch")
+    transformers = pytest.importorskip("transformers")
+    pytest.importorskip("peft")
+    if int(transformers.__version__.split(".")[0]) < 5:
+        pytest.skip("LFM2.5 requires the optional Transformers 5 environment")
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import Whitespace
+    from transformers import AutoModelForCausalLM, Lfm2Config, PreTrainedTokenizerFast
+    from rlvr.qwen import CausalLMGenerator
+
+    vocabulary = {
+        "<pad>": 0, "<eos>": 1, "<unk>": 2, "<bos>": 3,
+        "<think>": 4, "</think>": 5, "write": 6, "code": 7,
+    }
+    backend = Tokenizer(WordLevel(vocabulary, unk_token="<unk>"))
+    backend.pre_tokenizer = Whitespace()
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=backend, pad_token="<pad>", eos_token="<eos>",
+        unk_token="<unk>", bos_token="<bos>",
+        additional_special_tokens=["<think>", "</think>"],
+        chat_template="{{ bos_token }}{{ messages[0]['content'] }}<think>",
+    )
+    folder = tmp_path / "tiny-lfm-all-linear"
+    tokenizer.save_pretrained(folder)
+    config = Lfm2Config(
+        vocab_size=len(vocabulary), hidden_size=16, intermediate_size=32,
+        num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1,
+        max_position_embeddings=64, pad_token_id=0, eos_token_id=1, bos_token_id=3,
+        full_attn_idxs=[1], block_multiple_of=1, block_auto_adjust_ff_dim=False,
+    )
+    AutoModelForCausalLM.from_config(config).save_pretrained(folder)
+    trainer = CausalLMGenerator(
+        model_name=str(folder), revision="main", lora_rank=2, lora_alpha=4,
+        lora_targets="all-linear", learning_rate=1e-3,
+        max_prompt_tokens=16, max_completion_tokens=4,
+        clip_epsilon=0.2, kl_beta=0.0, seed=0,
+    )
+
+    names = [name for name, _ in trainer.model.named_parameters() if "lora_" in name]
+    assert any(".conv." in name for name in names)
+    assert any(".feed_forward." in name for name in names)
+    assert any(".self_attn." in name for name in names)
+    assert any(".conv." in name for name in trainer.lora_target_modules)
+    assert any(".feed_forward." in name for name in trainer.lora_target_modules)
 
 
 @pytest.mark.parametrize("family", ["lfm2", "qwen3"])

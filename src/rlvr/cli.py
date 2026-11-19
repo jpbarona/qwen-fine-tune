@@ -418,6 +418,7 @@ def _qwen_generator(config: Config, *, trainable: bool):
             revision=config.model_revision,
             lora_rank=config.lora_rank,
             lora_alpha=config.lora_alpha,
+            lora_targets=config.lora_targets,
             learning_rate=config.learning_rate,
             max_prompt_tokens=config.max_prompt_tokens,
             max_completion_tokens=config.max_completion_tokens,

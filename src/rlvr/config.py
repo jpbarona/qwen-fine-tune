@@ -27,6 +27,7 @@ Optional keys, with the defaults shown:
     [training] learning_rate = 1e-5
     [training] lora_rank = 32
     [training] lora_alpha = 64
+    [training] lora_targets = "attention"
     [training] max_prompt_tokens = 512
     [training] max_completion_tokens = 2048
     [training] thinking_budget_start = 768
@@ -93,6 +94,7 @@ from .reward import (
     DEFAULT_LENGTH_SOFT_LIMIT,
 )
 from .budget import DEFAULT_THINKING_BUDGET_START
+from .model_profiles import LORA_TARGETS
 from .stages import BANDS, DEFAULT_CARRY_OVER_RATIO
 
 __all__ = ["Config", "ConfigError", "default_config_path", "load_config"]
@@ -119,6 +121,7 @@ DEFAULT_TEMPERATURE = 0.9
 DEFAULT_LEARNING_RATE = 1e-5
 DEFAULT_LORA_RANK = 32
 DEFAULT_LORA_ALPHA = 64
+DEFAULT_LORA_TARGETS = "attention"
 DEFAULT_MAX_PROMPT_TOKENS = 512
 DEFAULT_MAX_COMPLETION_TOKENS = 2048
 DEFAULT_ENTROPY_EVERY_STEPS = 500
@@ -160,6 +163,7 @@ class Config:
     learning_rate: float = DEFAULT_LEARNING_RATE
     lora_rank: int = DEFAULT_LORA_RANK
     lora_alpha: int = DEFAULT_LORA_ALPHA
+    lora_targets: str = DEFAULT_LORA_TARGETS
     max_prompt_tokens: int = DEFAULT_MAX_PROMPT_TOKENS
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
     thinking_budget_start: int = DEFAULT_THINKING_BUDGET_START
@@ -293,6 +297,20 @@ def _band(raw: dict[str, Any], dotted: str, default: str) -> str:
     return value
 
 
+def _lora_targets(raw: dict[str, Any], dotted: str, default: str) -> str:
+    """One of the allowed adapter placements, or `default` when absent."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return default
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"config: '{dotted}' must be a non-empty string, got {_shown(value)}")
+    if value not in LORA_TARGETS:
+        raise ConfigError(
+            f"config: '{dotted}' must be one of {', '.join(LORA_TARGETS)}, got {value!r}"
+        )
+    return value
+
+
 def _optional_unit_float(raw: dict[str, Any], dotted: str, default: float) -> float:
     """A non-negative float from `dotted` that is below 1, or `default`."""
     value = _optional(raw, dotted, None)
@@ -394,6 +412,9 @@ def load_config(path: str | Path) -> Config:
         ),
         lora_alpha=_optional_positive_int(
             raw, "training.lora_alpha", DEFAULT_LORA_ALPHA
+        ),
+        lora_targets=_lora_targets(
+            raw, "training.lora_targets", DEFAULT_LORA_TARGETS
         ),
         max_prompt_tokens=_optional_positive_int(
             raw, "training.max_prompt_tokens", DEFAULT_MAX_PROMPT_TOKENS

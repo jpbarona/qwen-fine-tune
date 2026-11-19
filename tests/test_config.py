@@ -197,6 +197,7 @@ def test_training_settings_default_and_are_read(tmp_path) -> None:
     assert config.learning_rate == pytest.approx(1e-5)
     assert config.lora_rank == 32
     assert config.lora_alpha == 64
+    assert config.lora_targets == "attention"
     assert config.max_prompt_tokens == 512
     assert config.max_completion_tokens == 2048
     assert config.entropy_every_steps == 500
@@ -230,6 +231,23 @@ def test_training_settings_are_read_from_the_table(tmp_path) -> None:
     assert config.entropy_every_steps == 25
     assert config.clip_epsilon == pytest.approx(0.1)
     assert config.kl_beta == pytest.approx(0.05)
+
+
+def test_lora_targets_reads_all_linear(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        GOOD + '\n[training]\nlora_targets = "all-linear"\n', encoding="utf-8"
+    )
+    assert load_config(path).lora_targets == "all-linear"
+
+
+def test_an_unknown_lora_targets_value_is_rejected(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        GOOD + '\n[training]\nlora_targets = "every-layer"\n', encoding="utf-8"
+    )
+    with pytest.raises(ConfigError, match="training.lora_targets.*all-linear"):
+        load_config(path)
 
 
 def test_length_settings_are_read_from_the_training_table(tmp_path) -> None:

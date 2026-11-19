@@ -666,6 +666,7 @@ class Experiment:
                 "learning_rate": config.learning_rate,
                 "lora_rank": config.lora_rank,
                 "lora_alpha": config.lora_alpha,
+                "lora_targets": config.lora_targets,
                 "max_prompt_tokens": config.max_prompt_tokens,
                 "max_completion_tokens": config.max_completion_tokens,
                 "entropy_every_steps": config.entropy_every_steps,
