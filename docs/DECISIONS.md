@@ -536,9 +536,9 @@ slowed without starting over.
 after the restore. Stopping at a checkpoint, editing `learning_rate`, and
 resuming applies the new rate to the restored weights and optimizer state.
 
-## D29. The LFM run uses 3e-4
+## D29. The LFM run uses 1e-4
 
-The 3e-4 probe held for fifteen steps. Reward stayed between 0.45 and 1.00,
+Revised the same day. The 3e-4 probe held for fifteen steps. Reward stayed between 0.45 and 1.00,
 completion length fell from 572 tokens to 83, and the update norm settled near
 0.55. That is about three times the 1e-4 probe and a quarter of the 1e-3 run
 that was destroyed at step 11.
@@ -546,6 +546,9 @@ that was destroyed at step 11.
 On the pinned 100, the step 10 adapter scored 0.51 against a base of 0.51. The
 rate has not helped yet, and it has not hurt.
 
+The run rate was then set to 1e-4, the rate already validated on Qwen, since
+3e-4 showed no gain in ten steps and the operator chose the known-safe value.
+
 Stop rule: if the pinned 100 has not moved above 0.51 by step 40, stop the run.
-D28 allows the rate to be lowered on resume.
+D28 allows the rate to be changed on resume.
 
