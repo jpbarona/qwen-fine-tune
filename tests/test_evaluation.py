@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from rlvr.evaluation import pass_at_1, select_eval_subset, subset_selector
+from rlvr.evaluation import (
+    band_eval_prompts,
+    pass_at_1,
+    select_eval_subset,
+    subset_selector,
+)
 from rlvr.experiment import Prompt
 
 
@@ -90,3 +95,49 @@ def test_the_selector_records_the_method_seed_and_sizes() -> None:
         "selected": 100,
         "pool_size": 250,
     }
+
+
+def make_band_labels(pool: list[Prompt], bands: tuple[str, ...]) -> dict[str, str]:
+    return {
+        prompt.prompt_id: bands[index % len(bands)]
+        for index, prompt in enumerate(pool)
+    }
+
+
+def test_band_selection_keeps_only_the_requested_band() -> None:
+    pool = make_prompts(40)
+    labels = make_band_labels(pool, ("very easy", "medium", "hard", "very hard"))
+
+    selected = band_eval_prompts(pool, labels, "medium", 5, 2026)
+
+    assert len(selected) == 5
+    assert {labels[prompt.prompt_id] for prompt in selected} == {"medium"}
+    assert {prompt.prompt_id for prompt in selected} <= {
+        prompt.prompt_id for prompt in pool if labels[prompt.prompt_id] == "medium"
+    }
+
+
+def test_band_selection_is_deterministic_for_a_seed() -> None:
+    pool = make_prompts(40)
+    labels = make_band_labels(pool, ("very easy", "medium", "hard", "very hard"))
+
+    first = band_eval_prompts(pool, labels, "medium", 5, 2026)
+    second = band_eval_prompts(pool, labels, "medium", 5, 2026)
+
+    assert first == second
+
+
+def test_a_band_with_too_few_prompts_raises() -> None:
+    pool = make_prompts(4)
+    labels = make_band_labels(pool, ("very easy", "medium", "hard", "very hard"))
+
+    with pytest.raises(ValueError, match="fewer than the requested"):
+        band_eval_prompts(pool, labels, "medium", 100, 2026)
+
+
+def test_an_unknown_band_raises() -> None:
+    pool = make_prompts(4)
+    labels = make_band_labels(pool, ("very easy", "medium", "hard", "very hard"))
+
+    with pytest.raises(ValueError, match="unknown band"):
+        band_eval_prompts(pool, labels, "extreme", 1, 2026)

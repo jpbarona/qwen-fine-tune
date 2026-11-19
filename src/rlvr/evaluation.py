@@ -13,18 +13,26 @@ an integer seed and no other input.
 
 pass@1 is the only metric. It is the fraction of evaluated questions whose
 greedy generation passed every task test.
+
+`band_eval_prompts` reads a band from the training split, which carries the
+difficulty labels. It keeps the prompts labelled with that band and applies the
+same seeded sample, so a medium pass@1 can be measured without the test split
+and without a run folder.
 """
 
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
+
+from .stages import BANDS
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard for type checkers
     from .experiment import Prompt
 
 __all__ = [
     "SUBSET_METHOD",
+    "band_eval_prompts",
     "pass_at_1",
     "select_eval_subset",
     "subset_selector",
@@ -53,6 +61,36 @@ def select_eval_subset(
 
     indices = random.Random(seed).sample(range(len(pool)), count)
     return tuple(pool[index] for index in sorted(indices))
+
+
+def band_eval_prompts(
+    prompts: Sequence[Prompt],
+    labels: Mapping[str, str],
+    band: str,
+    count: int,
+    seed: int,
+) -> tuple[Prompt, ...]:
+    """Pick `count` prompts from one labelled difficulty band.
+
+    Only prompts whose id carries the requested band are kept. The kept prompts
+    keep their pool order, and `select_eval_subset` samples them with the given
+    seed. Raises ValueError for an unknown band, and when the band holds fewer
+    prompts than `count`, so a short band is not silently scored on a smaller
+    set.
+    """
+    if band not in BANDS:
+        raise ValueError(
+            f"unknown band {band!r}, expected one of {', '.join(BANDS)}"
+        )
+    in_band = tuple(
+        prompt for prompt in prompts if labels.get(prompt.prompt_id) == band
+    )
+    if len(in_band) < count:
+        raise ValueError(
+            f"band {band!r} holds {len(in_band)} prompts, "
+            f"fewer than the requested {count}"
+        )
+    return select_eval_subset(in_band, count=count, seed=seed)
 
 
 def subset_selector(

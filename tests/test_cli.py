@@ -285,6 +285,29 @@ def test_unknown_subcommand_fails(tmp_path) -> None:
         main(["train", "--arm", "code-score", "--fake"])
 
 
+def test_the_parser_accepts_eval_band() -> None:
+    from rlvr.cli import build_parser
+
+    args = build_parser().parse_args(["eval-band", "--band", "medium"])
+
+    assert args.command == "eval-band"
+    assert args.band == "medium"
+    assert args.count == 100
+    assert args.seed == 2026
+    assert args.checkpoint is None
+    assert args.out is None
+
+
+def test_eval_band_requires_a_band(capsys) -> None:
+    from rlvr.cli import build_parser
+
+    with pytest.raises(SystemExit) as excinfo:
+        build_parser().parse_args(["eval-band"])
+
+    assert excinfo.value.code != 0
+    assert "--band" in capsys.readouterr().err
+
+
 def test_runs_root_defaults_to_runs_in_the_current_directory(config_path, tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     assert main(["run", "--arm", "code-score", "--fake", "--config", str(config_path)]) == 0
