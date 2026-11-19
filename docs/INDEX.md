@@ -8,6 +8,8 @@ Docs, all in this folder:
 - [postmortem-run17.pdf](postmortem-run17.pdf) — the same report with three charts, three pages.
 - [6.1-sol-xhigh-pass.md](6.1-sol-xhigh-pass.md) — repository organization, LFM support, throughput changes, assumptions, and validation.
 - `DECISIONS.md` — decisions as they are made, newest last.
+- [superpowers/specs/2026-11-19-lfm-all-linear-lora-design.md](superpowers/specs/2026-11-19-lfm-all-linear-lora-design.md) — the approved design for all-linear LoRA on LFM.
+- [superpowers/plans/2026-11-19-lfm-all-linear-lora.md](superpowers/plans/2026-11-19-lfm-all-linear-lora.md) — the task breakdown for that change.
 - [IDEAS.md](IDEAS.md) — proposals that are not built, with their cost and the file they would touch.
 - `journal.md` — running problem and fix chunks, 10 to 12 words each.
 - `SPEC.md` — the deferred four-arm study design.
@@ -22,7 +24,7 @@ Repo items, relative to this folder:
 - `../issues/10` to `../issues/17` — the implemented tickets.
 - `../issues/18-reward-and-checkpoint-fixes.md` — the reward and checkpoint fix plan.
 - `../README.md` — install, run, and test commands.
-- `../configs/` — `real.toml`, `smoke.toml`, `lfm.toml`, `lfm-smoke.toml`, and the two twenty step probe configs `probe-1e4.toml` and `probe-1e3.toml`.
+- `../configs/` — `real.toml`, `smoke.toml`, `lfm.toml`, `lfm-smoke.toml`, the two twenty step Qwen probes `probe-1e4.toml` and `probe-1e3.toml`, the two LFM probes `lfm-probe-1e4.toml` and `lfm-probe-1e3.toml`, and the sixty step Qwen baseline `qwen-alllinear-60.toml`.
 - `../dashboard/` — React and Tailwind source for the live dashboard.
 - `../src/rlvr/web/index.html` — the committed single file build.
 - `../data/mbpp_full.jsonl` — 961 MBPP rows, pinned split of 711 train and 250 test, with `../data/split_seed1234.json` holding the ids.

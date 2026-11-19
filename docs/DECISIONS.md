@@ -466,3 +466,30 @@ before. `load_split` reads the pinned file when the config seed is 1234 and cuts
 fresh for any other seed.
 
 Training goes from 714 rows to 711.
+
+## D26. All-linear LoRA at rank 16, alpha 32
+
+LFM2.5-2.6B and the Qwen baseline both adapt every linear layer: attention
+projections, both MLP matrices, and the two convolution projections in each LFM
+block. Rank 16, alpha 32.
+
+Why. The committed code gives LFM only the four attention projections, which
+leaves 22 of 30 blocks frozen. Every framework checked defaults to all-linear
+for RL: verl, OpenRLHF, TRL. Placement mattered more than rank in the Thinking
+Machines experiments, where attention-only at a matched parameter count lost to
+all-linear.
+
+Why rank 16. Thinking Machines matched full fine-tuning at rank 1 on 8B models.
+A 1B to 3B GRPO study found rank 16 against 32 inside noise, with higher ranks
+drifting further from the base policy. Liquid ships rank 16 for LFM2.5. The one
+result favouring a higher rank is code supervised fine-tuning at 7B, where rank
+64 beat 16, and that run carried far more signal than a short RL run.
+
+Sizes on LFM2.5-2.6B, all-linear: rank 8 is 12.2M, rank 16 is 24.5M, rank 32 is
+48.9M. Rank 16 is 0.95 percent of the model.
+
+The setting is a config key, `lora_targets`, with `attention` as the default, so
+every existing Qwen config keeps its committed behaviour. A 60 step Qwen
+all-linear run at rank 16 supplies the matched baseline for the model
+comparison.
+
