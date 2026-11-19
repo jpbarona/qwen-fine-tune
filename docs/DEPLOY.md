@@ -19,6 +19,19 @@ The instance accepts the `opencode-agent` key and jpbarona's Mac key. Password l
 - Old key: `OPENCODE_GO_API_KEY` is only read when `[judge] provider = "opencode"`.
 - Docker is installed and the `Ubuntu` user is in the `docker` group.
 
+## Every detached job gets a watcher
+
+Start the job and its watcher in the same action. A detached job with no local
+waiter is a job nobody hears about, and that has already cost a probe.
+
+```bash
+ssh -i ~/.ssh/id_ed25519 Ubuntu@HOST 'setsid nohup ./run.sh code-score > ~/run.log 2>&1 < /dev/null &'
+./scripts/watch-remote.sh Ubuntu@HOST "configs/lfm.toml"
+```
+
+`watch-remote.sh` reports only on exit, treats a failed ssh as a retry rather
+than completion, and gives up after eight empty replies.
+
 ## Run
 
 ```bash
