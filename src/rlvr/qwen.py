@@ -41,7 +41,7 @@ from typing import Any, Sequence
 
 from .budget import budget_stop_is_truncation
 from .experiment import Generation, Prompt
-from .model_profiles import model_profile, validate_transformers_version
+from .model_profiles import LORA_TARGETS, model_profile, validate_transformers_version
 
 __all__ = [
     "ATTENTION_TARGET_MODULES",
@@ -535,6 +535,7 @@ class QwenGenerator:
         revision: str,
         lora_rank: int,
         lora_alpha: int,
+        lora_targets: str = "attention",
         learning_rate: float,
         max_prompt_tokens: int,
         max_completion_tokens: int,
@@ -543,10 +544,16 @@ class QwenGenerator:
         seed: int | None = None,
         trainable: bool = True,
     ) -> None:
+        if lora_targets not in LORA_TARGETS:
+            raise ValueError(
+                f"lora_targets must be one of {', '.join(LORA_TARGETS)}, "
+                f"got {lora_targets!r}"
+            )
         self.model_name = model_name
         self.revision = revision
         self.lora_rank = lora_rank
         self.lora_alpha = lora_alpha
+        self.lora_targets = lora_targets
         self.learning_rate = float(learning_rate)
         self.max_prompt_tokens = max_prompt_tokens
         self.max_completion_tokens = max_completion_tokens
@@ -601,15 +608,23 @@ class QwenGenerator:
 
         from peft import LoraConfig, TaskType, get_peft_model  # lazy
 
+        target_modules: Any = (
+            "all-linear"
+            if lora_targets == "all-linear"
+            else list(self.profile.attention_targets)
+        )
         lora_config = LoraConfig(
             r=lora_rank,
             lora_alpha=lora_alpha,
             lora_dropout=0.0,
             bias="none",
             task_type=TaskType.CAUSAL_LM,
-            target_modules=list(self.profile.attention_targets),
+            target_modules=target_modules,
         )
         self.model = get_peft_model(self.base_model, lora_config)
+        self.lora_target_modules = tuple(
+            self.model.peft_config["default"].target_modules
+        )
         self.model.train()
 
         trainable_params = [param for param in self.model.parameters() if param.requires_grad]
@@ -1304,8 +1319,10 @@ class QwenGenerator:
         for field, value in (("r", self.lora_rank), ("lora_alpha", self.lora_alpha)):
             if adapter_config.get(field) != value:
                 raise ValueError(f"checkpoint adapter {field} differs from the configured LoRA")
-        if set(adapter_config.get("target_modules", [])) != set(self.profile.attention_targets):
-            raise ValueError("checkpoint LoRA target modules differ from the model architecture")
+        if set(adapter_config.get("target_modules", [])) != set(self.lora_target_modules):
+            raise ValueError(
+                "checkpoint LoRA target modules differ from the configured placement"
+            )
 
 
 # Retain the established import and class name for callers and old integrations.

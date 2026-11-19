@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+#: The adapter placements a training config may choose.
+LORA_TARGETS: tuple[str, ...] = ("attention", "all-linear")
+
 
 @dataclass(frozen=True)
 class ModelProfile:
