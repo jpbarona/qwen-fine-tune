@@ -114,4 +114,5 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 98. All-linear adapters at rank 16, Qwen baseline at the same placement
 99. Band scoring reads training prompts, so it is not held out
 99. Resume takes the configured rate, so a run can be slowed
+100. 3e-4 probe held, so the full run starts there
 

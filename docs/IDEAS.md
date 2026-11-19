@@ -54,3 +54,79 @@ shows the last training step and the GPU looks busy for no stated reason.
 
 D22 is currently a procedure, not code. The runner could score the base model on
 its own cohort before step 1 and write the row into `eval.json`.
+
+## Cross-language evaluation
+
+The problem. Every result so far is one language. The question the papers leave
+open is whether a gain on Python arrives on other languages, and whether it
+costs anything there.
+
+The idea. Score the same adapter on two public translations of the same
+questions. MultiPL-E rewrites HumanEval and MBPP into 18 programming languages
+with compiled tests. mHumanEval translates the prompts into more than 200
+natural languages and keeps the Python tests, so the code stays the same and
+only the reading changes.
+
+Why it might work. A search of the 2025 and 2026 literature found no study of
+reinforcement learning transfer across programming languages. The closest work
+is cross-lingual RLVR in maths, and it reports stronger transfer than
+supervised tuning.
+
+Cost. MultiPL-E needs a runtime and grader per language, roughly a day of
+setup. mHumanEval reuses the Python docker runner and needs nothing new. Each
+pass over 164 questions is minutes on one card. The expert-translated subset is
+the one to use, since machine translation quality varies by language.
+
+Where. A new `eval-languages` path beside `eval-band`, or a script under
+`scripts/` while the question is open.
+
+## Upgrade vLLM past 0.17
+
+The problem. The repository pins vLLM 0.10.1, which predates LFM2 entirely, so
+the LFM path falls back to Hugging Face generation. A 20 step probe took an
+hour. The same work on vLLM is minutes.
+
+The facts. `lfm2` landed in PR 22845 three days after 0.10.1 and first shipped
+in 0.10.2. LoRA on LFM's fused MLP and short convolution needed PR 34921, first
+shipped in 0.17.0. Current vLLM is 0.34.
+
+Why it might work. Every future run gets the speedup, including the two-model
+comparison and every cross-language pass.
+
+Cost. A version bump, a reinstall, and a check that a runtime adapter swap
+produces the same logits as the base model. About an hour, and it changes a
+validated path.
+
+Where. `pyproject.toml` vllm extra, `validate_inference_engine` in
+`model_profiles.py`, and the adapter update path in `qwen.py`.
+
+## Label the 250 test questions by band
+
+The problem. The pinned 100 is a mixed sample, so a gain can hide inside it.
+The difficulty labels cover the 711 training rows only, which is why
+`eval-band` reads from the training split and carries a contamination caveat.
+
+The idea. Read the 250 test questions and label them into the four bands. Then
+the pinned cohort reports per band, and `eval-band` can draw from genuinely
+unseen questions.
+
+Cost. Reading 250 short problems, an hour or two. No code change beyond letting
+the label loader accept the test split.
+
+Where. `data/difficulty_labels.jsonl`, or a second file for the test side, plus
+`eval-band`.
+
+## Stopping rule and rate schedule
+
+The problem. A run at the wrong rate spends hours learning nothing, and the
+only lever today is stopping by hand.
+
+The idea. Two parts. First, a written stop rule per run, for example stop at
+step 40 if the pinned 100 has not moved. Second, a rate schedule, either a
+decay after a fraction of the budget or a drop on the plateau. D28 makes a
+manual drop possible today, since a resumed run now takes the configured rate.
+
+Cost. A stop rule is a convention. A scheduler is a small change in the update
+loop and one test.
+
+Where. The run notes, and `src/rlvr/experiment.py` for a scheduler.
