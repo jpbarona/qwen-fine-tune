@@ -3,7 +3,7 @@
 ## Global Constraints
 
 - Model `Qwen/Qwen3-0.6B` with thinking. LoRA rank 32, alpha 64, learning rate 1e-5. GRPO 8 generations, temperature 0.9, batch 1, gradient accumulation 1, 5 epochs, max prompt 512, max completion 768, one seed. Log truncation rate.
-- Data: MBPP train plus validation plus test merged to 964 questions, fixed seed split 714 train and 250 test. Same split and prompt format for every arm. The 10 few-shot examples are excluded.
+- Data: MBPP train plus validation plus test merged to 961 questions, fixed seed split 711 train and 250 test. Same split and prompt format for every arm. The 10 few-shot examples are excluded.
 - Rewards: code-score is passed/total. Hybrid is 0 on any test failure else 0.5 + 0.5*judge. Gated judge is 0 on any test failure else judge. Gated process is 0 on any test failure else 0.5*process + 0.5*judge. All scores in [0,1].
 - Judge: OpenCode Go OpenAI-compatible endpoint, `deepseek-v4.1-flash`, normal reasoning effort, temperature 0, JSON output, 32 concurrent, retries with backoff, content-hash cache. Output judge sees problem and code only. Process judge sees problem and trace only. Neither sees tests.
 - Execution: Docker per rollout, no network, non-root, read-only mount, 5 second timeout, no secrets in the container. Record per-test results and an error class.
@@ -35,16 +35,16 @@ API is involved.
 
 ## Task 2: Merged split and Docker test runner
 
-**What to build:** Load MBPP, merge the three real splits into 964 questions, cut
-a fixed 714/250 split, and run candidate code against task tests in Docker with
+**What to build:** Load MBPP, merge the three real splits into 961 questions, cut
+a fixed 711/250 split, and run candidate code against task tests in Docker with
 per-test results.
 
 **Blocked by:** 01.
 
 **Status:** ready-for-agent
 
-- [ ] Loader merges train, validation, and test into 964 questions.
-- [ ] Split with a fixed seed gives 714 train and 250 test.
+- [ ] Loader merges train, validation, and test into 961 questions.
+- [ ] Split with a fixed seed gives 711 train and 250 test.
 - [ ] Every arm reads the same split and prompt format.
 - [ ] Candidate code runs in Docker with no network, a non-root user, a read-only mount, and a 5 second timeout.
 - [ ] A hung candidate is killed and classified as a timeout.

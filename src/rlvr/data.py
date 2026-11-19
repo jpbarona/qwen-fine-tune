@@ -288,20 +288,27 @@ def load_split(
     seed: int,
     train_size: int = TRAIN_SIZE,
     test_size: int = TEST_SIZE,
-    split_path: str | Path = DEFAULT_SPLIT_PATH,
+    split_path: str | Path | None = None,
 ) -> DatasetSplit:
     """Load the merged dataset and cut it. The entry point every arm uses.
 
-    When the pinned split file exists, its id lists decide the cut and the seed
-    is not consulted. That keeps the held-out questions fixed across dataset
-    edits, which the evaluations depend on. Without the file the cut falls back
-    to `split_questions`.
+    The committed dataset uses the pinned split file when the seed is the
+    pinned one. A missing pinned file is an error, because a fresh cut would
+    move the held-out questions and break past evaluations. Any other dataset
+    path gets a fresh cut unless the caller passes `split_path`.
     """
     questions = load_dataset(path)
-    pinned = Path(split_path)
-    if pinned.is_file() and seed == PINNED_SPLIT_SEED:
-        return pinned_split(questions, pinned, train_size, test_size)
-    return split_questions(questions, seed, train_size, test_size)
+    if split_path is None:
+        if Path(path).resolve() != DEFAULT_DATA_PATH:
+            return split_questions(questions, seed, train_size, test_size)
+        pinned = DEFAULT_SPLIT_PATH
+    else:
+        pinned = Path(split_path)
+    if seed != PINNED_SPLIT_SEED:
+        return split_questions(questions, seed, train_size, test_size)
+    if not pinned.is_file():
+        raise DatasetError(f"split file not found: {pinned}")
+    return pinned_split(questions, pinned, train_size, test_size)
 
 
 def pinned_split(
@@ -312,8 +319,9 @@ def pinned_split(
 ) -> DatasetSplit:
     """Cut the dataset using the stored id lists.
 
-    Every pinned id must exist in the dataset. A missing one means the dataset
-    and the split file disagree, which would silently change a run's data.
+    Every pinned id must exist in the dataset and every dataset id must be
+    pinned. A mismatch means the two disagree, which would silently change a
+    run's data.
     """
     try:
         raw = json.loads(Path(split_path).read_text(encoding="utf-8"))
@@ -346,6 +354,19 @@ def pinned_split(
     overlap = set(train_ids) & set(test_ids)
     if overlap:
         raise DatasetError(f"{len(overlap)} ids appear in both halves")
+
+    covered = set(train_ids) | set(test_ids)
+    uncovered = sorted(set(by_id) - covered)
+    if uncovered:
+        raise DatasetError(
+            f"{len(uncovered)} dataset ids are absent from the split file, "
+            f"first {uncovered[0]}"
+        )
+    if len(covered) != train_size + test_size:
+        raise DatasetError(
+            f"split file must cover {train_size + test_size} ids, "
+            f"got {len(covered)}"
+        )
 
     return DatasetSplit(
         train=tuple(by_id[i] for i in train_ids),
