@@ -5,6 +5,7 @@ Qwen3-0.6B and LFM2.5-2.6B GRPO reward study. Documentation lives here. Code and
 Docs, all in this folder:
 
 - [postmortem-run17.md](postmortem-run17.md) — why the 313 step curve looked flat, and what the model actually did.
+- [postmortem-run17.pdf](postmortem-run17.pdf) — the same report with three charts, three pages.
 - [6.1-sol-xhigh-pass.md](6.1-sol-xhigh-pass.md) — repository organization, LFM support, throughput changes, assumptions, and validation.
 - `DECISIONS.md` — decisions as they are made, newest last.
 - `journal.md` — running problem and fix chunks, 10 to 12 words each.
