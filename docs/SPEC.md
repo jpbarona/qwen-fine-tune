@@ -49,8 +49,9 @@ RTX A6000 with one command per arm.
 
 ## Implementation Decisions
 
-**Data.** Merge the MBPP train, validation, and test splits into 964 questions.
-Use a fixed split seed. 714 questions train, 250 test. Every arm uses the same
+**Data.** Merge the MBPP train, validation, and test splits into 961 questions.
+The split is pinned in `data/split_seed1234.json`. 711 questions train, 250 test.
+Three unpassable very easy questions were removed, see D25. Every arm uses the same
 split and prompt format. The 10 few-shot prompt examples are excluded.
 
 **Model and training.** `Qwen/Qwen3-0.6B` with thinking enabled. LoRA rank 32,

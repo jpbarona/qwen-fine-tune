@@ -452,7 +452,7 @@ def test_build_prompts_separates_the_train_and_test_questions(tmp_path) -> None:
     config = load_config(write_split_config(tmp_path))
     train, evaluation = build_prompts(config)
 
-    assert len(train) == 714 + 50
+    assert len(train) == 711 + 50
     assert len(evaluation) == 250
     assert {prompt.prompt_id for prompt in train}.isdisjoint(
         {prompt.prompt_id for prompt in evaluation}
