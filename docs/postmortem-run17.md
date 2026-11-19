@@ -78,6 +78,26 @@ Over 132,408 rollouts and 16,551 prompt groups.
   Entropy was set to every 500 steps and the run stopped at 313, so it was
   written once at most.
 
+## Learning rate probe
+
+Two twenty step runs, one per card, same config and cohort, the rate the only
+change.
+
+| rate | reward over the run | step 20 pass@1 | update norm | outcome |
+| --- | --- | --- | --- | --- |
+| 1e-5 (run 17) | 0.2 to 0.3 | 0.32 | not logged | flat for 300 steps |
+| 1e-4 | 0.44 to 0.91 | 0.31 | 0.08 | stable |
+| 1e-3 | collapsed to -0.99 | not reached | 0.7 to 2.2 | destroyed by step 14 |
+
+The 1e-3 run failed the way divergence looks here: reward at -0.99, pass rate
+zero, every answer running to the 2,048 token cap. It was stopped at step 16.
+
+The update norm separates the rates by 25 times. The gradient norm did not, 0.11
+to 0.33 against 0.05 to 0.59, because AdamW divides the gradient magnitude away.
+
+Ten times the old rate is safe and has bought nothing after twenty steps. The
+open question is whether it pulls ahead over sixty.
+
 ## Conclusions
 
 The run worked and was measured wrongly. Its first data point was step 20, by
