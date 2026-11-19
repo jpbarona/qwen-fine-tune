@@ -267,6 +267,25 @@ subset of the test pool with greedy decoding. The subset is
 split seed, and the subset is a seeded sample, not the first questions in file
 order. The subset keeps the pool order.
 
+### Scoring one difficulty band
+
+`eval-band` scores a fixed number of prompts from one labelled band, so a
+checkpoint can be compared per band without a full run.
+
+```bash
+.venv/bin/rlvr eval-band --config configs/lfm.toml --band medium \
+    --count 100 --seed 2026 --checkpoint runs/lfm/20261119T101500Z/checkpoints/step-000020
+```
+
+The bands are `very easy`, `medium`, `hard`, and `very hard`. The prompts come
+from the training split, which carries the labels. Once training uses those
+prompts they are no longer held out, so a band score after training is a
+training score for that band, not a generalization score. The command prints
+one JSON line with `model`, `band`, `pass_at_1`, `count`, `passed`, and
+`seconds`. `--out PATH` writes the same line to a file. Without `--checkpoint`
+it scores the base model. A band that holds fewer prompts than `--count` stops
+with an error rather than scoring a smaller set.
+
 ## Live dashboard
 
 The dashboard reads a run folder and shows reward, pass rate, pass@1, completion
