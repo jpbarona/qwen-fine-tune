@@ -5,8 +5,10 @@
 
 - Source: https://huggingface.co/datasets/google-research-datasets/mbpp
 - Config: `full`
-- Splits merged: train (374), validation (90), test (500)
-- Total: 964 rows
+- Splits merged: train (373), validation (88), test (500)
+- Total: 961 rows
+- Removed: `mbpp-535`, `mbpp-536`, `mbpp-679`, three very easy questions that
+  no attempt passed in run 17
 - Excluded: the 10 few-shot examples in the `prompt` split
 - Downloaded: 2026-11-12
 
@@ -14,9 +16,13 @@ Each line has `task_id`, `text`, `test_list`, `test_setup_code`, and
 `source_split`. The reference `code` column is not kept because nothing needs
 it. The loader reads `data/` from the repository, so pytest needs no network.
 
-The split is defined in `src/rlvr/data.py`. Seed 1234 gives 714 train and 250
-test. Task ids are sorted before the shuffle, so file order cannot change the
-result.
+The split is pinned in `split_seed1234.json`: 711 train and 250 test. The file
+holds the id lists cut from the original 964 rows with seed 1234, so removing a
+row cannot move a held-out question. `src/rlvr/data.py` reads it when the config
+seed is 1234. Any other seed gets a fresh cut.
+
+A pinned split keeps past evaluations comparable. Reshuffling after a deletion
+would replace 106 of the 250 held-out questions.
 
 ## Difficulty labels
 

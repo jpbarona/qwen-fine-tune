@@ -90,7 +90,7 @@ Four bands, in order: very easy, medium, hard, very hard.
 
 - Very easy: 50 synthetic questions, each with its own tests. Written by an
   agent. Start here.
-- Medium and hard: cut from the 714 MBPP training rows by the committed
+- Medium and hard: cut from the 711 MBPP training rows by the committed
   difficulty labels.
 - Very hard: last stage only.
 
@@ -292,7 +292,7 @@ run.
 ## D17. The RL environment needs cold tests, not live-run discovery
 
 Status: implemented. 899 tests, 9 of them cold checks over the committed data.
-The prompt contract reads every one of the 964 MBPP rows and the 50 synthetic
+The prompt contract reads every one of the 961 MBPP rows and the 50 synthetic
 rows:
 
 - every row resolves to a function name, and the name is not a keyword,
@@ -452,3 +452,17 @@ cohort, each capped with `[budget] max_steps = 20`.
 So a 10x rate is safe but has bought nothing after 20 steps, and a 100x rate
 destroys the policy. The next question is whether 1e-4 pulls ahead over 60
 steps, which is one resume of the probe checkpoint.
+
+## D25. Three unpassable very easy questions are out of the dataset
+
+`mbpp-535`, `mbpp-536` and `mbpp-679` never passed in run 17 and were dropped by
+the control file at step 121. They are removed from `data/mbpp_full.jsonl` and
+from the label file, so no run spends steps on them again.
+
+Deleting rows would reshuffle the seed 1234 cut and replace 106 of the 250
+held-out questions, which breaks every past evaluation. So the split is pinned
+in `data/split_seed1234.json`: 711 train and 250 test, with the same test ids as
+before. `load_split` reads the pinned file when the config seed is 1234 and cuts
+fresh for any other seed.
+
+Training goes from 714 rows to 711.

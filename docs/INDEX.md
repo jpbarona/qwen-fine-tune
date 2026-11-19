@@ -25,7 +25,7 @@ Repo items, relative to this folder:
 - `../configs/` — `real.toml`, `smoke.toml`, `lfm.toml`, `lfm-smoke.toml`, and the two twenty step probe configs `probe-1e4.toml` and `probe-1e3.toml`.
 - `../dashboard/` — React and Tailwind source for the live dashboard.
 - `../src/rlvr/web/index.html` — the committed single file build.
-- `../data/mbpp_full.jsonl` — 964 MBPP rows, fixed 714 and 250 split.
+- `../data/mbpp_full.jsonl` — 961 MBPP rows, pinned split of 711 train and 250 test, with `../data/split_seed1234.json` holding the ids.
 - `../data/difficulty_labels.jsonl` — one band per training row.
 - `../data/synthetic_easy.jsonl` — 50 very easy rows for the first stage.
 - `../src/rlvr/` — package source.

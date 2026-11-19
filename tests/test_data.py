@@ -33,16 +33,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def test_committed_dataset_merges_the_three_real_splits() -> None:
     questions = load_dataset(DEFAULT_DATA_PATH)
-    assert len(questions) == TOTAL_QUESTIONS == 964
+    assert len(questions) == TOTAL_QUESTIONS == 961
     counts: dict[str, int] = {}
     for question in questions:
         counts[question.source_split] = counts.get(question.source_split, 0) + 1
-    assert counts == {"train": 374, "validation": 90, "test": 500}
+    assert counts == {"train": 373, "validation": 88, "test": 500}
 
 
 def test_committed_dataset_has_unique_ids_and_tests() -> None:
     questions = load_dataset(DEFAULT_DATA_PATH)
-    assert len({question.task_id for question in questions}) == 964
+    assert len({question.task_id for question in questions}) == 961
     for question in questions:
         assert question.test_list, question.task_id
         assert all(isinstance(test, str) for test in question.test_list)
@@ -96,7 +96,7 @@ def test_loader_rejects_duplicate_ids(tmp_path: Path) -> None:
 def test_split_is_714_train_and_250_test() -> None:
     questions = load_dataset(DEFAULT_DATA_PATH)
     split = split_questions(questions, seed=1234)
-    assert len(split.train) == TRAIN_SIZE == 714
+    assert len(split.train) == TRAIN_SIZE == 711
     assert len(split.test) == TEST_SIZE == 250
     assert TRAIN_SIZE + TEST_SIZE == len(questions)
 

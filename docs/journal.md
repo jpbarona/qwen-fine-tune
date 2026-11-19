@@ -110,3 +110,4 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 94. 1e-3 diverges within two steps, answers pinned at the cap
 95. 1e-4 is safe but no faster after twenty steps
 96. Gradient norm cannot separate rates under AdamW, update norm can
+97. Three dead very easy questions removed, held-out set pinned

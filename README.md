@@ -99,7 +99,7 @@ The source map and GPU validation procedure are in
 The fake path needs no GPU, no network, no Docker, and no model download. It is
 deterministic: the same command produces the same rollout records. The CLI
 still reads the committed MBPP split and the synthetic easy file, so the run
-trains on the 714 MBPP train questions plus the 50 synthetic easy questions, and
+trains on the 711 MBPP train questions plus the 50 synthetic easy questions, and
 evaluates the 250 held-out test questions. Only the model, judge, and Docker
 runner are replaced by fakes.
 
@@ -394,7 +394,7 @@ last checkpoint result.
 }
 ```
 
-The CLI loads the fixed MBPP split with `data.load_split`, uses the 714 train
+The CLI loads the pinned MBPP split with `data.load_split`, uses the 711 train
 questions plus the 50 synthetic easy questions as training prompts, and the 250
 test questions as eval prompts. Fake mode uses the same set, so a fake run also
 evaluates held-out questions and never evaluates a training question. The

@@ -1,14 +1,16 @@
 """The MBPP dataset, the fixed train/test split, and the prompt format.
 
 The committed file `data/mbpp_full.jsonl` holds the MBPP `full` configuration:
-374 train, 90 validation, and 500 test rows, 964 in total. The 10 few-shot
+373 train, 88 validation, and 500 test rows, 961 in total. Three very easy rows
+were removed on 2026-11-19 because every attempt on them failed: `mbpp-535`,
+`mbpp-536`, `mbpp-679`. The 10 few-shot
 prompt rows from the same configuration are not part of the file. They are
 skipped by the loader if a raw export still carries them.
 
-The split is a pure function of the questions and the seed. It sorts by task id
-first, so the caller's row order cannot change the result. Every arm calls
-`load_split` or `split_questions` with the same seed from config, so every arm
-sees the same 714 train and 250 test questions.
+The split comes from `data/split_seed1234.json`, the id lists cut from the
+original dataset with seed 1234. Every arm calls `load_split` and reads the same
+711 train and 250 test questions. Removing a row cannot move a held-out
+question, so past evaluations stay comparable.
 
 The prompt format is one function, `format_prompt`, used by every arm through
 `prompt_for_question`. It is deliberately short: the problem text, the name of
@@ -34,6 +36,7 @@ from .stages import BANDS, DEFAULT_LABELS_PATH
 __all__ = [
     "DEFAULT_DATA_PATH",
     "DEFAULT_LABELS_PATH",
+    "DEFAULT_SPLIT_PATH",
     "PROMPT_TEMPLATE",
     "TEST_SIZE",
     "TOTAL_QUESTIONS",
@@ -47,6 +50,7 @@ __all__ = [
     "load_dataset",
     "load_difficulty_labels",
     "load_split",
+    "pinned_split",
     "prompt_for_question",
     "prompt_id_for",
     "prompts_for_questions",
@@ -57,9 +61,21 @@ __all__ = [
 DEFAULT_DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "mbpp_full.jsonl"
 
 #: Counts for the full MBPP configuration.
-TOTAL_QUESTIONS = 964
-TRAIN_SIZE = 714
+TOTAL_QUESTIONS = 961
+TRAIN_SIZE = 711
 TEST_SIZE = 250
+
+#: The held-out cut is pinned to its first assignment. Three questions were
+#: removed from the training pool on 2026-11-19 because the model could never
+#: pass them. Re-shuffling the remaining rows would have replaced most of the
+#: held-out set, so the ids are stored instead. Produced from seed 1234 over
+#: the original 964 rows, with the three removed ids dropped from the training
+#: side. No held-out id changed.
+DEFAULT_SPLIT_PATH = Path(__file__).resolve().parents[2] / "data" / "split_seed1234.json"
+
+#: The seed the pinned split was cut with. A config that asks for another seed
+#: gets a fresh cut, so a label file built for the pinned one fails its check.
+PINNED_SPLIT_SEED = 1234
 
 #: Splits that belong in the merged dataset. `prompt` holds the 10 few-shot
 #: examples and is always skipped.
@@ -272,9 +288,69 @@ def load_split(
     seed: int,
     train_size: int = TRAIN_SIZE,
     test_size: int = TEST_SIZE,
+    split_path: str | Path = DEFAULT_SPLIT_PATH,
 ) -> DatasetSplit:
-    """Load the merged dataset and cut it. The entry point every arm uses."""
-    return split_questions(load_dataset(path), seed, train_size, test_size)
+    """Load the merged dataset and cut it. The entry point every arm uses.
+
+    When the pinned split file exists, its id lists decide the cut and the seed
+    is not consulted. That keeps the held-out questions fixed across dataset
+    edits, which the evaluations depend on. Without the file the cut falls back
+    to `split_questions`.
+    """
+    questions = load_dataset(path)
+    pinned = Path(split_path)
+    if pinned.is_file() and seed == PINNED_SPLIT_SEED:
+        return pinned_split(questions, pinned, train_size, test_size)
+    return split_questions(questions, seed, train_size, test_size)
+
+
+def pinned_split(
+    questions: tuple[MBPPQuestion, ...] | list[MBPPQuestion],
+    split_path: str | Path,
+    train_size: int = TRAIN_SIZE,
+    test_size: int = TEST_SIZE,
+) -> DatasetSplit:
+    """Cut the dataset using the stored id lists.
+
+    Every pinned id must exist in the dataset. A missing one means the dataset
+    and the split file disagree, which would silently change a run's data.
+    """
+    try:
+        raw = json.loads(Path(split_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DatasetError(f"cannot read split file {split_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise DatasetError("split file must hold an object with train and test")
+    train_ids = raw.get("train")
+    test_ids = raw.get("test")
+    for name, ids in (("train", train_ids), ("test", test_ids)):
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise DatasetError(f"split file field {name!r} must be a list of ids")
+        if len(set(ids)) != len(ids):
+            raise DatasetError(f"split file field {name!r} repeats an id")
+
+    if len(train_ids) != train_size or len(test_ids) != test_size:
+        raise DatasetError(
+            f"split file must hold {train_size} train and {test_size} test ids, "
+            f"got {len(train_ids)} and {len(test_ids)}"
+        )
+
+    by_id = {prompt_id_for(question): question for question in questions}
+    for name, ids in (("train", train_ids), ("test", test_ids)):
+        missing = [i for i in ids if i not in by_id]
+        if missing:
+            raise DatasetError(
+                f"{len(missing)} {name} ids are absent from the dataset, "
+                f"first {missing[0]}"
+            )
+    overlap = set(train_ids) & set(test_ids)
+    if overlap:
+        raise DatasetError(f"{len(overlap)} ids appear in both halves")
+
+    return DatasetSplit(
+        train=tuple(by_id[i] for i in train_ids),
+        test=tuple(by_id[i] for i in test_ids),
+    )
 
 
 def load_difficulty_labels(
