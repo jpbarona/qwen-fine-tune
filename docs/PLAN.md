@@ -156,3 +156,33 @@ babysitting.
 - [ ] One full arm finishes without manual intervention.
 - [ ] The report for a finished arm is reachable at a GitHub Pages URL.
 
+## Study plan, November 2026
+
+The question. Does GRPO on Python code change pass rates on other languages,
+and does the answer depend on the base model.
+
+The two models. Qwen3-0.6B, base pass@1 0.19 on the pinned 100. LFM2.5-2.6B,
+base 0.51 on the same 100. Both use all-linear LoRA, rank 16, alpha 32.
+
+The three axes.
+
+1. Same language. The pinned 100 test questions, greedy, every 20 steps.
+2. Other programming languages. MultiPL-E, HumanEval and MBPP in 18 languages.
+3. Other natural languages. mHumanEval prompts in the eight languages LFM
+   claims, with the Python tests unchanged.
+
+The metric. Transfer ratio is the change on an untrained axis divided by the
+change on Python, reported per language with a paired McNemar test. A ratio
+near zero means the gain stayed in Python. A negative ratio means the training
+cost the other languages something.
+
+The order. LFM first, because its base is high enough that a fall is visible.
+Then the 60 step Qwen all-linear baseline at 1e-4, so placement is constant
+across models. Then MultiPL-E, then mHumanEval. The band evaluation fills in
+where the gain sits, since the pinned cohort mixes difficulty.
+
+Known risks. LFM at 0.51 may be near its ceiling on easy questions, which
+compresses any gain. Machine-translated prompts can fail on comprehension
+rather than on transfer, so use the expert subset. MultiPL-E needs a compiler
+per language, which is the one piece of setup nobody has done yet.
+
