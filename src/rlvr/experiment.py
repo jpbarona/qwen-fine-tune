@@ -41,6 +41,7 @@ so a resume starts at the batch after the checkpoint.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -90,6 +91,13 @@ __all__ = [
 
 #: Greedy decoding, used for evaluation.
 EVAL_TEMPERATURE = 0.0
+
+
+def _finite_or_none(value: float | None) -> float | None:
+    """A metric value the JSON writer accepts, or None when it is not finite."""
+    if value is None:
+        return None
+    return value if math.isfinite(value) else None
 
 
 def _empty_cuda_cache() -> None:
@@ -278,6 +286,7 @@ class StepResult:
     prompt_truncated: int
     mean_entropy: float | None
     grad_norm: float | None
+    update_norm: float | None
     mastered: tuple[Prompt, ...]
     timings: Mapping[str, float] = field(default_factory=dict)
 
@@ -517,6 +526,7 @@ class Experiment:
                     prompt_truncated=result.prompt_truncated,
                     mean_entropy=result.mean_entropy,
                     grad_norm=result.grad_norm,
+                    update_norm=result.update_norm,
                     memory=memory,
                     timings=result.timings,
                 )
@@ -872,6 +882,7 @@ class Experiment:
         # cannot safely be retried as another sample from the previous policy.
         try:
             grad_norm = self.generator.apply_update()
+            update_norm = getattr(self.generator, "last_update_norm", None)
         except Exception as error:
             if is_cuda_out_of_memory(error):
                 raise RuntimeError(
@@ -896,6 +907,7 @@ class Experiment:
             prompt_truncated=prompt_truncated,
             mean_entropy=sum(entropies) / len(entropies) if entropies else None,
             grad_norm=grad_norm,
+            update_norm=update_norm,
             mastered=tuple(mastered),
             timings=timings,
         )
@@ -1185,6 +1197,7 @@ class Experiment:
         prompt_truncated: int = 0,
         mean_entropy: float | None = None,
         grad_norm: float | None = None,
+        update_norm: float | None = None,
         memory: MemoryReport | None = None,
         timings: Mapping[str, float] | None = None,
     ) -> dict[str, Any]:
@@ -1192,8 +1205,9 @@ class Experiment:
 
         `prompts` is the prompt groups in the batch and `sequences` is the
         sampled completions across them. `rollouts` keeps the old name for the
-        sequence count, so an older reader keeps working. `grad_norm` is null
-        when the generator has no gradients, as the fake does.
+        sequence count, so an older reader keeps working. `grad_norm` and
+        `update_norm` are null when the generator has no gradients, as the fake
+        does, or when a diverged step produced a non-finite value.
         """
         count = len(records)
         passed = sum(
@@ -1214,7 +1228,8 @@ class Experiment:
             "cache_hits": sum(1 for record in records if record.cache_hit),
             "truncation_rate": truncated / count,
             "prompt_truncation_rate": prompt_truncated / count,
-            "grad_norm": grad_norm,
+            "grad_norm": _finite_or_none(grad_norm),
+            "update_norm": _finite_or_none(update_norm),
         }
         row.update(timings or {})
         seconds = row.get("step_seconds", 0.0)

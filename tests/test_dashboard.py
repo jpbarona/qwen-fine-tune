@@ -896,7 +896,7 @@ def test_latest_entropy_is_absent_when_no_step_measured(tmp_path) -> None:
     assert run["series"]["mean_entropy"] == [None]
 
 
-def test_gradient_norm_series_is_exposed_and_missing_rows_stay_null(tmp_path) -> None:
+def test_norm_series_are_exposed_and_missing_rows_stay_null(tmp_path) -> None:
     rows = [
         {
             "step": 1,
@@ -905,6 +905,7 @@ def test_gradient_norm_series_is_exposed_and_missing_rows_stay_null(tmp_path) ->
             "mean_reward": 0.5,
             "pass_rate": 0.5,
             "grad_norm": 1.5,
+            "update_norm": 0.25,
         },
         {
             "step": 2,
@@ -919,6 +920,7 @@ def test_gradient_norm_series_is_exposed_and_missing_rows_stay_null(tmp_path) ->
     )["runs"][0]
 
     assert run["series"]["grad_norm"] == [1.5, None]
+    assert run["series"]["update_norm"] == [0.25, None]
 
 
 def test_series_and_distribution_shapes(tmp_path) -> None:
@@ -926,7 +928,15 @@ def test_series_and_distribution_shapes(tmp_path) -> None:
     run = collect_dashboard([run_dir])["runs"][0]
 
     assert run["series"]["steps"] == [1, 2]
-    for name in ("mean_reward", "pass_rate", "mean_entropy", "grad_norm", "mean_completion_tokens", "truncation_rate"):
+    for name in (
+        "mean_reward",
+        "pass_rate",
+        "mean_entropy",
+        "grad_norm",
+        "update_norm",
+        "mean_completion_tokens",
+        "truncation_rate",
+    ):
         assert len(run["series"][name]) == 2
 
     reward = run["distributions"]["reward"]

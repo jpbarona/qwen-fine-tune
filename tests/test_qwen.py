@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 import pytest
 
 from rlvr.qwen import (
     ATTENTION_TARGET_MODULES,
+    QwenGenerator,
     categorical_entropy,
     check_attention_mask,
     clipped_surrogate,
@@ -26,6 +28,7 @@ from rlvr.qwen import (
     split_thinking_and_code,
     thinking_marker_index,
     truncate_prompt,
+    update_norm,
 )
 
 
@@ -153,69 +156,141 @@ def test_gradient_norm_ignores_a_parameter_with_a_null_gradient() -> None:
     assert gradient_norm(parameters) == pytest.approx(5.0)
 
 
-def test_apply_update_measures_the_divided_gradient_before_the_step() -> None:
-    # Two groups of gradients 3 and 4. The mean over the groups is 1.5 and 2.0,
-    # whose norm is 2.5. The raw norm before the divide would be 5.0. The norm
-    # calls are recorded in order, so a norm taken after the step is visible.
-    from types import SimpleNamespace
+class _UpdateTensor:
+    """A stand-in for a tensor with the calls the norms make."""
 
-    from rlvr.qwen import QwenGenerator
+    def __init__(
+        self, *values: float, label: str = "", events: list[str] | None = None
+    ) -> None:
+        self.values = tuple(float(value) for value in values)
+        self.label = label
+        self.events = events if events is not None else []
 
+    def detach(self) -> "_UpdateTensor":
+        return self
+
+    def clone(self) -> "_UpdateTensor":
+        return _UpdateTensor(*self.values, label=self.label, events=self.events)
+
+    def div_(self, count: int) -> None:
+        self.values = tuple(value / count for value in self.values)
+
+    def __sub__(self, other: "_UpdateTensor") -> "_UpdateTensor":
+        return _UpdateTensor(
+            *(left - right for left, right in zip(self.values, other.values)),
+            label="update",
+            events=self.events,
+        )
+
+    def norm(self, order: int) -> float:
+        assert order == 2
+        value = math.sqrt(sum(item * item for item in self.values))
+        self.events.append(f"{self.label}:{value:.2f}")
+        return value
+
+
+class _UpdateParameter(_UpdateTensor):
+    """A trainable weight with a gradient tensor."""
+
+    requires_grad = True
+
+    def __init__(self, gradient: float, events: list[str]) -> None:
+        super().__init__(0.0, label="weight", events=events)
+        self.grad = _UpdateTensor(gradient, label="grad", events=events)
+
+
+class _UpdateOptimizer:
+    """Moves each weight by a fixed fraction of its gradient."""
+
+    def __init__(
+        self, parameters: list[_UpdateParameter], events: list[str]
+    ) -> None:
+        self.parameters = parameters
+        self.events = events
+        self.seen: list[float] = []
+
+    def step(self) -> None:
+        self.events.append("step")
+        self.seen = [parameter.grad.values[0] for parameter in self.parameters]
+        for parameter in self.parameters:
+            parameter.values = tuple(
+                weight - 0.5 * gradient
+                for weight, gradient in zip(parameter.values, parameter.grad.values)
+            )
+
+    def zero_grad(self) -> None:
+        pass
+
+
+def _update_stub(gradients: tuple[float, ...], groups: int):
+    """A QwenGenerator-shaped object the real update method can bind to."""
     events: list[str] = []
-
-    class Gradient:
-        def __init__(self, value: float) -> None:
-            self.value = value
-
-        def div_(self, count: int) -> None:
-            self.value /= count
-
-        def detach(self) -> "Gradient":
-            return self
-
-        def norm(self, order: int) -> float:
-            assert order == 2
-            events.append(f"norm:{self.value:.1f}")
-            return abs(self.value)
-
-    class Parameter:
-        requires_grad = True
-
-        def __init__(self, value: float) -> None:
-            self.grad = Gradient(value)
-
-    class Optimizer:
-        def __init__(self) -> None:
-            self.seen: list[float] = []
-
-        def step(self) -> None:
-            events.append("step")
-            self.seen = [parameter.grad.value for parameter in parameters]
-
-        def zero_grad(self) -> None:
-            events.append("zero")
-
-    parameters = [Parameter(3.0), Parameter(4.0)]
-    optimizer = Optimizer()
+    parameters = [_UpdateParameter(gradient, events) for gradient in gradients]
+    optimizer = _UpdateOptimizer(parameters, events)
     generator = SimpleNamespace(
         trainable=True,
         model=SimpleNamespace(parameters=lambda: iter(parameters)),
         optimizer=optimizer,
         step=0,
         last_grad_norm=None,
-        _accumulated_groups=2,
+        last_update_norm=None,
+        _accumulated_groups=groups,
         _pending_groups=[],
     )
+    return generator, optimizer, events
+
+
+def test_update_norm_reports_the_parameter_delta() -> None:
+    before = [_UpdateTensor(0.0), _UpdateTensor(0.0)]
+    after = [_UpdateTensor(3.0), _UpdateTensor(4.0)]
+    assert update_norm(zip(after, before)) == pytest.approx(5.0)
+
+
+def test_update_norm_is_null_when_the_delta_is_not_finite() -> None:
+    before = [_UpdateTensor(0.0)]
+    after = [_UpdateTensor(math.inf)]
+    assert update_norm(zip(after, before)) is None
+
+
+def test_apply_update_measures_the_divided_gradient_before_the_step() -> None:
+    # Two groups of gradients 3 and 4. The mean over the groups is 1.5 and 2.0,
+    # whose norm is 2.5. The raw norm before the divide would be 5.0. The norm
+    # calls are recorded in order, so a norm taken after the step is visible.
+    generator, optimizer, events = _update_stub((3.0, 4.0), groups=2)
 
     norm = QwenGenerator.apply_update(generator)
 
     # The return value catches a norm taken before the divide, which is 5.0.
     assert norm == pytest.approx(2.5)
     assert generator.last_grad_norm == pytest.approx(2.5)
-    # The norm is read before the step, which catches a norm taken after it.
-    assert events[:3] == ["norm:1.5", "norm:2.0", "step"]
+    # The gradient norm is read before the step, which catches a later norm.
+    assert events.index("grad:1.50") < events.index("step")
+    assert events.index("grad:2.00") < events.index("step")
     # The optimizer applies the mean gradient, not the accumulated sum.
     assert optimizer.seen == pytest.approx([1.5, 2.0])
+
+
+def test_apply_update_measures_the_weight_change_after_the_step() -> None:
+    # The stub moves each weight by half its mean gradient. With two groups,
+    # the deltas are 0.75 and 1.0, whose norm is 1.25. Without the divide the
+    # deltas would be 1.5 and 2.0, whose norm is 2.5.
+    generator, _, events = _update_stub((3.0, 4.0), groups=2)
+
+    QwenGenerator.apply_update(generator)
+
+    assert generator.last_update_norm == pytest.approx(1.25)
+    assert events.index("update:0.75") > events.index("step")
+    assert events.index("update:1.00") > events.index("step")
+
+
+def test_apply_update_writes_null_norms_for_an_infinite_gradient() -> None:
+    generator, _, _ = _update_stub((math.inf,), groups=1)
+
+    norm = QwenGenerator.apply_update(generator)
+
+    assert norm is None
+    assert generator.last_grad_norm is None
+    assert generator.last_update_norm is None
 
 
 def test_group_advantages_are_mean_zero_unit_std() -> None:

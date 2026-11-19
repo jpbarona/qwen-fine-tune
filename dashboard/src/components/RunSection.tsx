@@ -313,6 +313,9 @@ export default function RunSection({ run }: { run: Run }) {
         <Panel title="gradient norm per step" right={num(latest.grad_norm)}>
           <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.grad_norm) }]} yMin={0} />
         </Panel>
+        <Panel title="update norm per step" right={num(latest.update_norm)}>
+          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.update_norm) }]} yMin={0} />
+        </Panel>
         <Panel title="completion tokens per step" right={num(latest.mean_completion_tokens, 0)}>
           <LineChart
             series={[{ color: ACCENT, points: pairs(steps, run.series.mean_completion_tokens) }]}

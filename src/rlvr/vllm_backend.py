@@ -169,6 +169,7 @@ class VLLMGenerator:
     ) -> None:
         self._trainer = trainer
         self._engine = engine
+        self.last_update_norm: float | None = None
         if adapter_dir is None:
             adapter_dir = tempfile.mkdtemp(prefix="rlvr-lora-")
         self._adapter_root = Path(adapter_dir)
@@ -260,9 +261,10 @@ class VLLMGenerator:
         """Step the optimizer once, then hand the new adapter to the engine.
 
         The trainer owns the gradients, so its norm is passed straight back to
-        the caller.
+        the caller and its weight change is copied beside it.
         """
         grad_norm = self._trainer.apply_update()
+        self.last_update_norm = getattr(self._trainer, "last_update_norm", None)
         self._sync_adapter()
         return grad_norm
 
