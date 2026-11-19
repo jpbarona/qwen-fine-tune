@@ -61,9 +61,10 @@ The LFM profile pins `LiquidAI/LFM2.5-2.6B` at revision
 The native LFM template always opens a reasoning block, including for screening
 and evaluation. The comparison starts from Qwen's hyperparameters. The
 `[training] lora_targets` key chooses the adapter placement: `attention` adapts
-the four attention projections, and `all-linear` adapts every linear layer. The
-committed LFM and Qwen baseline configs use `all-linear`. Full-weight GPU
-performance still needs measurement.
+the four attention projections, and `all-linear` adapts every linear layer.
+`configs/lfm.toml` and `configs/qwen-alllinear-60.toml` use `all-linear`.
+`configs/lfm-smoke.toml` stays `attention`. Full-weight GPU performance still
+needs measurement.
 The assumptions, implementation details, and validation are recorded in
 [the pass notes](docs/6.1-sol-xhigh-pass.md).
 
