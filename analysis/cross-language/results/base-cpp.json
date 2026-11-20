@@ -1,0 +1,168 @@
+{
+ "model": "base",
+ "language": "cpp",
+ "problems": 20,
+ "passed": 6,
+ "outcomes": [
+  {
+   "number": 0,
+   "name": "HumanEval_0_has_close_elements",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 20,
+   "name": "HumanEval_20_find_closest_elements",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -11,
+   "output_tail": ""
+  },
+  {
+   "number": 26,
+   "name": "HumanEval_26_remove_duplicates",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -6,
+   "output_tail": "main: /tmp/tmp2l5x8ydg/main.cpp:22: int main(): Assertion `candidate((std::vector<long>({(long)1, (long)2, (long)3, (long)4}))) == (std::vector<long>({(long)1, (long)2, (long)3, (long)4}))' failed."
+  },
+  {
+   "number": 28,
+   "name": "HumanEval_28_concatenate",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 30,
+   "name": "HumanEval_30_get_positive",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 60,
+   "name": "HumanEval_60_sum_to_n",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 64,
+   "name": "HumanEval_64_vowels_count",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -6,
+   "output_tail": "main: /tmp/tmpswl879cw/main.cpp:24: int main(): Assertion `candidate((\"Alone\")) == (3)' failed."
+  },
+  {
+   "number": 76,
+   "name": "HumanEval_76_is_simple_power",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "ote: remove parentheses to default-initialize a variable\n   37 | int main() {\n      |         ^~\n      |         --\n/tmp/tmpb9ur5j53/main.cpp:37:9: note: or replace parentheses with braces to value-initialize a variable\n/tmp/tmpb9ur5j53/main.cpp:37:12: error: a function-definition is not allowed here before \u2018{\u2019 token\n   37 | int main() {\n      |            ^\n/tmp/tmpb9ur5j53/main.cpp:49:2: error: expected \u2018}\u2019 at end of input\n   49 | }\n      |  ^\n/tmp/tmpb9ur5j53/main.cpp:19:38: note: to match this \u2018{\u2019\n   19 | bool is_simple_power(long x, long n) {\n      |                                      ^"
+  },
+  {
+   "number": 84,
+   "name": "HumanEval_84_solve",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "e<class _Tp> std::_Expr<std::__detail::_BinClos<std::__plus, std::_Constant, std::_ValArray, _Tp, _Tp>, typename std::__fun<std::__plus, _Tp>::result_type> std::operator+(const typename std::valarray<_Tp>::value_type&, const std::valarray<_Tp>&)\u2019\n 1186 | _DEFINE_BINARY_OPERATOR(+, __plus)\n      | ^~~~~~~~~~~~~~~~~~~~~~~\n/usr/include/c++/11/valarray:1186:1: note:   template argument deduction/substitution failed:\n/tmp/tmpom7ssehy/main.cpp:22:33: note:   mismatched types \u2018const std::valarray<_Tp>\u2019 and \u2018long int\u2019\n   22 |         binary = binary + (N % 2);\n      |                                 ^"
+  },
+  {
+   "number": 111,
+   "name": "HumanEval_111_histogram",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -6,
+   "output_tail": "main: /tmp/tmp2lueftbo/main.cpp:28: int main(): Assertion `candidate((\"a b b a\")) == (std::map<std::string,long>({{\"a\", 2}, {\"b\", 2}}))' failed."
+  },
+  {
+   "number": 116,
+   "name": "HumanEval_116_sort_array",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -11,
+   "output_tail": ""
+  },
+  {
+   "number": 130,
+   "name": "HumanEval_130_tri",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "        --\n/tmp/tmpdtkkv6gl/main.cpp:36:9: note: or replace parentheses with braces to value-initialize a variable\n/tmp/tmpdtkkv6gl/main.cpp:36:12: error: a function-definition is not allowed here before \u2018{\u2019 token\n   36 | int main() {\n      |            ^\n/tmp/tmpdtkkv6gl/main.cpp:48:2: error: expected \u2018}\u2019 at end of input\n   48 | }\n      |  ^\n/tmp/tmpdtkkv6gl/main.cpp:19:31: note: to match this \u2018{\u2019\n   19 | std::vector<long> tri(long n) {\n      |                               ^\n/tmp/tmpdtkkv6gl/main.cpp:48:2: warning: control reaches end of non-void function [-Wreturn-type]\n   48 | }\n      |  ^"
+  },
+  {
+   "number": 133,
+   "name": "HumanEval_133_sum_squares",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -11,
+   "output_tail": ""
+  },
+  {
+   "number": 136,
+   "name": "HumanEval_136_largest_smallest_integers",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -11,
+   "output_tail": ""
+  },
+  {
+   "number": 146,
+   "name": "HumanEval_146_specialFilter",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -6,
+   "output_tail": "main: /tmp/tmp74envd1q/main.cpp:28: int main(): Assertion `candidate((std::vector<long>({(long)15, (long)-73, (long)14, (long)-15}))) == (1)' failed."
+  },
+  {
+   "number": 148,
+   "name": "HumanEval_148_bf",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -11,
+   "output_tail": ""
+  },
+  {
+   "number": 152,
+   "name": "HumanEval_152_compare",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 156,
+   "name": "HumanEval_156_int_to_mini_roman",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 159,
+   "name": "HumanEval_159_eat",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -6,
+   "output_tail": "main: /tmp/tmpzmoowv8_/main.cpp:45: int main(): Assertion `candidate((5), (6), (10)) == (std::vector<long>({(long)11, (long)4}))' failed."
+  },
+  {
+   "number": 163,
+   "name": "HumanEval_163_generate_integers",
+   "status": "fail",
+   "stage": "run",
+   "returncode": -6,
+   "output_tail": "main: /tmp/tmpvwsxz0o9/main.cpp:28: int main(): Assertion `candidate((2), (10)) == (std::vector<long>({(long)2, (long)4, (long)6, (long)8}))' failed."
+  }
+ ]
+}

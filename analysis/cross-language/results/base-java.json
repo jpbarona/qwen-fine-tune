@@ -1,0 +1,168 @@
+{
+ "model": "base",
+ "language": "java",
+ "problems": 20,
+ "passed": 4,
+ "outcomes": [
+  {
+   "number": 0,
+   "name": "HumanEval_0_has_close_elements",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 20,
+   "name": "HumanEval_20_find_closest_elements",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Exception in thread \"main\" java.lang.IndexOutOfBoundsException: Index 6 out of bounds for length 6\n\tat java.base/jdk.internal.util.Preconditions.outOfBounds(Preconditions.java:64)\n\tat java.base/jdk.internal.util.Preconditions.outOfBoundsCheckIndex(Preconditions.java:70)\n\tat java.base/jdk.internal.util.Preconditions.checkIndex(Preconditions.java:248)\n\tat java.base/java.util.Objects.checkIndex(Objects.java:374)\n\tat java.base/java.util.ArrayList.get(ArrayList.java:459)\n\tat Problem.findClosestElements(Problem.java:37)\n\tat Problem.main(Problem.java:40)"
+  },
+  {
+   "number": 26,
+   "name": "HumanEval_26_remove_duplicates",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpsm_n5t6g/Problem.java:61: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 28,
+   "name": "HumanEval_28_concatenate",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 30,
+   "name": "HumanEval_30_get_positive",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 60,
+   "name": "HumanEval_60_sum_to_n",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 64,
+   "name": "HumanEval_64_vowels_count",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Exception in thread \"main\" java.lang.AssertionError\n\tat Problem.main(Problem.java:30)"
+  },
+  {
+   "number": 76,
+   "name": "HumanEval_76_is_simple_power",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpvojvjnle/Problem.java:100: error: ';' expected\n                                                                        return x\n                                                                                ^\n/tmp/tmpvojvjnle/Problem.java:102: error: illegal start of expression\n    public static void main(String[] args) {\n    ^\n2 errors"
+  },
+  {
+   "number": 84,
+   "name": "HumanEval_84_solve",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpbq7cv2fv/Problem.java:26: error: incompatible types: possible lossy conversion from long to int\n        String binary = Integer.toBinaryString(N);\n                                               ^\nNote: Some messages have been simplified; recompile with -Xdiags:verbose to get full output\n1 error"
+  },
+  {
+   "number": 111,
+   "name": "HumanEval_111_histogram",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Exception in thread \"main\" java.lang.AssertionError\n\tat Problem.main(Problem.java:34)"
+  },
+  {
+   "number": 116,
+   "name": "HumanEval_116_sort_array",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmptd6xss_2/Problem.java:41: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 130,
+   "name": "HumanEval_130_tri",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmp0di4vd9m/Problem.java:54: error: ')' expected\n            return new ArrayList<>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)8l, (long)3l, (long)10l, (long)13l, (long)21l, (long)34l, (long)5\n                                                                                                                                                      ^\n/tmp/tmp0di4vd9m/Problem.java:56: error: illegal start of expression\n    public static void main(String[] args) {\n    ^\n2 errors"
+  },
+  {
+   "number": 133,
+   "name": "HumanEval_133_sum_squares",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpk1euynh5/Problem.java:71: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 136,
+   "name": "HumanEval_136_largest_smallest_integers",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpabusvv8m/Problem.java:22: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 146,
+   "name": "HumanEval_146_specialFilter",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpz8mwzvj7/Problem.java:19: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 148,
+   "name": "HumanEval_148_bf",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmp3gkwb9rg/Problem.java:27: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 152,
+   "name": "HumanEval_152_compare",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Exception in thread \"main\" java.lang.AssertionError\n\tat Problem.main(Problem.java:30)"
+  },
+  {
+   "number": 156,
+   "name": "HumanEval_156_int_to_mini_roman",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpoojvaegt/Problem.java:21: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 159,
+   "name": "HumanEval_159_eat",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpjlbxk_db/Problem.java:76: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 163,
+   "name": "HumanEval_163_generate_integers",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Exception in thread \"main\" java.lang.AssertionError\n\tat Problem.main(Problem.java:28)"
+  }
+ ]
+}
