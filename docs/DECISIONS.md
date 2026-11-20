@@ -12,6 +12,11 @@ step below that floor settles the batch at the largest size that fit, and it
 stays there. A CUDA out-of-memory error does the same instead of crashing. It
 never goes below one prompt. There is no percentage rule.
 
+`[training] max_prompts` optionally caps the prompt count per step, whatever
+free memory allows. An absent key means no cap, so older configs keep the
+growth above. The cap limits sequences per step. Step time is unverified,
+because test containers and judge calls run outside the batch.
+
 Advantage is normalised inside one prompt group. The backward pass runs once per
 generation and gradients accumulate across the group, so only one autograd graph
 is alive at a time. This is what makes the 2,048 token cap fit at a larger batch.

@@ -60,11 +60,9 @@ length_penalty_floor = 0.2
 # floor and at or above one prompt group's measured footprint, in MiB. The
 # largest size that fit is kept. Never below one prompt.
 memory_floor_mib = 512
-# Hard cap on prompts per step so the step time stays bounded. At eight
-# rollouts per prompt this is 160 sequences. The last uncapped run reached 536
-# sequences in 717 seconds, about 1.34 seconds per sequence, so 160 sequences
-# is expected near 215 seconds per step before measurement.
-max_prompts = 20
+# Hard cap on prompts per step. At eight rollouts per prompt this is 120
+# sequences. It caps sequences per step. Step time is unverified.
+max_prompts = 15
 # Bound concurrent sandboxed test containers. Each keeps its own limits.
 test_workers = 4
 # Greedy evaluation questions decoded together. OOM retries halve this size.
