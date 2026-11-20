@@ -1,0 +1,168 @@
+{
+ "model": "adapter",
+ "language": "java",
+ "problems": 20,
+ "passed": 5,
+ "outcomes": [
+  {
+   "number": 0,
+   "name": "HumanEval_0_has_close_elements",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 20,
+   "name": "HumanEval_20_find_closest_elements",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Exception in thread \"main\" java.lang.AssertionError\n\tat Problem.main(Problem.java:34)"
+  },
+  {
+   "number": 26,
+   "name": "HumanEval_26_remove_duplicates",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpfj3a018r/Problem.java:15: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 28,
+   "name": "HumanEval_28_concatenate",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 30,
+   "name": "HumanEval_30_get_positive",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 60,
+   "name": "HumanEval_60_sum_to_n",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 64,
+   "name": "HumanEval_64_vowels_count",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Exception in thread \"main\" java.lang.AssertionError\n\tat Problem.main(Problem.java:29)"
+  },
+  {
+   "number": 76,
+   "name": "HumanEval_76_is_simple_power",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Exception in thread \"main\" java.lang.AssertionError\n\tat Problem.main(Problem.java:50)"
+  },
+  {
+   "number": 84,
+   "name": "HumanEval_84_solve",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpypcoluak/Problem.java:29: error: incompatible types: possible lossy conversion from long to int\n            digits[i] = N % 2;\n                          ^\n1 error"
+  },
+  {
+   "number": 111,
+   "name": "HumanEval_111_histogram",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Exception in thread \"main\" java.lang.AssertionError\n\tat Problem.main(Problem.java:34)"
+  },
+  {
+   "number": 116,
+   "name": "HumanEval_116_sort_array",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpftbcwfzo/Problem.java:21: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 130,
+   "name": "HumanEval_130_tri",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmp2j2ylkgs/Problem.java:63: error: illegal start of statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 133,
+   "name": "HumanEval_133_sum_squares",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpom0_bv8u/Problem.java:75: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 136,
+   "name": "HumanEval_136_largest_smallest_integers",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "invalid method reference\n            return Pair.with(Optional.of(positives.stream().mapToDouble(Long::min).orElse(0L)), Optional.of(positives.stream().mapToDouble(Long::max).orElse(0L)));\n                                                                                                                                           ^\n    method max in class Long cannot be applied to given types\n      required: long,long\n      found: Long\n      reason: actual and formal argument lists differ in length\nNote: Some messages have been simplified; recompile with -Xdiags:verbose to get full output\n3 errors"
+  },
+  {
+   "number": 146,
+   "name": "HumanEval_146_specialFilter",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmp_ytx419m/Problem.java:19: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 148,
+   "name": "HumanEval_148_bf",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpmeqwn3cf/Problem.java:27: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 152,
+   "name": "HumanEval_152_compare",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 156,
+   "name": "HumanEval_156_int_to_mini_roman",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpr_yoezkj/Problem.java:21: error: missing return statement\n    }\n    ^\n1 error"
+  },
+  {
+   "number": 159,
+   "name": "HumanEval_159_eat",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Exception in thread \"main\" java.lang.AssertionError\n\tat Problem.main(Problem.java:45)"
+  },
+  {
+   "number": 163,
+   "name": "HumanEval_163_generate_integers",
+   "status": "fail",
+   "stage": "compile",
+   "returncode": 2,
+   "output_tail": "compile:\n/tmp/tmpbb76t12t/Problem.java:20: error: cannot find symbol\n        for (long num : range(a, b)) {\n                        ^\n  symbol:   method range(long,long)\n  location: class Problem\n/tmp/tmpbb76t12t/Problem.java:21: error: cannot find symbol\n            if (isEvenDigit(num)) {\n                ^\n  symbol:   method isEvenDigit(long)\n  location: class Problem\n2 errors"
+  }
+ ]
+}

@@ -1,0 +1,168 @@
+{
+ "model": "base",
+ "language": "python",
+ "problems": 20,
+ "passed": 3,
+ "outcomes": [
+  {
+   "number": 0,
+   "name": "HumanEval/0",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmpxfcidfsz/main.py\", line 41, in <module>\n    check(has_close_elements)\n  File \"/tmp/tmpxfcidfsz/main.py\", line 34, in check\n    assert candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.95) == True\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError"
+  },
+  {
+   "number": 20,
+   "name": "HumanEval/20",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    ^\nSyntaxError: expected 'else' after 'if' expression"
+  },
+  {
+   "number": 26,
+   "name": "HumanEval/26",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmp_haez2d7/main.py\", line 31, in <module>\n    check(remove_duplicates)\n  File \"/tmp/tmp_haez2d7/main.py\", line 29, in check\n    assert candidate([1, 2, 3, 2, 4, 3, 5]) == [1, 4, 5]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError"
+  },
+  {
+   "number": 28,
+   "name": "HumanEval/28",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 30,
+   "name": "HumanEval/30",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 60,
+   "name": "HumanEval/60",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 64,
+   "name": "HumanEval/64",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmp36011tw0/main.py\", line 40, in <module>\n    check(vowels_count)\n  File \"/tmp/tmp36011tw0/main.py\", line 29, in check\n    assert candidate(\"Alone\") == 3, \"Test 2\"\n           ^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Test 2"
+  },
+  {
+   "number": 76,
+   "name": "HumanEval/76",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "(good for debugging!)\"\n           ^^^^^^^^^^^^^^^^\n  File \"/tmp/tmpz8q85db9/main.py\", line 18, in is_simple_power\n    return is_simple_power(x, n)  # recursive definition\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/tmpz8q85db9/main.py\", line 18, in is_simple_power\n    return is_simple_power(x, n)  # recursive definition\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/tmpz8q85db9/main.py\", line 18, in is_simple_power\n    return is_simple_power(x, n)  # recursive definition\n           ^^^^^^^^^^^^^^^^^^^^^\n  [Previous line repeated 995 more times]\nRecursionError: maximum recursion depth exceeded"
+  },
+  {
+   "number": 84,
+   "name": "HumanEval/84",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmp_2nipifo/main.py\", line 39, in <module>\n    check(solve)\n  File \"/tmp/tmp_2nipifo/main.py\", line 29, in check\n    assert candidate(1000) == \"1\", \"Error\"\n           ^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Error"
+  },
+  {
+   "number": 111,
+   "name": "HumanEval/111",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmpsviazsgp/main.py\", line 36, in <module>\n    check(histogram)\n  File \"/tmp/tmpsviazsgp/main.py\", line 23, in check\n    assert candidate('a b b a') == {'a':2,'b': 2}, \"This prints if this assert fails 1 (good for debugging!)\"\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: This prints if this assert fails 1 (good for debugging!)"
+  },
+  {
+   "number": 116,
+   "name": "HumanEval/116",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmp5fwh_oz7/main.py\", line 33, in <module>\n    check(sort_array)\n  File \"/tmp/tmp5fwh_oz7/main.py\", line 20, in check\n    assert candidate([1,5,2,3,4]) == [1, 2, 4, 3, 5]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError"
+  },
+  {
+   "number": 130,
+   "name": "HumanEval/130",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmph94j6_du/main.py\", line 47, in <module>\n    check(tri)\n  File \"/tmp/tmph94j6_du/main.py\", line 35, in check\n    assert candidate(4) == [1, 3, 2.0, 8.0, 3.0]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError"
+  },
+  {
+   "number": 133,
+   "name": "HumanEval/133",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmpoltq1ox0/main.py\", line 76, in <module>\n    check(sum_squares)\n  File \"/tmp/tmpoltq1ox0/main.py\", line 58, in check\n    assert candidate([1,2,3])==14, \"This prints if this assert fails 1 (good for debugging!)\"\n           ^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: This prints if this assert fails 1 (good for debugging!)"
+  },
+  {
+   "number": 136,
+   "name": "HumanEval/136",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmp97rzxzr3/main.py\", line 35, in <module>\n    check(largest_smallest_integers)\n  File \"/tmp/tmp97rzxzr3/main.py\", line 20, in check\n    assert candidate([2, 4, 1, 3, 5, 7]) == (None, 1)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError"
+  },
+  {
+   "number": 146,
+   "name": "HumanEval/146",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmp4qlnz456/main.py\", line 31, in <module>\n    check(specialFilter)\n  File \"/tmp/tmp4qlnz456/main.py\", line 20, in check\n    assert candidate([15, -73, 14, -15]) == 1\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError"
+  },
+  {
+   "number": 148,
+   "name": "HumanEval/148",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmpglf2zp9p/main.py\", line 36, in <module>\n    check(bf)\n  File \"/tmp/tmpglf2zp9p/main.py\", line 24, in check\n    assert candidate(\"Jupiter\", \"Neptune\") == (\"Saturn\", \"Uranus\"), \"First test error: \" + str(len(candidate(\"Jupiter\", \"Neptune\")))      \n                                                                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: object of type 'NoneType' has no len()"
+  },
+  {
+   "number": 152,
+   "name": "HumanEval/152",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmp01ex7obc/main.py\", line 32, in <module>\n    check(compare)\n  File \"/tmp/tmp01ex7obc/main.py\", line 23, in check\n    assert candidate([1,2,3,4,5,1],[1,2,3,4,2,-2])==[0,0,0,0,3,3], \"This prints if this assert fails 1 (good for debugging!)\"\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: This prints if this assert fails 1 (good for debugging!)"
+  },
+  {
+   "number": 156,
+   "name": "HumanEval/156",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmpzh4skrta/main.py\", line 53, in <module>\n    check(int_to_mini_roman)\n  File \"/tmp/tmpzh4skrta/main.py\", line 34, in check\n    assert candidate(19) == 'xix'\n           ^^^^^^^^^^^^^\n  File \"/tmp/tmpzh4skrta/main.py\", line 26, in int_to_mini_roman\n    if number >= key:\n       ^^^^^^^^^^^^^\nTypeError: '>=' not supported between instances of 'int' and 'str'"
+  },
+  {
+   "number": 159,
+   "name": "HumanEval/159",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmpaito5nx7/main.py\", line 51, in <module>\n    check(eat)\n  File \"/tmp/tmpaito5nx7/main.py\", line 40, in check\n    assert candidate(5, 6, 10) == [11, 4], \"Error\"\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Error"
+  },
+  {
+   "number": 163,
+   "name": "HumanEval/163",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "Traceback (most recent call last):\n  File \"/tmp/tmpi6s2tm38/main.py\", line 31, in <module>\n    check(generate_integers)\n  File \"/tmp/tmpi6s2tm38/main.py\", line 22, in check\n    assert candidate(2, 10) == [2, 4, 6, 8], \"Test 1\"\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Test 1"
+  }
+ ]
+}

@@ -1,0 +1,337 @@
+{
+ "source": "/home/opencode/Work/rl-grpo-data/2026-11-16-run17-step313",
+ "model": {
+  "name": "Qwen/Qwen3-0.6B",
+  "revision": "c1899de289a04d12100db370d81485cdf75e47ca"
+ },
+ "model_revision": "c1899de289a04d12100db370d81485cdf75e47ca",
+ "git_commit": "e0e47acd83c79db5c63b94933c4b3d39eddc99f7",
+ "versions": {
+  "python": "3.12.16",
+  "rlvr": "0.1.0",
+  "torch": "2.7.1+cu128",
+  "transformers": "4.57.1",
+  "peft": "0.17.1",
+  "datasets": null,
+  "trl": null
+ },
+ "training": {
+  "method": "grpo",
+  "engine": "vllm",
+  "generations_per_prompt": 8,
+  "temperature": 0.9,
+  "learning_rate": 1e-05,
+  "epochs": 5,
+  "lora_rank": 32,
+  "lora_alpha": 64,
+  "max_prompt_tokens": 512,
+  "max_completion_tokens": 2048,
+  "thinking_budget_start": 768,
+  "entropy_every_steps": 500,
+  "clip_epsilon": 0.2,
+  "kl_beta": 0.0,
+  "length_soft_limit": 900,
+  "length_penalty_per_token": 0.001,
+  "length_penalty_floor": 0.2,
+  "memory_floor_mib": 512,
+  "seed": 0
+ },
+ "run": {
+  "checkpoint_every_steps": 20,
+  "eval_every_steps": 20,
+  "eval_questions": 100,
+  "eval_subset_seed": 2026
+ },
+ "curriculum": {
+  "bands": [
+   "very easy",
+   "medium",
+   "hard",
+   "very hard"
+  ],
+  "start_stage": "very easy",
+  "carry_over_ratio": 0.2,
+  "stages": [
+   {
+    "name": "very easy",
+    "train": 69,
+    "held_out": 17
+   },
+   {
+    "name": "medium",
+    "train": 448,
+    "held_out": 109
+   },
+   {
+    "name": "hard",
+    "train": 161,
+    "held_out": 19
+   },
+   {
+    "name": "very hard",
+    "train": 49,
+    "held_out": 8
+   }
+  ]
+ },
+ "trainer": {
+  "method": "grpo",
+  "model_name": "Qwen/Qwen3-0.6B",
+  "generations_per_prompt": 8,
+  "epochs": 5,
+  "temperature": 0.9,
+  "learning_rate": 1e-05,
+  "lora_rank": 32,
+  "lora_alpha": 64,
+  "max_prompt_tokens": 512,
+  "max_completion_tokens": 2048,
+  "entropy_every_steps": 500,
+  "clip_epsilon": 0.2,
+  "kl_beta": 0.0,
+  "batch_size": "adaptive",
+  "batch_start_prompts": 2,
+  "gradient_accumulation": 8,
+  "optimizer_updates_per_step": 1,
+  "memory_floor_mib": 512
+ },
+ "metrics": {
+  "steps": 313,
+  "first_step": 1,
+  "last_step": 313,
+  "prompts_per_step": {
+   "mean": 52.87859424920128,
+   "median": 20,
+   "min": 1,
+   "max": 175,
+   "steps_at_or_below_3": 42
+  },
+  "sequences_per_step": {
+   "mean": 423.0287539936102,
+   "median": 160,
+   "max": 1400
+  },
+  "by_stage": {
+   "very easy": {
+    "steps": 160,
+    "mean_reward": 0.4409994527220863,
+    "mean_pass_rate": 0.4164862709643996,
+    "mean_completion_tokens": 808.6973448382107,
+    "mean_truncation_rate": 0.027173853498985316
+   },
+   "medium": {
+    "steps": 153,
+    "mean_reward": 0.21798602531632072,
+    "mean_pass_rate": 0.1755133843212025,
+    "mean_completion_tokens": 571.792195820835,
+    "mean_truncation_rate": 0.016376061809941198
+   }
+  },
+  "final_row": {
+   "step": 313,
+   "arm": "code-score",
+   "stage": "medium",
+   "prompts": 175,
+   "sequences": 1400,
+   "rollouts": 1400,
+   "mean_reward": 0.18935714285714286,
+   "pass_rate": 0.12428571428571429,
+   "mean_completion_tokens": 307.9142857142857,
+   "cache_hits": 0,
+   "truncation_rate": 0.0,
+   "prompt_truncation_rate": 0.0,
+   "gpu_live_mib": 1258.139,
+   "gpu_cached_mib": 6219.861,
+   "gpu_fragmented_mib": 0.0,
+   "gpu_total_mib": 48541.438,
+   "gpu_unaccounted_mib": 41063.438
+  }
+ },
+ "rollouts": {
+  "rows": 132408,
+  "groups": 16551,
+  "mean_group_size": 8.0,
+  "group_size_histogram": {
+   "8": 16551
+  },
+  "zero_variance_groups": 1713,
+  "zero_variance_share": 0.10349827804966467,
+  "all_zero_reward_groups": 548,
+  "all_one_reward_groups": 127,
+  "all_tests_failed_groups": 7311,
+  "mastered_groups_by_stage": {
+   "very easy": 35,
+   "medium": 92
+  },
+  "duplicate_code_groups": 3262,
+  "duplicate_code_share": 0.1970877892574467,
+  "mean_distinct_bodies": 7.651924355023866,
+  "error_classes_by_stage": {
+   "very easy": {
+    "pass": 4188,
+    "wrong_answer": 3545,
+    "runtime_error": 3008,
+    "syntax_error": 443,
+    "timeout": 48
+   },
+   "medium": {
+    "pass": 18140,
+    "runtime_error": 34164,
+    "wrong_answer": 59585,
+    "timeout": 678,
+    "syntax_error": 8587,
+    "runner_error": 22
+   }
+  },
+  "unique_prompts": 503,
+  "prompts_with_one_group": 69,
+  "prompts_in_one_step": 69
+ },
+ "retirement": {
+  "very easy": {
+   "entered": 69,
+   "retired": 35,
+   "retired_mean_pass_rate": 0.8598144309066638,
+   "remaining_mean_pass_rate": 0.7411702815931083
+  },
+  "medium": {
+   "entered": 434,
+   "retired": 92,
+   "retired_mean_pass_rate": 0.8627075008693013,
+   "remaining_mean_pass_rate": 0.2051194573683582
+  },
+  "hard": {
+   "entered": 0,
+   "retired": 0,
+   "retired_mean_pass_rate": null,
+   "remaining_mean_pass_rate": null
+  },
+  "very hard": {
+   "entered": 0,
+   "retired": 0,
+   "retired_mean_pass_rate": null,
+   "remaining_mean_pass_rate": null
+  }
+ },
+ "eval_curve": {
+  "evaluations": [
+   {
+    "step": 20,
+    "kind": "checkpoint",
+    "pass_at_1": 0.32,
+    "count": 100
+   },
+   {
+    "step": 40,
+    "kind": "checkpoint",
+    "pass_at_1": 0.33,
+    "count": 100
+   },
+   {
+    "step": 60,
+    "kind": "checkpoint",
+    "pass_at_1": 0.33,
+    "count": 100
+   },
+   {
+    "step": 80,
+    "kind": "checkpoint",
+    "pass_at_1": 0.37,
+    "count": 100
+   },
+   {
+    "step": 100,
+    "kind": "checkpoint",
+    "pass_at_1": 0.34,
+    "count": 100
+   },
+   {
+    "step": 120,
+    "kind": "checkpoint",
+    "pass_at_1": 0.4,
+    "count": 100
+   },
+   {
+    "step": 140,
+    "kind": "checkpoint",
+    "pass_at_1": 0.34,
+    "count": 100
+   },
+   {
+    "step": 160,
+    "kind": "stage",
+    "pass_at_1": 0.9411764705882353,
+    "count": 17
+   },
+   {
+    "step": 160,
+    "kind": "checkpoint",
+    "pass_at_1": 0.33,
+    "count": 100
+   },
+   {
+    "step": 180,
+    "kind": "checkpoint",
+    "pass_at_1": 0.37,
+    "count": 100
+   },
+   {
+    "step": 200,
+    "kind": "checkpoint",
+    "pass_at_1": 0.4,
+    "count": 100
+   },
+   {
+    "step": 220,
+    "kind": "checkpoint",
+    "pass_at_1": 0.36,
+    "count": 100
+   },
+   {
+    "step": 240,
+    "kind": "checkpoint",
+    "pass_at_1": 0.34,
+    "count": 100
+   },
+   {
+    "step": 260,
+    "kind": "checkpoint",
+    "pass_at_1": 0.35,
+    "count": 100
+   },
+   {
+    "step": 280,
+    "kind": "checkpoint",
+    "pass_at_1": 0.35,
+    "count": 100
+   },
+   {
+    "step": 300,
+    "kind": "checkpoint",
+    "pass_at_1": 0.35,
+    "count": 100
+   }
+  ],
+  "checkpoint_min": 0.32,
+  "checkpoint_max": 0.4,
+  "first_checkpoint": {
+   "step": 20,
+   "kind": "checkpoint",
+   "pass_at_1": 0.32,
+   "count": 100
+  },
+  "last_checkpoint": {
+   "step": 300,
+   "kind": "checkpoint",
+   "pass_at_1": 0.35,
+   "count": 100
+  },
+  "final": 0.35,
+  "subset": {
+   "method": "seeded_sample",
+   "seed": 2026,
+   "requested": 100,
+   "selected": 100,
+   "pool_size": 250
+  }
+ }
+}

@@ -1,0 +1,986 @@
+{
+ "seed": 2026,
+ "count": 20,
+ "problems": [
+  {
+   "number": 0,
+   "python": {
+    "task_id": "HumanEval/0",
+    "prompt": "from typing import List\n\n\ndef has_close_elements(numbers: List[float], threshold: float) -> bool:\n    \"\"\" Check if in given list of numbers, are any two numbers closer to each other than\n    given threshold.\n    >>> has_close_elements([1.0, 2.0, 3.0], 0.5)\n    False\n    >>> has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3)\n    True\n    \"\"\"\n",
+    "entry_point": "has_close_elements",
+    "canonical_solution": "    for idx, elem in enumerate(numbers):\n        for idx2, elem2 in enumerate(numbers):\n            if idx != idx2:\n                distance = abs(elem - elem2)\n                if distance < threshold:\n                    return True\n\n    return False\n",
+    "test": "\n\nMETADATA = {\n    'author': 'jt',\n    'dataset': 'test'\n}\n\n\ndef check(candidate):\n    assert candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.3) == True\n    assert candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.05) == False\n    assert candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.95) == True\n    assert candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.8) == False\n    assert candidate([1.0, 2.0, 3.0, 4.0, 5.0, 2.0], 0.1) == True\n    assert candidate([1.1, 2.2, 3.1, 4.1, 5.1], 1.0) == True\n    assert candidate([1.1, 2.2, 3.1, 4.1, 5.1], 0.5) == False\n\n"
+   },
+   "js": {
+    "name": "HumanEval_0_has_close_elements",
+    "language": "js",
+    "prompt": "//Check if in given array of numbers, are any two numbers closer to each other than\n// given threshold.\n// >>> has_close_elements([1.0, 2.0, 3.0], 0.5)\n// false\n// >>> has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3)\n// true\nfunction has_close_elements(numbers, threshold){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_0_has_close_elements.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = has_close_elements;\n  assert.deepEqual(candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.3),true);\n  assert.deepEqual(candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2], 0.05),false);\n  assert.deepEqual(candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.95),true);\n  assert.deepEqual(candidate([1.0, 2.0, 5.9, 4.0, 5.0], 0.8),false);\n  assert.deepEqual(candidate([1.0, 2.0, 3.0, 4.0, 5.0, 2.0], 0.1),true);\n  assert.deepEqual(candidate([1.1, 2.2, 3.1, 4.1, 5.1], 1.0),true);\n  assert.deepEqual(candidate([1.1, 2.2, 3.1, 4.1, 5.1], 0.5),false);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_0_has_close_elements",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Check if in given array list of numbers, are any two numbers closer to each other than\n    // given threshold.\n    // >>> hasCloseElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.0f))), (0.5f))\n    // (false)\n    // >>> hasCloseElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.8f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.0f))), (0.3f))\n    // (true)\n    public static boolean hasCloseElements(ArrayList<Float> numbers, float threshold) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_0_has_close_elements.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(hasCloseElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.9f, (float)4.0f, (float)5.0f, (float)2.2f))), (0.3f)) == (true));\n    assert(hasCloseElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.9f, (float)4.0f, (float)5.0f, (float)2.2f))), (0.05f)) == (false));\n    assert(hasCloseElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)5.9f, (float)4.0f, (float)5.0f))), (0.95f)) == (true));\n    assert(hasCloseElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)5.9f, (float)4.0f, (float)5.0f))), (0.8f)) == (false));\n    assert(hasCloseElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.0f))), (0.1f)) == (true));\n    assert(hasCloseElements((new ArrayList<Float>(Arrays.asList((float)1.1f, (float)2.2f, (float)3.1f, (float)4.1f, (float)5.1f))), (1.0f)) == (true));\n    assert(hasCloseElements((new ArrayList<Float>(Arrays.asList((float)1.1f, (float)2.2f, (float)3.1f, (float)4.1f, (float)5.1f))), (0.5f)) == (false));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_0_has_close_elements",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Check if in given vector of numbers, are any two numbers closer to each other than\n// given threshold.\n// >>> has_close_elements((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.0f})), (0.5f))\n// (false)\n// >>> has_close_elements((std::vector<float>({(float)1.0f, (float)2.8f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.0f})), (0.3f))\n// (true)\nbool has_close_elements(std::vector<float> numbers, float threshold) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_0_has_close_elements.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = has_close_elements;\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.9f, (float)4.0f, (float)5.0f, (float)2.2f})), (0.3f)) == (true));\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.9f, (float)4.0f, (float)5.0f, (float)2.2f})), (0.05f)) == (false));\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)5.9f, (float)4.0f, (float)5.0f})), (0.95f)) == (true));\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)5.9f, (float)4.0f, (float)5.0f})), (0.8f)) == (false));\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.0f})), (0.1f)) == (true));\n    assert(candidate((std::vector<float>({(float)1.1f, (float)2.2f, (float)3.1f, (float)4.1f, (float)5.1f})), (1.0f)) == (true));\n    assert(candidate((std::vector<float>({(float)1.1f, (float)2.2f, (float)3.1f, (float)4.1f, (float)5.1f})), (0.5f)) == (false));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 20,
+   "python": {
+    "task_id": "HumanEval/20",
+    "prompt": "from typing import List, Tuple\n\n\ndef find_closest_elements(numbers: List[float]) -> Tuple[float, float]:\n    \"\"\" From a supplied list of numbers (of length at least two) select and return two that are the closest to each\n    other and return them in order (smaller number, larger number).\n    >>> find_closest_elements([1.0, 2.0, 3.0, 4.0, 5.0, 2.2])\n    (2.0, 2.2)\n    >>> find_closest_elements([1.0, 2.0, 3.0, 4.0, 5.0, 2.0])\n    (2.0, 2.0)\n    \"\"\"\n",
+    "entry_point": "find_closest_elements",
+    "canonical_solution": "    closest_pair = None\n    distance = None\n\n    for idx, elem in enumerate(numbers):\n        for idx2, elem2 in enumerate(numbers):\n            if idx != idx2:\n                if distance is None:\n                    distance = abs(elem - elem2)\n                    closest_pair = tuple(sorted([elem, elem2]))\n                else:\n                    new_distance = abs(elem - elem2)\n                    if new_distance < distance:\n                        distance = new_distance\n                        closest_pair = tuple(sorted([elem, elem2]))\n\n    return closest_pair\n",
+    "test": "\n\nMETADATA = {\n    'author': 'jt',\n    'dataset': 'test'\n}\n\n\ndef check(candidate):\n    assert candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2]) == (3.9, 4.0)\n    assert candidate([1.0, 2.0, 5.9, 4.0, 5.0]) == (5.0, 5.9)\n    assert candidate([1.0, 2.0, 3.0, 4.0, 5.0, 2.2]) == (2.0, 2.2)\n    assert candidate([1.0, 2.0, 3.0, 4.0, 5.0, 2.0]) == (2.0, 2.0)\n    assert candidate([1.1, 2.2, 3.1, 4.1, 5.1]) == (2.2, 3.1)\n\n"
+   },
+   "js": {
+    "name": "HumanEval_20_find_closest_elements",
+    "language": "js",
+    "prompt": "//From a supplied array of numbers (of length at least two) select and return two that are the closest to each\n// other and return them in order (smaller number, larger number).\n// >>> find_closest_elements([1.0, 2.0, 3.0, 4.0, 5.0, 2.2])\n// [2.0, 2.2]\n// >>> find_closest_elements([1.0, 2.0, 3.0, 4.0, 5.0, 2.0])\n// [2.0, 2.0]\nfunction find_closest_elements(numbers){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_20_find_closest_elements.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = find_closest_elements;\n  assert.deepEqual(candidate([1.0, 2.0, 3.9, 4.0, 5.0, 2.2]),[3.9, 4.0]);\n  assert.deepEqual(candidate([1.0, 2.0, 5.9, 4.0, 5.0]),[5.0, 5.9]);\n  assert.deepEqual(candidate([1.0, 2.0, 3.0, 4.0, 5.0, 2.2]),[2.0, 2.2]);\n  assert.deepEqual(candidate([1.0, 2.0, 3.0, 4.0, 5.0, 2.0]),[2.0, 2.0]);\n  assert.deepEqual(candidate([1.1, 2.2, 3.1, 4.1, 5.1]),[2.2, 3.1]);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_20_find_closest_elements",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // From a supplied array list of numbers (of length at least two) select and return two that are the closest to each\n    // other and return them in order (smaller number, larger number).\n    // >>> findClosestElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.2f))))\n    // (Pair.with(2.0f, 2.2f))\n    // >>> findClosestElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.0f))))\n    // (Pair.with(2.0f, 2.0f))\n    public static Pair<Float, Float> findClosestElements(ArrayList<Float> numbers) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_20_find_closest_elements.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(findClosestElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.9f, (float)4.0f, (float)5.0f, (float)2.2f)))).equals((Pair.with(3.9f, 4.0f))));\n    assert(findClosestElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)5.9f, (float)4.0f, (float)5.0f)))).equals((Pair.with(5.0f, 5.9f))));\n    assert(findClosestElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.2f)))).equals((Pair.with(2.0f, 2.2f))));\n    assert(findClosestElements((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.0f)))).equals((Pair.with(2.0f, 2.0f))));\n    assert(findClosestElements((new ArrayList<Float>(Arrays.asList((float)1.1f, (float)2.2f, (float)3.1f, (float)4.1f, (float)5.1f)))).equals((Pair.with(2.2f, 3.1f))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_20_find_closest_elements",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// From a supplied vector of numbers (of length at least two) select and return two that are the closest to each\n// other and return them in order (smaller number, larger number).\n// >>> find_closest_elements((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.2f})))\n// (std::make_tuple(2.0f, 2.2f))\n// >>> find_closest_elements((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.0f})))\n// (std::make_tuple(2.0f, 2.0f))\nstd::tuple<float, float> find_closest_elements(std::vector<float> numbers) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_20_find_closest_elements.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = find_closest_elements;\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.9f, (float)4.0f, (float)5.0f, (float)2.2f}))) == (std::make_tuple(3.9f, 4.0f)));\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)5.9f, (float)4.0f, (float)5.0f}))) == (std::make_tuple(5.0f, 5.9f)));\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.2f}))) == (std::make_tuple(2.0f, 2.2f)));\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.0f, (float)4.0f, (float)5.0f, (float)2.0f}))) == (std::make_tuple(2.0f, 2.0f)));\n    assert(candidate((std::vector<float>({(float)1.1f, (float)2.2f, (float)3.1f, (float)4.1f, (float)5.1f}))) == (std::make_tuple(2.2f, 3.1f)));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 26,
+   "python": {
+    "task_id": "HumanEval/26",
+    "prompt": "from typing import List\n\n\ndef remove_duplicates(numbers: List[int]) -> List[int]:\n    \"\"\" From a list of integers, remove all elements that occur more than once.\n    Keep order of elements left the same as in the input.\n    >>> remove_duplicates([1, 2, 3, 2, 4])\n    [1, 3, 4]\n    \"\"\"\n",
+    "entry_point": "remove_duplicates",
+    "canonical_solution": "    import collections\n    c = collections.Counter(numbers)\n    return [n for n in numbers if c[n] <= 1]\n",
+    "test": "\n\nMETADATA = {\n    'author': 'jt',\n    'dataset': 'test'\n}\n\n\ndef check(candidate):\n    assert candidate([]) == []\n    assert candidate([1, 2, 3, 4]) == [1, 2, 3, 4]\n    assert candidate([1, 2, 3, 2, 4, 3, 5]) == [1, 4, 5]\n"
+   },
+   "js": {
+    "name": "HumanEval_26_remove_duplicates",
+    "language": "js",
+    "prompt": "//From an array of integers, remove all elements that occur more than once.\n// Keep order of elements left the same as in the input.\n// >>> remove_duplicates([1, 2, 3, 2, 4])\n// [1, 3, 4]\nfunction remove_duplicates(numbers){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_26_remove_duplicates.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = remove_duplicates;\n  assert.deepEqual(candidate([]),[]);\n  assert.deepEqual(candidate([1, 2, 3, 4]),[1, 2, 3, 4]);\n  assert.deepEqual(candidate([1, 2, 3, 2, 4, 3, 5]),[1, 4, 5]);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_26_remove_duplicates",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // From an array array list of integers, remove all elements that occur more than once.\n    // Keep order of elements left the same as in the input.\n    // >>> removeDuplicates((new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l, (long)2l, (long)4l))))\n    // (new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)4l)))\n    public static ArrayList<Long> removeDuplicates(ArrayList<Long> numbers) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_26_remove_duplicates.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(removeDuplicates((new ArrayList<Long>(Arrays.asList()))).equals((new ArrayList<Long>(Arrays.asList()))));\n    assert(removeDuplicates((new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l, (long)4l)))).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l, (long)4l)))));\n    assert(removeDuplicates((new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l, (long)2l, (long)4l, (long)3l, (long)5l)))).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)4l, (long)5l)))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_26_remove_duplicates",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// From a vector of integers, remove all elements that occur more than once.\n// Keep order of elements left the same as in the input.\n// >>> remove_duplicates((std::vector<long>({(long)1, (long)2, (long)3, (long)2, (long)4})))\n// (std::vector<long>({(long)1, (long)3, (long)4}))\nstd::vector<long> remove_duplicates(std::vector<long> numbers) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_26_remove_duplicates.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = remove_duplicates;\n    assert(candidate((std::vector<long>())) == (std::vector<long>()));\n    assert(candidate((std::vector<long>({(long)1, (long)2, (long)3, (long)4}))) == (std::vector<long>({(long)1, (long)2, (long)3, (long)4})));\n    assert(candidate((std::vector<long>({(long)1, (long)2, (long)3, (long)2, (long)4, (long)3, (long)5}))) == (std::vector<long>({(long)1, (long)4, (long)5})));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 28,
+   "python": {
+    "task_id": "HumanEval/28",
+    "prompt": "from typing import List\n\n\ndef concatenate(strings: List[str]) -> str:\n    \"\"\" Concatenate list of strings into a single string\n    >>> concatenate([])\n    ''\n    >>> concatenate(['a', 'b', 'c'])\n    'abc'\n    \"\"\"\n",
+    "entry_point": "concatenate",
+    "canonical_solution": "    return ''.join(strings)\n",
+    "test": "\n\nMETADATA = {\n    'author': 'jt',\n    'dataset': 'test'\n}\n\n\ndef check(candidate):\n    assert candidate([]) == ''\n    assert candidate(['x', 'y', 'z']) == 'xyz'\n    assert candidate(['x', 'y', 'z', 'w', 'k']) == 'xyzwk'\n"
+   },
+   "js": {
+    "name": "HumanEval_28_concatenate",
+    "language": "js",
+    "prompt": "//Concatenate array of strings into a single string\n// >>> concatenate([])\n// \"\"\n// >>> concatenate([\"a\", \"b\", \"c\"])\n// \"abc\"\nfunction concatenate(strings){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_28_concatenate.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = concatenate;\n  assert.deepEqual(candidate([]),\"\");\n  assert.deepEqual(candidate([\"x\", \"y\", \"z\"]),\"xyz\");\n  assert.deepEqual(candidate([\"x\", \"y\", \"z\", \"w\", \"k\"]),\"xyzwk\");\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_28_concatenate",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Concatenate array list of strings into a single string\n    // >>> concatenate((new ArrayList<String>(Arrays.asList())))\n    // (\"\")\n    // >>> concatenate((new ArrayList<String>(Arrays.asList((String)\"a\", (String)\"b\", (String)\"c\"))))\n    // (\"abc\")\n    public static String concatenate(ArrayList<String> strings) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_28_concatenate.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(concatenate((new ArrayList<String>(Arrays.asList()))).equals((\"\")));\n    assert(concatenate((new ArrayList<String>(Arrays.asList((String)\"x\", (String)\"y\", (String)\"z\")))).equals((\"xyz\")));\n    assert(concatenate((new ArrayList<String>(Arrays.asList((String)\"x\", (String)\"y\", (String)\"z\", (String)\"w\", (String)\"k\")))).equals((\"xyzwk\")));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_28_concatenate",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Concatenate vector of strings into a single string\n// >>> concatenate((std::vector<std::string>()))\n// (\"\")\n// >>> concatenate((std::vector<std::string>({(std::string)\"a\", (std::string)\"b\", (std::string)\"c\"})))\n// (\"abc\")\nstd::string concatenate(std::vector<std::string> strings) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_28_concatenate.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = concatenate;\n    assert(candidate((std::vector<std::string>())) == (\"\"));\n    assert(candidate((std::vector<std::string>({(std::string)\"x\", (std::string)\"y\", (std::string)\"z\"}))) == (\"xyz\"));\n    assert(candidate((std::vector<std::string>({(std::string)\"x\", (std::string)\"y\", (std::string)\"z\", (std::string)\"w\", (std::string)\"k\"}))) == (\"xyzwk\"));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 30,
+   "python": {
+    "task_id": "HumanEval/30",
+    "prompt": "\n\ndef get_positive(l: list):\n    \"\"\"Return only positive numbers in the list.\n    >>> get_positive([-1, 2, -4, 5, 6])\n    [2, 5, 6]\n    >>> get_positive([5, 3, -5, 2, -3, 3, 9, 0, 123, 1, -10])\n    [5, 3, 2, 3, 9, 123, 1]\n    \"\"\"\n",
+    "entry_point": "get_positive",
+    "canonical_solution": "    return [e for e in l if e > 0]\n",
+    "test": "\n\nMETADATA = {}\n\n\ndef check(candidate):\n    assert candidate([-1, -2, 4, 5, 6]) == [4, 5, 6]\n    assert candidate([5, 3, -5, 2, 3, 3, 9, 0, 123, 1, -10]) == [5, 3, 2, 3, 3, 9, 123, 1]\n    assert candidate([-1, -2]) == []\n    assert candidate([]) == []\n\n"
+   },
+   "js": {
+    "name": "HumanEval_30_get_positive",
+    "language": "js",
+    "prompt": "//Return only positive numbers in the array.\n// >>> get_positive([-1, 2, -4, 5, 6])\n// [2, 5, 6]\n// >>> get_positive([5, 3, -5, 2, -3, 3, 9, 0, 123, 1, -10])\n// [5, 3, 2, 3, 9, 123, 1]\nfunction get_positive(l){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_30_get_positive.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = get_positive;\n  assert.deepEqual(candidate([-1, -2, 4, 5, 6]),[4, 5, 6]);\n  assert.deepEqual(candidate([5, 3, -5, 2, 3, 3, 9, 0, 123, 1, -10]),[5, 3, 2, 3, 3, 9, 123, 1]);\n  assert.deepEqual(candidate([-1, -2]),[]);\n  assert.deepEqual(candidate([]),[]);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_30_get_positive",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Return only positive numbers in the array list.\n    // >>> getPositive((new ArrayList<Long>(Arrays.asList((long)-1l, (long)2l, (long)-4l, (long)5l, (long)6l))))\n    // (new ArrayList<Long>(Arrays.asList((long)2l, (long)5l, (long)6l)))\n    // >>> getPositive((new ArrayList<Long>(Arrays.asList((long)5l, (long)3l, (long)-5l, (long)2l, (long)-3l, (long)3l, (long)9l, (long)0l, (long)123l, (long)1l, (long)-10l))))\n    // (new ArrayList<Long>(Arrays.asList((long)5l, (long)3l, (long)2l, (long)3l, (long)9l, (long)123l, (long)1l)))\n    public static ArrayList<Long> getPositive(ArrayList<Long> l) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_30_get_positive.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(getPositive((new ArrayList<Long>(Arrays.asList((long)-1l, (long)-2l, (long)4l, (long)5l, (long)6l)))).equals((new ArrayList<Long>(Arrays.asList((long)4l, (long)5l, (long)6l)))));\n    assert(getPositive((new ArrayList<Long>(Arrays.asList((long)5l, (long)3l, (long)-5l, (long)2l, (long)3l, (long)3l, (long)9l, (long)0l, (long)123l, (long)1l, (long)-10l)))).equals((new ArrayList<Long>(Arrays.asList((long)5l, (long)3l, (long)2l, (long)3l, (long)3l, (long)9l, (long)123l, (long)1l)))));\n    assert(getPositive((new ArrayList<Long>(Arrays.asList((long)-1l, (long)-2l)))).equals((new ArrayList<Long>(Arrays.asList()))));\n    assert(getPositive((new ArrayList<Long>(Arrays.asList()))).equals((new ArrayList<Long>(Arrays.asList()))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_30_get_positive",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Return only positive numbers in the vector.\n// >>> get_positive((std::vector<long>({(long)-1, (long)2, (long)-4, (long)5, (long)6})))\n// (std::vector<long>({(long)2, (long)5, (long)6}))\n// >>> get_positive((std::vector<long>({(long)5, (long)3, (long)-5, (long)2, (long)-3, (long)3, (long)9, (long)0, (long)123, (long)1, (long)-10})))\n// (std::vector<long>({(long)5, (long)3, (long)2, (long)3, (long)9, (long)123, (long)1}))\nstd::vector<long> get_positive(std::vector<long> l) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_30_get_positive.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = get_positive;\n    assert(candidate((std::vector<long>({(long)-1, (long)-2, (long)4, (long)5, (long)6}))) == (std::vector<long>({(long)4, (long)5, (long)6})));\n    assert(candidate((std::vector<long>({(long)5, (long)3, (long)-5, (long)2, (long)3, (long)3, (long)9, (long)0, (long)123, (long)1, (long)-10}))) == (std::vector<long>({(long)5, (long)3, (long)2, (long)3, (long)3, (long)9, (long)123, (long)1})));\n    assert(candidate((std::vector<long>({(long)-1, (long)-2}))) == (std::vector<long>()));\n    assert(candidate((std::vector<long>())) == (std::vector<long>()));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 60,
+   "python": {
+    "task_id": "HumanEval/60",
+    "prompt": "\n\ndef sum_to_n(n: int):\n    \"\"\"sum_to_n is a function that sums numbers from 1 to n.\n    >>> sum_to_n(30)\n    465\n    >>> sum_to_n(100)\n    5050\n    >>> sum_to_n(5)\n    15\n    >>> sum_to_n(10)\n    55\n    >>> sum_to_n(1)\n    1\n    \"\"\"\n",
+    "entry_point": "sum_to_n",
+    "canonical_solution": "    return sum(range(n + 1))\n",
+    "test": "\n\nMETADATA = {}\n\n\ndef check(candidate):\n    assert candidate(1) == 1\n    assert candidate(6) == 21\n    assert candidate(11) == 66\n    assert candidate(30) == 465\n    assert candidate(100) == 5050\n\n"
+   },
+   "js": {
+    "name": "HumanEval_60_sum_to_n",
+    "language": "js",
+    "prompt": "//sum_to_n is a function that sums numbers from 1 to n.\n// >>> sum_to_n(30)\n// 465\n// >>> sum_to_n(100)\n// 5050\n// >>> sum_to_n(5)\n// 15\n// >>> sum_to_n(10)\n// 55\n// >>> sum_to_n(1)\n// 1\nfunction sum_to_n(n){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_60_sum_to_n.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = sum_to_n;\n  assert.deepEqual(candidate(1),1);\n  assert.deepEqual(candidate(6),21);\n  assert.deepEqual(candidate(11),66);\n  assert.deepEqual(candidate(30),465);\n  assert.deepEqual(candidate(100),5050);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_60_sum_to_n",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // sum_to_n is a function that sums numbers from 1 to n.\n    // >>> sumToN((30l))\n    // (465l)\n    // >>> sumToN((100l))\n    // (5050l)\n    // >>> sumToN((5l))\n    // (15l)\n    // >>> sumToN((10l))\n    // (55l)\n    // >>> sumToN((1l))\n    // (1l)\n    public static long sumToN(long n) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_60_sum_to_n.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(sumToN((1l)) == (1l));\n    assert(sumToN((6l)) == (21l));\n    assert(sumToN((11l)) == (66l));\n    assert(sumToN((30l)) == (465l));\n    assert(sumToN((100l)) == (5050l));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_60_sum_to_n",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// sum_to_n is a function that sums numbers from 1 to n.\n// >>> sum_to_n((30))\n// (465)\n// >>> sum_to_n((100))\n// (5050)\n// >>> sum_to_n((5))\n// (15)\n// >>> sum_to_n((10))\n// (55)\n// >>> sum_to_n((1))\n// (1)\nlong sum_to_n(long n) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_60_sum_to_n.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = sum_to_n;\n    assert(candidate((1)) == (1));\n    assert(candidate((6)) == (21));\n    assert(candidate((11)) == (66));\n    assert(candidate((30)) == (465));\n    assert(candidate((100)) == (5050));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 64,
+   "python": {
+    "task_id": "HumanEval/64",
+    "prompt": "\nFIX = \"\"\"\nAdd more test cases.\n\"\"\"\n\ndef vowels_count(s):\n    \"\"\"Write a function vowels_count which takes a string representing\n    a word as input and returns the number of vowels in the string.\n    Vowels in this case are 'a', 'e', 'i', 'o', 'u'. Here, 'y' is also a\n    vowel, but only when it is at the end of the given word.\n\n    Example:\n    >>> vowels_count(\"abcde\")\n    2\n    >>> vowels_count(\"ACEDY\")\n    3\n    \"\"\"\n",
+    "entry_point": "vowels_count",
+    "canonical_solution": "    vowels = \"aeiouAEIOU\"\n    n_vowels = sum(c in vowels for c in s)\n    if s[-1] == 'y' or s[-1] == 'Y':\n        n_vowels += 1\n    return n_vowels\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate(\"abcde\") == 2, \"Test 1\"\n    assert candidate(\"Alone\") == 3, \"Test 2\"\n    assert candidate(\"key\") == 2, \"Test 3\"\n    assert candidate(\"bye\") == 1, \"Test 4\"\n    assert candidate(\"keY\") == 2, \"Test 5\"\n    assert candidate(\"bYe\") == 1, \"Test 6\"\n    assert candidate(\"ACEDY\") == 3, \"Test 7\"\n\n    # Check some edge cases that are easy to work out by hand.\n    assert True, \"This prints if this assert fails 2 (also good for debugging!)\"\n\n"
+   },
+   "js": {
+    "name": "HumanEval_64_vowels_count",
+    "language": "js",
+    "prompt": "//Write a function vowels_count which takes a string representing\n// a word as input and returns the number of vowels in the string.\n// Vowels in this case are 'a', 'e', 'i', 'o', 'u'. Here, 'y' is also a\n// vowel, but only when it is at the end of the given word.\n// Example:\n// >>> vowels_count(\"abcde\")\n// 2\n// >>> vowels_count(\"ACEDY\")\n// 3\nfunction vowels_count(s){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_64_vowels_count.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = vowels_count;\n  assert.deepEqual(candidate(\"abcde\"),2);\n  assert.deepEqual(candidate(\"Alone\"),3);\n  assert.deepEqual(candidate(\"key\"),2);\n  assert.deepEqual(candidate(\"bye\"),1);\n  assert.deepEqual(candidate(\"keY\"),2);\n  assert.deepEqual(candidate(\"bYe\"),1);\n  assert.deepEqual(candidate(\"ACEDY\"),3);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_64_vowels_count",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Write a function vowels_count which takes a string representing\n    // a word as input and returns the number of vowels in the string.\n    // Vowels in this case are 'a', 'e', 'i', 'o', 'u'. Here, 'y' is also a\n    // vowel, but only when it is at the end of the given word.\n    // Example:\n    // >>> vowelsCount((\"abcde\"))\n    // (2l)\n    // >>> vowelsCount((\"ACEDY\"))\n    // (3l)\n    public static long vowelsCount(String s) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_64_vowels_count.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(vowelsCount((\"abcde\")) == (2l));\n    assert(vowelsCount((\"Alone\")) == (3l));\n    assert(vowelsCount((\"key\")) == (2l));\n    assert(vowelsCount((\"bye\")) == (1l));\n    assert(vowelsCount((\"keY\")) == (2l));\n    assert(vowelsCount((\"bYe\")) == (1l));\n    assert(vowelsCount((\"ACEDY\")) == (3l));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_64_vowels_count",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Write a function vowels_count which takes a string representing\n// a word as input and returns the number of vowels in the string.\n// Vowels in this case are 'a', 'e', 'i', 'o', 'u'. Here, 'y' is also a\n// vowel, but only when it is at the end of the given word.\n// Example:\n// >>> vowels_count((\"abcde\"))\n// (2)\n// >>> vowels_count((\"ACEDY\"))\n// (3)\nlong vowels_count(std::string s) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_64_vowels_count.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = vowels_count;\n    assert(candidate((\"abcde\")) == (2));\n    assert(candidate((\"Alone\")) == (3));\n    assert(candidate((\"key\")) == (2));\n    assert(candidate((\"bye\")) == (1));\n    assert(candidate((\"keY\")) == (2));\n    assert(candidate((\"bYe\")) == (1));\n    assert(candidate((\"ACEDY\")) == (3));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 76,
+   "python": {
+    "task_id": "HumanEval/76",
+    "prompt": "\ndef is_simple_power(x, n):\n    \"\"\"Your task is to write a function that returns true if a number x is a simple\n    power of n and false in other cases.\n    x is a simple power of n if n**int=x\n    For example:\n    is_simple_power(1, 4) => true\n    is_simple_power(2, 2) => true\n    is_simple_power(8, 2) => true\n    is_simple_power(3, 2) => false\n    is_simple_power(3, 1) => false\n    is_simple_power(5, 3) => false\n    \"\"\"\n",
+    "entry_point": "is_simple_power",
+    "canonical_solution": "    if (n == 1): \n        return (x == 1) \n    power = 1\n    while (power < x): \n        power = power * n \n    return (power == x) \n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate(16, 2)== True, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate(143214, 16)== False, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate(4, 2)==True, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate(9, 3)==True, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate(16, 4)==True, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate(24, 2)==False, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate(128, 4)==False, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate(12, 6)==False, \"This prints if this assert fails 1 (good for debugging!)\"\n\n    # Check some edge cases that are easy to work out by hand.\n    assert candidate(1, 1)==True, \"This prints if this assert fails 2 (also good for debugging!)\"\n    assert candidate(1, 12)==True, \"This prints if this assert fails 2 (also good for debugging!)\"\n\n"
+   },
+   "js": {
+    "name": "HumanEval_76_is_simple_power",
+    "language": "js",
+    "prompt": "//Your task is to write a function that returns true if a number x is a simple\n// power of n and false in other cases.\n// x is a simple power of n if n**int=x\n// For example:\n// >>> is_simple_power(1, 4)\n// true\n// >>> is_simple_power(2, 2)\n// true\n// >>> is_simple_power(8, 2)\n// true\n// >>> is_simple_power(3, 2)\n// false\n// >>> is_simple_power(3, 1)\n// false\n// >>> is_simple_power(5, 3)\n// false\nfunction is_simple_power(x, n){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_76_is_simple_power.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = is_simple_power;\n  assert.deepEqual(candidate(16, 2),true);\n  assert.deepEqual(candidate(143214, 16),false);\n  assert.deepEqual(candidate(4, 2),true);\n  assert.deepEqual(candidate(9, 3),true);\n  assert.deepEqual(candidate(16, 4),true);\n  assert.deepEqual(candidate(24, 2),false);\n  assert.deepEqual(candidate(128, 4),false);\n  assert.deepEqual(candidate(12, 6),false);\n  assert.deepEqual(candidate(1, 1),true);\n  assert.deepEqual(candidate(1, 12),true);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_76_is_simple_power",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Your task is to write a function that returns true if a number x is a simple\n    // power of n and false in other cases.\n    // x is a simple power of n if n**int=x\n    // For example:\n    // >>> isSimplePower((1l), (4l))\n    // (true)\n    // >>> isSimplePower((2l), (2l))\n    // (true)\n    // >>> isSimplePower((8l), (2l))\n    // (true)\n    // >>> isSimplePower((3l), (2l))\n    // (false)\n    // >>> isSimplePower((3l), (1l))\n    // (false)\n    // >>> isSimplePower((5l), (3l))\n    // (false)\n    public static boolean isSimplePower(long x, long n) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_76_is_simple_power.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(isSimplePower((16l), (2l)) == (true));\n    assert(isSimplePower((143214l), (16l)) == (false));\n    assert(isSimplePower((4l), (2l)) == (true));\n    assert(isSimplePower((9l), (3l)) == (true));\n    assert(isSimplePower((16l), (4l)) == (true));\n    assert(isSimplePower((24l), (2l)) == (false));\n    assert(isSimplePower((128l), (4l)) == (false));\n    assert(isSimplePower((12l), (6l)) == (false));\n    assert(isSimplePower((1l), (1l)) == (true));\n    assert(isSimplePower((1l), (12l)) == (true));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_76_is_simple_power",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Your task is to write a function that returns true if a number x is a simple\n// power of n and false in other cases.\n// x is a simple power of n if n**int=x\n// For example:\n// >>> is_simple_power((1), (4))\n// (true)\n// >>> is_simple_power((2), (2))\n// (true)\n// >>> is_simple_power((8), (2))\n// (true)\n// >>> is_simple_power((3), (2))\n// (false)\n// >>> is_simple_power((3), (1))\n// (false)\n// >>> is_simple_power((5), (3))\n// (false)\nbool is_simple_power(long x, long n) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_76_is_simple_power.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = is_simple_power;\n    assert(candidate((16), (2)) == (true));\n    assert(candidate((143214), (16)) == (false));\n    assert(candidate((4), (2)) == (true));\n    assert(candidate((9), (3)) == (true));\n    assert(candidate((16), (4)) == (true));\n    assert(candidate((24), (2)) == (false));\n    assert(candidate((128), (4)) == (false));\n    assert(candidate((12), (6)) == (false));\n    assert(candidate((1), (1)) == (true));\n    assert(candidate((1), (12)) == (true));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 84,
+   "python": {
+    "task_id": "HumanEval/84",
+    "prompt": "\ndef solve(N):\n    \"\"\"Given a positive integer N, return the total sum of its digits in binary.\n    \n    Example\n        For N = 1000, the sum of digits will be 1 the output should be \"1\".\n        For N = 150, the sum of digits will be 6 the output should be \"110\".\n        For N = 147, the sum of digits will be 12 the output should be \"1100\".\n    \n    Variables:\n        @N integer\n             Constraints: 0 \u2264 N \u2264 10000.\n    Output:\n         a string of binary number\n    \"\"\"\n",
+    "entry_point": "solve",
+    "canonical_solution": "    return bin(sum(int(i) for i in str(N)))[2:]\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert True, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate(1000) == \"1\", \"Error\"\n    assert candidate(150) == \"110\", \"Error\"\n    assert candidate(147) == \"1100\", \"Error\"\n\n    # Check some edge cases that are easy to work out by hand.\n    assert True, \"This prints if this assert fails 2 (also good for debugging!)\"\n    assert candidate(333) == \"1001\", \"Error\"\n    assert candidate(963) == \"10010\", \"Error\"\n\n"
+   },
+   "js": {
+    "name": "HumanEval_84_solve",
+    "language": "js",
+    "prompt": "//Given a positive integer N, return the total sum of its digits in binary.\n// Example\n// >>> solve(1000)\n// \"1\"\n// >>> solve(150)\n// \"110\"\n// >>> solve(147)\n// \"1100\"\n// Variables:\n// @N integer\n// Constraints: 0 \u2264 N \u2264 10000.\n// Output:\n// a string of binary number\nfunction solve(N){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_84_solve.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = solve;\n  assert.deepEqual(candidate(1000),\"1\");\n  assert.deepEqual(candidate(150),\"110\");\n  assert.deepEqual(candidate(147),\"1100\");\n  assert.deepEqual(candidate(333),\"1001\");\n  assert.deepEqual(candidate(963),\"10010\");\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_84_solve",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Given a positive integer N, return the total sum of its digits in binary.\n    // Example\n    // >>> solve((1000l))\n    // (\"1\")\n    // >>> solve((150l))\n    // (\"110\")\n    // >>> solve((147l))\n    // (\"1100\")\n    // Variables:\n    // @N integer\n    // Constraints: 0 \u2264 N \u2264 10000.\n    // Output:\n    // a string of binary number\n    public static String solve(long N) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_84_solve.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(solve((1000l)).equals((\"1\")));\n    assert(solve((150l)).equals((\"110\")));\n    assert(solve((147l)).equals((\"1100\")));\n    assert(solve((333l)).equals((\"1001\")));\n    assert(solve((963l)).equals((\"10010\")));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_84_solve",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Given a positive integer N, return the total sum of its digits in binary.\n// Example\n// >>> solve((1000))\n// (\"1\")\n// >>> solve((150))\n// (\"110\")\n// >>> solve((147))\n// (\"1100\")\n// Variables:\n// @N integer\n// Constraints: 0 \u2264 N \u2264 10000.\n// Output:\n// a string of binary number\nstd::string solve(long N) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_84_solve.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = solve;\n    assert(candidate((1000)) == (\"1\"));\n    assert(candidate((150)) == (\"110\"));\n    assert(candidate((147)) == (\"1100\"));\n    assert(candidate((333)) == (\"1001\"));\n    assert(candidate((963)) == (\"10010\"));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 111,
+   "python": {
+    "task_id": "HumanEval/111",
+    "prompt": "\ndef histogram(test):\n    \"\"\"Given a string representing a space separated lowercase letters, return a dictionary\n    of the letter with the most repetition and containing the corresponding count.\n    If several letters have the same occurrence, return all of them.\n    \n    Example:\n    histogram('a b c') == {'a': 1, 'b': 1, 'c': 1}\n    histogram('a b b a') == {'a': 2, 'b': 2}\n    histogram('a b c a b') == {'a': 2, 'b': 2}\n    histogram('b b b b a') == {'b': 4}\n    histogram('') == {}\n\n    \"\"\"\n",
+    "entry_point": "histogram",
+    "canonical_solution": "    dict1={}\n    list1=test.split(\" \")\n    t=0\n\n    for i in list1:\n        if(list1.count(i)>t) and i!='':\n            t=list1.count(i)\n    if t>0:\n        for i in list1:\n            if(list1.count(i)==t):\n                \n                dict1[i]=t\n    return dict1\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate('a b b a') == {'a':2,'b': 2}, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate('a b c a b') == {'a': 2, 'b': 2}, \"This prints if this assert fails 2 (good for debugging!)\"\n    assert candidate('a b c d g') == {'a': 1, 'b': 1, 'c': 1, 'd': 1, 'g': 1}, \"This prints if this assert fails 3 (good for debugging!)\"\n    assert candidate('r t g') == {'r': 1,'t': 1,'g': 1}, \"This prints if this assert fails 4 (good for debugging!)\"\n    assert candidate('b b b b a') == {'b': 4}, \"This prints if this assert fails 5 (good for debugging!)\"\n    assert candidate('r t g') == {'r': 1,'t': 1,'g': 1}, \"This prints if this assert fails 6 (good for debugging!)\"\n    \n    \n    # Check some edge cases that are easy to work out by hand.\n    assert candidate('') == {}, \"This prints if this assert fails 7 (also good for debugging!)\"\n    assert candidate('a') == {'a': 1}, \"This prints if this assert fails 8 (also good for debugging!)\"\n\n"
+   },
+   "js": {
+    "name": "HumanEval_111_histogram",
+    "language": "js",
+    "prompt": "//Given a string representing a space separated lowercase letters, return an object\n// of the letter with the most repetition and containing the corresponding count.\n// If several letters have the same occurrence, return all of them.\n// Example:\n// >>> histogram(\"a b c\")\n// {\"a\": 1, \"b\": 1, \"c\": 1}\n// >>> histogram(\"a b b a\")\n// {\"a\": 2, \"b\": 2}\n// >>> histogram(\"a b c a b\")\n// {\"a\": 2, \"b\": 2}\n// >>> histogram(\"b b b b a\")\n// {\"b\": 4}\n// >>> histogram(\"\")\n// {}\nfunction histogram(test){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_111_histogram.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = histogram;\n  assert.deepEqual(candidate(\"a b b a\"),{\"a\": 2, \"b\": 2});\n  assert.deepEqual(candidate(\"a b c a b\"),{\"a\": 2, \"b\": 2});\n  assert.deepEqual(candidate(\"a b c d g\"),{\"a\": 1, \"b\": 1, \"c\": 1, \"d\": 1, \"g\": 1});\n  assert.deepEqual(candidate(\"r t g\"),{\"r\": 1, \"t\": 1, \"g\": 1});\n  assert.deepEqual(candidate(\"b b b b a\"),{\"b\": 4});\n  assert.deepEqual(candidate(\"r t g\"),{\"r\": 1, \"t\": 1, \"g\": 1});\n  assert.deepEqual(candidate(\"\"),{});\n  assert.deepEqual(candidate(\"a\"),{\"a\": 1});\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_111_histogram",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Given a string representing a space separated lowercase letters, return a hash map\n    // of the letter with the most repetition and containing the corresponding count.\n    // If several letters have the same occurrence, return all of them.\n    // Example:\n    // >>> histogram((\"a b c\"))\n    // (new HashMap<String,Long>(Map.of(\"a\", 1l, \"b\", 1l, \"c\", 1l)))\n    // >>> histogram((\"a b b a\"))\n    // (new HashMap<String,Long>(Map.of(\"a\", 2l, \"b\", 2l)))\n    // >>> histogram((\"a b c a b\"))\n    // (new HashMap<String,Long>(Map.of(\"a\", 2l, \"b\", 2l)))\n    // >>> histogram((\"b b b b a\"))\n    // (new HashMap<String,Long>(Map.of(\"b\", 4l)))\n    // >>> histogram((\"\"))\n    // (new HashMap<String,Long>())\n    public static HashMap<String,Long> histogram(String test) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_111_histogram.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(histogram((\"a b b a\")).equals((new HashMap<String,Long>(Map.of(\"a\", 2l, \"b\", 2l)))));\n    assert(histogram((\"a b c a b\")).equals((new HashMap<String,Long>(Map.of(\"a\", 2l, \"b\", 2l)))));\n    assert(histogram((\"a b c d g\")).equals((new HashMap<String,Long>(Map.of(\"a\", 1l, \"b\", 1l, \"c\", 1l, \"d\", 1l, \"g\", 1l)))));\n    assert(histogram((\"r t g\")).equals((new HashMap<String,Long>(Map.of(\"r\", 1l, \"t\", 1l, \"g\", 1l)))));\n    assert(histogram((\"b b b b a\")).equals((new HashMap<String,Long>(Map.of(\"b\", 4l)))));\n    assert(histogram((\"r t g\")).equals((new HashMap<String,Long>(Map.of(\"r\", 1l, \"t\", 1l, \"g\", 1l)))));\n    assert(histogram((\"\")).equals((new HashMap<String,Long>())));\n    assert(histogram((\"a\")).equals((new HashMap<String,Long>(Map.of(\"a\", 1l)))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_111_histogram",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Given a string representing a space separated lowercase letters, return a map\n// of the letter with the most repetition and containing the corresponding count.\n// If several letters have the same occurrence, return all of them.\n// Example:\n// >>> histogram((\"a b c\"))\n// (std::map<std::string,long>({{\"a\", 1}, {\"b\", 1}, {\"c\", 1}}))\n// >>> histogram((\"a b b a\"))\n// (std::map<std::string,long>({{\"a\", 2}, {\"b\", 2}}))\n// >>> histogram((\"a b c a b\"))\n// (std::map<std::string,long>({{\"a\", 2}, {\"b\", 2}}))\n// >>> histogram((\"b b b b a\"))\n// (std::map<std::string,long>({{\"b\", 4}}))\n// >>> histogram((\"\"))\n// (std::map<std::string,long>())\nstd::map<std::string,long> histogram(std::string test) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_111_histogram.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = histogram;\n    assert(candidate((\"a b b a\")) == (std::map<std::string,long>({{\"a\", 2}, {\"b\", 2}})));\n    assert(candidate((\"a b c a b\")) == (std::map<std::string,long>({{\"a\", 2}, {\"b\", 2}})));\n    assert(candidate((\"a b c d g\")) == (std::map<std::string,long>({{\"a\", 1}, {\"b\", 1}, {\"c\", 1}, {\"d\", 1}, {\"g\", 1}})));\n    assert(candidate((\"r t g\")) == (std::map<std::string,long>({{\"r\", 1}, {\"t\", 1}, {\"g\", 1}})));\n    assert(candidate((\"b b b b a\")) == (std::map<std::string,long>({{\"b\", 4}})));\n    assert(candidate((\"r t g\")) == (std::map<std::string,long>({{\"r\", 1}, {\"t\", 1}, {\"g\", 1}})));\n    assert(candidate((\"\")) == (std::map<std::string,long>()));\n    assert(candidate((\"a\")) == (std::map<std::string,long>({{\"a\", 1}})));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 116,
+   "python": {
+    "task_id": "HumanEval/116",
+    "prompt": "\ndef sort_array(arr):\n    \"\"\"\n    In this Kata, you have to sort an array of non-negative integers according to\n    number of ones in their binary representation in ascending order.\n    For similar number of ones, sort based on decimal value.\n\n    It must be implemented like this:\n    >>> sort_array([1, 5, 2, 3, 4]) == [1, 2, 3, 4, 5]\n    >>> sort_array([-2, -3, -4, -5, -6]) == [-6, -5, -4, -3, -2]\n    >>> sort_array([1, 0, 2, 3, 4]) [0, 1, 2, 3, 4]\n    \"\"\"\n",
+    "entry_point": "sort_array",
+    "canonical_solution": "    return sorted(sorted(arr), key=lambda x: bin(x)[2:].count('1'))\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert True, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([1,5,2,3,4]) == [1, 2, 4, 3, 5]\n    assert candidate([-2,-3,-4,-5,-6]) == [-4, -2, -6, -5, -3]\n    assert candidate([1,0,2,3,4]) == [0, 1, 2, 4, 3]\n    assert candidate([]) == []\n    assert candidate([2,5,77,4,5,3,5,7,2,3,4]) == [2, 2, 4, 4, 3, 3, 5, 5, 5, 7, 77]\n    assert candidate([3,6,44,12,32,5]) == [32, 3, 5, 6, 12, 44]\n    assert candidate([2,4,8,16,32]) == [2, 4, 8, 16, 32]\n    assert candidate([2,4,8,16,32]) == [2, 4, 8, 16, 32]\n\n    # Check some edge cases that are easy to work out by hand.\n    assert True, \"This prints if this assert fails 2 (also good for debugging!)\"\n\n"
+   },
+   "js": {
+    "name": "HumanEval_116_sort_array",
+    "language": "js",
+    "prompt": "//In this Kata, you have to sort an array of non-negative integers according to\n// number of ones in their binary representation in ascending order.\n// For similar number of ones, sort based on decimal value.\n// It must be implemented like this:\n// >>> sort_array([1, 5, 2, 3, 4])\n// [1, 2, 3, 4, 5]\n// >>> sort_array([-2, -3, -4, -5, -6])\n// [-6, -5, -4, -3, -2]\n// >>> sort_array([1, 0, 2, 3, 4])\n// [0, 1, 2, 3, 4]\nfunction sort_array(arr){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_116_sort_array.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = sort_array;\n  assert.deepEqual(candidate([1, 5, 2, 3, 4]),[1, 2, 4, 3, 5]);\n  assert.deepEqual(candidate([-2, -3, -4, -5, -6]),[-4, -2, -6, -5, -3]);\n  assert.deepEqual(candidate([1, 0, 2, 3, 4]),[0, 1, 2, 4, 3]);\n  assert.deepEqual(candidate([]),[]);\n  assert.deepEqual(candidate([2, 5, 77, 4, 5, 3, 5, 7, 2, 3, 4]),[2, 2, 4, 4, 3, 3, 5, 5, 5, 7, 77]);\n  assert.deepEqual(candidate([3, 6, 44, 12, 32, 5]),[32, 3, 5, 6, 12, 44]);\n  assert.deepEqual(candidate([2, 4, 8, 16, 32]),[2, 4, 8, 16, 32]);\n  assert.deepEqual(candidate([2, 4, 8, 16, 32]),[2, 4, 8, 16, 32]);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_116_sort_array",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // In this Kata, you have to sort an array array list of non-negative integers according to\n    // number of ones in their binary representation in ascending order.\n    // For similar number of ones, sort based on decimal value.\n    // It must be implemented like this:\n    // >>> sortArray((new ArrayList<Long>(Arrays.asList((long)1l, (long)5l, (long)2l, (long)3l, (long)4l))))\n    // (new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l, (long)4l, (long)5l)))\n    // >>> sortArray((new ArrayList<Long>(Arrays.asList((long)-2l, (long)-3l, (long)-4l, (long)-5l, (long)-6l))))\n    // (new ArrayList<Long>(Arrays.asList((long)-6l, (long)-5l, (long)-4l, (long)-3l, (long)-2l)))\n    // >>> sortArray((new ArrayList<Long>(Arrays.asList((long)1l, (long)0l, (long)2l, (long)3l, (long)4l))))\n    // (new ArrayList<Long>(Arrays.asList((long)0l, (long)1l, (long)2l, (long)3l, (long)4l)))\n    public static ArrayList<Long> sortArray(ArrayList<Long> arr) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_116_sort_array.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(sortArray((new ArrayList<Long>(Arrays.asList((long)1l, (long)5l, (long)2l, (long)3l, (long)4l)))).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)4l, (long)3l, (long)5l)))));\n    assert(sortArray((new ArrayList<Long>(Arrays.asList((long)-2l, (long)-3l, (long)-4l, (long)-5l, (long)-6l)))).equals((new ArrayList<Long>(Arrays.asList((long)-4l, (long)-2l, (long)-6l, (long)-5l, (long)-3l)))));\n    assert(sortArray((new ArrayList<Long>(Arrays.asList((long)1l, (long)0l, (long)2l, (long)3l, (long)4l)))).equals((new ArrayList<Long>(Arrays.asList((long)0l, (long)1l, (long)2l, (long)4l, (long)3l)))));\n    assert(sortArray((new ArrayList<Long>(Arrays.asList()))).equals((new ArrayList<Long>(Arrays.asList()))));\n    assert(sortArray((new ArrayList<Long>(Arrays.asList((long)2l, (long)5l, (long)77l, (long)4l, (long)5l, (long)3l, (long)5l, (long)7l, (long)2l, (long)3l, (long)4l)))).equals((new ArrayList<Long>(Arrays.asList((long)2l, (long)2l, (long)4l, (long)4l, (long)3l, (long)3l, (long)5l, (long)5l, (long)5l, (long)7l, (long)77l)))));\n    assert(sortArray((new ArrayList<Long>(Arrays.asList((long)3l, (long)6l, (long)44l, (long)12l, (long)32l, (long)5l)))).equals((new ArrayList<Long>(Arrays.asList((long)32l, (long)3l, (long)5l, (long)6l, (long)12l, (long)44l)))));\n    assert(sortArray((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)8l, (long)16l, (long)32l)))).equals((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)8l, (long)16l, (long)32l)))));\n    assert(sortArray((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)8l, (long)16l, (long)32l)))).equals((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)8l, (long)16l, (long)32l)))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_116_sort_array",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// In this Kata, you have to sort a vector of non-negative integers according to\n// number of ones in their binary representation in ascending order.\n// For similar number of ones, sort based on decimal value.\n// It must be implemented like this:\n// >>> sort_array((std::vector<long>({(long)1, (long)5, (long)2, (long)3, (long)4})))\n// (std::vector<long>({(long)1, (long)2, (long)3, (long)4, (long)5}))\n// >>> sort_array((std::vector<long>({(long)-2, (long)-3, (long)-4, (long)-5, (long)-6})))\n// (std::vector<long>({(long)-6, (long)-5, (long)-4, (long)-3, (long)-2}))\n// >>> sort_array((std::vector<long>({(long)1, (long)0, (long)2, (long)3, (long)4})))\n// (std::vector<long>({(long)0, (long)1, (long)2, (long)3, (long)4}))\nstd::vector<long> sort_array(std::vector<long> arr) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_116_sort_array.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = sort_array;\n    assert(candidate((std::vector<long>({(long)1, (long)5, (long)2, (long)3, (long)4}))) == (std::vector<long>({(long)1, (long)2, (long)4, (long)3, (long)5})));\n    assert(candidate((std::vector<long>({(long)-2, (long)-3, (long)-4, (long)-5, (long)-6}))) == (std::vector<long>({(long)-4, (long)-2, (long)-6, (long)-5, (long)-3})));\n    assert(candidate((std::vector<long>({(long)1, (long)0, (long)2, (long)3, (long)4}))) == (std::vector<long>({(long)0, (long)1, (long)2, (long)4, (long)3})));\n    assert(candidate((std::vector<long>())) == (std::vector<long>()));\n    assert(candidate((std::vector<long>({(long)2, (long)5, (long)77, (long)4, (long)5, (long)3, (long)5, (long)7, (long)2, (long)3, (long)4}))) == (std::vector<long>({(long)2, (long)2, (long)4, (long)4, (long)3, (long)3, (long)5, (long)5, (long)5, (long)7, (long)77})));\n    assert(candidate((std::vector<long>({(long)3, (long)6, (long)44, (long)12, (long)32, (long)5}))) == (std::vector<long>({(long)32, (long)3, (long)5, (long)6, (long)12, (long)44})));\n    assert(candidate((std::vector<long>({(long)2, (long)4, (long)8, (long)16, (long)32}))) == (std::vector<long>({(long)2, (long)4, (long)8, (long)16, (long)32})));\n    assert(candidate((std::vector<long>({(long)2, (long)4, (long)8, (long)16, (long)32}))) == (std::vector<long>({(long)2, (long)4, (long)8, (long)16, (long)32})));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 130,
+   "python": {
+    "task_id": "HumanEval/130",
+    "prompt": "\ndef tri(n):\n    \"\"\"Everyone knows Fibonacci sequence, it was studied deeply by mathematicians in \n    the last couple centuries. However, what people don't know is Tribonacci sequence.\n    Tribonacci sequence is defined by the recurrence:\n    tri(1) = 3\n    tri(n) = 1 + n / 2, if n is even.\n    tri(n) =  tri(n - 1) + tri(n - 2) + tri(n + 1), if n is odd.\n    For example:\n    tri(2) = 1 + (2 / 2) = 2\n    tri(4) = 3\n    tri(3) = tri(2) + tri(1) + tri(4)\n           = 2 + 3 + 3 = 8 \n    You are given a non-negative integer number n, you have to a return a list of the \n    first n + 1 numbers of the Tribonacci sequence.\n    Examples:\n    tri(3) = [1, 3, 2, 8]\n    \"\"\"\n",
+    "entry_point": "tri",
+    "canonical_solution": "    if n == 0:\n        return [1]\n    my_tri = [1, 3]\n    for i in range(2, n + 1):\n        if i % 2 == 0:\n            my_tri.append(i / 2 + 1)\n        else:\n            my_tri.append(my_tri[i - 1] + my_tri[i - 2] + (i + 3) / 2)\n    return my_tri\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    \n    assert candidate(3) == [1, 3, 2.0, 8.0]\n    assert candidate(4) == [1, 3, 2.0, 8.0, 3.0]\n    assert candidate(5) == [1, 3, 2.0, 8.0, 3.0, 15.0]\n    assert candidate(6) == [1, 3, 2.0, 8.0, 3.0, 15.0, 4.0]\n    assert candidate(7) == [1, 3, 2.0, 8.0, 3.0, 15.0, 4.0, 24.0]\n    assert candidate(8) == [1, 3, 2.0, 8.0, 3.0, 15.0, 4.0, 24.0, 5.0]\n    assert candidate(9) == [1, 3, 2.0, 8.0, 3.0, 15.0, 4.0, 24.0, 5.0, 35.0]\n    assert candidate(20) == [1, 3, 2.0, 8.0, 3.0, 15.0, 4.0, 24.0, 5.0, 35.0, 6.0, 48.0, 7.0, 63.0, 8.0, 80.0, 9.0, 99.0, 10.0, 120.0, 11.0]\n\n    # Check some edge cases that are easy to work out by hand.\n    assert candidate(0) == [1]\n    assert candidate(1) == [1, 3]\n"
+   },
+   "js": {
+    "name": "HumanEval_130_tri",
+    "language": "js",
+    "prompt": "//Everyone knows Fibonacci sequence, it was studied deeply by mathematicians in \n// the last couple centuries. However, what people don't know is Tribonacci sequence.\n// Tribonacci sequence is defined by the recurrence:\n// tri(1) = 3\n// tri(n) = 1 + n / 2, if n is even.\n// tri(n) =  tri(n - 1) + tri(n - 2) + tri(n + 1), if n is odd.\n// For example:\n// tri(2) = 1 + (2 / 2) = 2\n// tri(4) = 3\n// tri(3) = tri(2) + tri(1) + tri(4)\n// = 2 + 3 + 3 = 8 \n// You are given a non-negative integer number n, you have to a return an array of the \n// first n + 1 numbers of the Tribonacci sequence.\n// Examples:\n// >>> tri(3)\n// [1, 3, 2, 8]\nfunction tri(n){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_130_tri.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = tri;\n  assert.deepEqual(candidate(3),[1, 3, 2, 8]);\n  assert.deepEqual(candidate(4),[1, 3, 2, 8, 3]);\n  assert.deepEqual(candidate(5),[1, 3, 2, 8, 3, 15]);\n  assert.deepEqual(candidate(6),[1, 3, 2, 8, 3, 15, 4]);\n  assert.deepEqual(candidate(7),[1, 3, 2, 8, 3, 15, 4, 24]);\n  assert.deepEqual(candidate(8),[1, 3, 2, 8, 3, 15, 4, 24, 5]);\n  assert.deepEqual(candidate(9),[1, 3, 2, 8, 3, 15, 4, 24, 5, 35]);\n  assert.deepEqual(candidate(20),[1, 3, 2, 8, 3, 15, 4, 24, 5, 35, 6, 48, 7, 63, 8, 80, 9, 99, 10, 120, 11]);\n  assert.deepEqual(candidate(0),[1]);\n  assert.deepEqual(candidate(1),[1, 3]);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_130_tri",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Everyone knows Fibonacci sequence, it was studied deeply by mathematicians in \n    // the last couple centuries. However, what people don't know is Tribonacci sequence.\n    // Tribonacci sequence is defined by the recurrence:\n    // tri(1) = 3\n    // tri(n) = 1 + n / 2, if n is even.\n    // tri(n) =  tri(n - 1) + tri(n - 2) + tri(n + 1), if n is odd.\n    // For example:\n    // tri(2) = 1 + (2 / 2) = 2\n    // tri(4) = 3\n    // tri(3) = tri(2) + tri(1) + tri(4)\n    // = 2 + 3 + 3 = 8 \n    // You are given a non-negative integer number n, you have to a return an array array list of the \n    // first n + 1 numbers of the Tribonacci sequence.\n    // Examples:\n    // >>> tri((3l))\n    // (new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)8l)))\n    public static ArrayList<Long> tri(long n) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_130_tri.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(tri((3l)).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)8l)))));\n    assert(tri((4l)).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)8l, (long)3l)))));\n    assert(tri((5l)).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)8l, (long)3l, (long)15l)))));\n    assert(tri((6l)).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)8l, (long)3l, (long)15l, (long)4l)))));\n    assert(tri((7l)).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)8l, (long)3l, (long)15l, (long)4l, (long)24l)))));\n    assert(tri((8l)).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)8l, (long)3l, (long)15l, (long)4l, (long)24l, (long)5l)))));\n    assert(tri((9l)).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)8l, (long)3l, (long)15l, (long)4l, (long)24l, (long)5l, (long)35l)))));\n    assert(tri((20l)).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)8l, (long)3l, (long)15l, (long)4l, (long)24l, (long)5l, (long)35l, (long)6l, (long)48l, (long)7l, (long)63l, (long)8l, (long)80l, (long)9l, (long)99l, (long)10l, (long)120l, (long)11l)))));\n    assert(tri((0l)).equals((new ArrayList<Long>(Arrays.asList((long)1l)))));\n    assert(tri((1l)).equals((new ArrayList<Long>(Arrays.asList((long)1l, (long)3l)))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_130_tri",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Everyone knows Fibonacci sequence, it was studied deeply by mathematicians in \n// the last couple centuries. However, what people don't know is Tribonacci sequence.\n// Tribonacci sequence is defined by the recurrence:\n// tri(1) = 3\n// tri(n) = 1 + n / 2, if n is even.\n// tri(n) =  tri(n - 1) + tri(n - 2) + tri(n + 1), if n is odd.\n// For example:\n// tri(2) = 1 + (2 / 2) = 2\n// tri(4) = 3\n// tri(3) = tri(2) + tri(1) + tri(4)\n// = 2 + 3 + 3 = 8 \n// You are given a non-negative integer number n, you have to a return a vector of the \n// first n + 1 numbers of the Tribonacci sequence.\n// Examples:\n// >>> tri((3))\n// (std::vector<long>({(long)1, (long)3, (long)2, (long)8}))\nstd::vector<long> tri(long n) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_130_tri.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = tri;\n    assert(candidate((3)) == (std::vector<long>({(long)1, (long)3, (long)2, (long)8})));\n    assert(candidate((4)) == (std::vector<long>({(long)1, (long)3, (long)2, (long)8, (long)3})));\n    assert(candidate((5)) == (std::vector<long>({(long)1, (long)3, (long)2, (long)8, (long)3, (long)15})));\n    assert(candidate((6)) == (std::vector<long>({(long)1, (long)3, (long)2, (long)8, (long)3, (long)15, (long)4})));\n    assert(candidate((7)) == (std::vector<long>({(long)1, (long)3, (long)2, (long)8, (long)3, (long)15, (long)4, (long)24})));\n    assert(candidate((8)) == (std::vector<long>({(long)1, (long)3, (long)2, (long)8, (long)3, (long)15, (long)4, (long)24, (long)5})));\n    assert(candidate((9)) == (std::vector<long>({(long)1, (long)3, (long)2, (long)8, (long)3, (long)15, (long)4, (long)24, (long)5, (long)35})));\n    assert(candidate((20)) == (std::vector<long>({(long)1, (long)3, (long)2, (long)8, (long)3, (long)15, (long)4, (long)24, (long)5, (long)35, (long)6, (long)48, (long)7, (long)63, (long)8, (long)80, (long)9, (long)99, (long)10, (long)120, (long)11})));\n    assert(candidate((0)) == (std::vector<long>({(long)1})));\n    assert(candidate((1)) == (std::vector<long>({(long)1, (long)3})));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 133,
+   "python": {
+    "task_id": "HumanEval/133",
+    "prompt": "\n\ndef sum_squares(lst):\n    \"\"\"You are given a list of numbers.\n    You need to return the sum of squared numbers in the given list,\n    round each element in the list to the upper int(Ceiling) first.\n    Examples:\n    For lst = [1,2,3] the output should be 14\n    For lst = [1,4,9] the output should be 98\n    For lst = [1,3,5,7] the output should be 84\n    For lst = [1.4,4.2,0] the output should be 29\n    For lst = [-2.4,1,1] the output should be 6\n    \n\n    \"\"\"\n",
+    "entry_point": "sum_squares",
+    "canonical_solution": "    import math\n    squared = 0\n    for i in lst:\n        squared += math.ceil(i)**2\n    return squared\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate([1,2,3])==14, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([1.0,2,3])==14, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([1,3,5,7])==84, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([1.4,4.2,0])==29, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([-2.4,1,1])==6, \"This prints if this assert fails 1 (good for debugging!)\"\n\n    assert candidate([100,1,15,2])==10230, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([10000,10000])==200000000, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([-1.4,4.6,6.3])==75, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([-1.4,17.9,18.9,19.9])==1086, \"This prints if this assert fails 1 (good for debugging!)\"\n\n\n    # Check some edge cases that are easy to work out by hand.\n    assert candidate([0])==0, \"This prints if this assert fails 2 (also good for debugging!)\"\n    assert candidate([-1])==1, \"This prints if this assert fails 2 (also good for debugging!)\"\n    assert candidate([-1,1,0])==2, \"This prints if this assert fails 2 (also good for debugging!)\"\n\n"
+   },
+   "js": {
+    "name": "HumanEval_133_sum_squares",
+    "language": "js",
+    "prompt": "//You are given an array of numbers.\n// You need to return the sum of squared numbers in the given array,\n// round each element in the array to the upper int(Ceiling) first.\n// Examples:\n// >>> lst([1.0, 2.0, 3.0])\n// 14\n// >>> lst([1.0, 4.0, 9.0])\n// 98\n// >>> lst([1.0, 3.0, 5.0, 7.0])\n// 84\n// >>> lst([1.4, 4.2, 0.0])\n// 29\n// >>> lst([-2.4, 1.0, 1.0])\n// 6\nfunction sum_squares(lst){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_133_sum_squares.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = sum_squares;\n  assert.deepEqual(candidate([1.0, 2.0, 3.0]),14);\n  assert.deepEqual(candidate([1.0, 2.0, 3.0]),14);\n  assert.deepEqual(candidate([1.0, 3.0, 5.0, 7.0]),84);\n  assert.deepEqual(candidate([1.4, 4.2, 0.0]),29);\n  assert.deepEqual(candidate([-2.4, 1.0, 1.0]),6);\n  assert.deepEqual(candidate([100.0, 1.0, 15.0, 2.0]),10230);\n  assert.deepEqual(candidate([10000.0, 10000.0]),200000000);\n  assert.deepEqual(candidate([-1.4, 4.6, 6.3]),75);\n  assert.deepEqual(candidate([-1.4, 17.9, 18.9, 19.9]),1086);\n  assert.deepEqual(candidate([0.0]),0);\n  assert.deepEqual(candidate([-1.0]),1);\n  assert.deepEqual(candidate([-1.0, 1.0, 0.0]),2);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_133_sum_squares",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // You are given an array array list of numbers.\n    // You need to return the sum of squared numbers in the given array list,\n    // round each element in the array list to the upper int(Ceiling) first.\n    // Examples:\n    // >>> lst((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.0f))))\n    // (14l)\n    // >>> lst((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)4.0f, (float)9.0f))))\n    // (98l)\n    // >>> lst((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)3.0f, (float)5.0f, (float)7.0f))))\n    // (84l)\n    // >>> lst((new ArrayList<Float>(Arrays.asList((float)1.4f, (float)4.2f, (float)0.0f))))\n    // (29l)\n    // >>> lst((new ArrayList<Float>(Arrays.asList((float)-2.4f, (float)1.0f, (float)1.0f))))\n    // (6l)\n    public static long sumSquares(ArrayList<Float> lst) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_133_sum_squares.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.0f)))) == (14l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)2.0f, (float)3.0f)))) == (14l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)1.0f, (float)3.0f, (float)5.0f, (float)7.0f)))) == (84l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)1.4f, (float)4.2f, (float)0.0f)))) == (29l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)-2.4f, (float)1.0f, (float)1.0f)))) == (6l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)100.0f, (float)1.0f, (float)15.0f, (float)2.0f)))) == (10230l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)10000.0f, (float)10000.0f)))) == (200000000l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)-1.4f, (float)4.6f, (float)6.3f)))) == (75l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)-1.4f, (float)17.9f, (float)18.9f, (float)19.9f)))) == (1086l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)0.0f)))) == (0l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)-1.0f)))) == (1l));\n    assert(sumSquares((new ArrayList<Float>(Arrays.asList((float)-1.0f, (float)1.0f, (float)0.0f)))) == (2l));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_133_sum_squares",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// You are given a vector of numbers.\n// You need to return the sum of squared numbers in the given vector,\n// round each element in the vector to the upper int(Ceiling) first.\n// Examples:\n// >>> lst((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.0f})))\n// (14)\n// >>> lst((std::vector<float>({(float)1.0f, (float)4.0f, (float)9.0f})))\n// (98)\n// >>> lst((std::vector<float>({(float)1.0f, (float)3.0f, (float)5.0f, (float)7.0f})))\n// (84)\n// >>> lst((std::vector<float>({(float)1.4f, (float)4.2f, (float)0.0f})))\n// (29)\n// >>> lst((std::vector<float>({(float)-2.4f, (float)1.0f, (float)1.0f})))\n// (6)\nlong sum_squares(std::vector<float> lst) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_133_sum_squares.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = sum_squares;\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.0f}))) == (14));\n    assert(candidate((std::vector<float>({(float)1.0f, (float)2.0f, (float)3.0f}))) == (14));\n    assert(candidate((std::vector<float>({(float)1.0f, (float)3.0f, (float)5.0f, (float)7.0f}))) == (84));\n    assert(candidate((std::vector<float>({(float)1.4f, (float)4.2f, (float)0.0f}))) == (29));\n    assert(candidate((std::vector<float>({(float)-2.4f, (float)1.0f, (float)1.0f}))) == (6));\n    assert(candidate((std::vector<float>({(float)100.0f, (float)1.0f, (float)15.0f, (float)2.0f}))) == (10230));\n    assert(candidate((std::vector<float>({(float)10000.0f, (float)10000.0f}))) == (200000000));\n    assert(candidate((std::vector<float>({(float)-1.4f, (float)4.6f, (float)6.3f}))) == (75));\n    assert(candidate((std::vector<float>({(float)-1.4f, (float)17.9f, (float)18.9f, (float)19.9f}))) == (1086));\n    assert(candidate((std::vector<float>({(float)0.0f}))) == (0));\n    assert(candidate((std::vector<float>({(float)-1.0f}))) == (1));\n    assert(candidate((std::vector<float>({(float)-1.0f, (float)1.0f, (float)0.0f}))) == (2));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 136,
+   "python": {
+    "task_id": "HumanEval/136",
+    "prompt": "\ndef largest_smallest_integers(lst):\n    '''\n    Create a function that returns a tuple (a, b), where 'a' is\n    the largest of negative integers, and 'b' is the smallest\n    of positive integers in a list.\n    If there is no negative or positive integers, return them as None.\n\n    Examples:\n    largest_smallest_integers([2, 4, 1, 3, 5, 7]) == (None, 1)\n    largest_smallest_integers([]) == (None, None)\n    largest_smallest_integers([0]) == (None, None)\n    '''\n",
+    "entry_point": "largest_smallest_integers",
+    "canonical_solution": "    smallest = list(filter(lambda x: x < 0, lst))\n    largest = list(filter(lambda x: x > 0, lst))\n    return (max(smallest) if smallest else None, min(largest) if largest else None)\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate([2, 4, 1, 3, 5, 7]) == (None, 1)\n    assert candidate([2, 4, 1, 3, 5, 7, 0]) == (None, 1)\n    assert candidate([1, 3, 2, 4, 5, 6, -2]) == (-2, 1)\n    assert candidate([4, 5, 3, 6, 2, 7, -7]) == (-7, 2)\n    assert candidate([7, 3, 8, 4, 9, 2, 5, -9]) == (-9, 2)\n    assert candidate([]) == (None, None)\n    assert candidate([0]) == (None, None)\n    assert candidate([-1, -3, -5, -6]) == (-1, None)\n    assert candidate([-1, -3, -5, -6, 0]) == (-1, None)\n    assert candidate([-6, -4, -4, -3, 1]) == (-3, 1)\n    assert candidate([-6, -4, -4, -3, -100, 1]) == (-3, 1)\n\n    # Check some edge cases that are easy to work out by hand.\n    assert True\n"
+   },
+   "js": {
+    "name": "HumanEval_136_largest_smallest_integers",
+    "language": "js",
+    "prompt": "//Create a function that returns an array (a, b), where 'a' is\n// the largest of negative integers, and 'b' is the smallest\n// of positive integers in an array.\n// If there is no negative or positive integers, return them as undefined.\n// Examples:\n// >>> largest_smallest_integers([2, 4, 1, 3, 5, 7])\n// [undefined, 1]\n// >>> largest_smallest_integers([])\n// [undefined, undefined]\n// >>> largest_smallest_integers([0])\n// [undefined, undefined]\nfunction largest_smallest_integers(lst){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_136_largest_smallest_integers.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = largest_smallest_integers;\n  assert.deepEqual(candidate([2, 4, 1, 3, 5, 7]),[undefined, 1]);\n  assert.deepEqual(candidate([2, 4, 1, 3, 5, 7, 0]),[undefined, 1]);\n  assert.deepEqual(candidate([1, 3, 2, 4, 5, 6, -2]),[-2, 1]);\n  assert.deepEqual(candidate([4, 5, 3, 6, 2, 7, -7]),[-7, 2]);\n  assert.deepEqual(candidate([7, 3, 8, 4, 9, 2, 5, -9]),[-9, 2]);\n  assert.deepEqual(candidate([]),[undefined, undefined]);\n  assert.deepEqual(candidate([0]),[undefined, undefined]);\n  assert.deepEqual(candidate([-1, -3, -5, -6]),[-1, undefined]);\n  assert.deepEqual(candidate([-1, -3, -5, -6, 0]),[-1, undefined]);\n  assert.deepEqual(candidate([-6, -4, -4, -3, 1]),[-3, 1]);\n  assert.deepEqual(candidate([-6, -4, -4, -3, -100, 1]),[-3, 1]);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_136_largest_smallest_integers",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Create a function that returns a pair (a, b), where 'a' is\n    // the largest of negative integers, and 'b' is the smallest\n    // of positive integers in an array array list.\n    // If there is no negative or positive integers, return them as null.\n    // Examples:\n    // >>> largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)1l, (long)3l, (long)5l, (long)7l))))\n    // Pair.with(Optional.of(Optional.empty()), Optional.of(1l))\n    // >>> largestSmallestIntegers((new ArrayList<Long>(Arrays.asList())))\n    // Pair.with(Optional.of(Optional.empty()), Optional.of(Optional.empty()))\n    // >>> largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)0l))))\n    // Pair.with(Optional.of(Optional.empty()), Optional.of(Optional.empty()))\n    public static Pair<Optional<Long>, Optional<Long>> largestSmallestIntegers(ArrayList<Long> lst) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_136_largest_smallest_integers.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)1l, (long)3l, (long)5l, (long)7l)))).equals(Pair.with(Optional.of(Optional.empty()), Optional.of(1l))));\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)1l, (long)3l, (long)5l, (long)7l, (long)0l)))).equals(Pair.with(Optional.of(Optional.empty()), Optional.of(1l))));\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)1l, (long)3l, (long)2l, (long)4l, (long)5l, (long)6l, (long)-2l)))).equals(Optional.of(Pair.with(-2l, 1l))));\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)4l, (long)5l, (long)3l, (long)6l, (long)2l, (long)7l, (long)-7l)))).equals(Optional.of(Pair.with(-7l, 2l))));\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)7l, (long)3l, (long)8l, (long)4l, (long)9l, (long)2l, (long)5l, (long)-9l)))).equals(Optional.of(Pair.with(-9l, 2l))));\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList()))).equals(Pair.with(Optional.of(Optional.empty()), Optional.of(Optional.empty()))));\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)0l)))).equals(Pair.with(Optional.of(Optional.empty()), Optional.of(Optional.empty()))));\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)-1l, (long)-3l, (long)-5l, (long)-6l)))).equals(Pair.with(Optional.of(-1l), Optional.of(Optional.empty()))));\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)-1l, (long)-3l, (long)-5l, (long)-6l, (long)0l)))).equals(Pair.with(Optional.of(-1l), Optional.of(Optional.empty()))));\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)-6l, (long)-4l, (long)-4l, (long)-3l, (long)1l)))).equals(Optional.of(Pair.with(-3l, 1l))));\n    assert(largestSmallestIntegers((new ArrayList<Long>(Arrays.asList((long)-6l, (long)-4l, (long)-4l, (long)-3l, (long)-100l, (long)1l)))).equals(Optional.of(Pair.with(-3l, 1l))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_136_largest_smallest_integers",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Create a function that returns a tuple (a, b), where 'a' is\n// the largest of negative integers, and 'b' is the smallest\n// of positive integers in a vector.\n// If there is no negative or positive integers, return them as None.\n// Examples:\n// >>> largest_smallest_integers((std::vector<long>({(long)2, (long)4, (long)1, (long)3, (long)5, (long)7})))\n// std::make_tuple(std::optional<long>(std::nullopt), std::optional<long>(1))\n// >>> largest_smallest_integers((std::vector<long>()))\n// std::make_tuple(std::optional<long>(std::nullopt), std::optional<long>(std::nullopt))\n// >>> largest_smallest_integers((std::vector<long>({(long)0})))\n// std::make_tuple(std::optional<long>(std::nullopt), std::optional<long>(std::nullopt))\nstd::tuple<std::optional<long>, std::optional<long>> largest_smallest_integers(std::vector<long> lst) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_136_largest_smallest_integers.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = largest_smallest_integers;\n    assert(candidate((std::vector<long>({(long)2, (long)4, (long)1, (long)3, (long)5, (long)7}))) == std::make_tuple(std::optional<long>(std::nullopt), std::optional<long>(1)));\n    assert(candidate((std::vector<long>({(long)2, (long)4, (long)1, (long)3, (long)5, (long)7, (long)0}))) == std::make_tuple(std::optional<long>(std::nullopt), std::optional<long>(1)));\n    assert(candidate((std::vector<long>({(long)1, (long)3, (long)2, (long)4, (long)5, (long)6, (long)-2}))) == std::make_tuple(-2, 1));\n    assert(candidate((std::vector<long>({(long)4, (long)5, (long)3, (long)6, (long)2, (long)7, (long)-7}))) == std::make_tuple(-7, 2));\n    assert(candidate((std::vector<long>({(long)7, (long)3, (long)8, (long)4, (long)9, (long)2, (long)5, (long)-9}))) == std::make_tuple(-9, 2));\n    assert(candidate((std::vector<long>())) == std::make_tuple(std::optional<long>(std::nullopt), std::optional<long>(std::nullopt)));\n    assert(candidate((std::vector<long>({(long)0}))) == std::make_tuple(std::optional<long>(std::nullopt), std::optional<long>(std::nullopt)));\n    assert(candidate((std::vector<long>({(long)-1, (long)-3, (long)-5, (long)-6}))) == std::make_tuple(std::optional<long>(-1), std::optional<long>(std::nullopt)));\n    assert(candidate((std::vector<long>({(long)-1, (long)-3, (long)-5, (long)-6, (long)0}))) == std::make_tuple(std::optional<long>(-1), std::optional<long>(std::nullopt)));\n    assert(candidate((std::vector<long>({(long)-6, (long)-4, (long)-4, (long)-3, (long)1}))) == std::make_tuple(-3, 1));\n    assert(candidate((std::vector<long>({(long)-6, (long)-4, (long)-4, (long)-3, (long)-100, (long)1}))) == std::make_tuple(-3, 1));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 146,
+   "python": {
+    "task_id": "HumanEval/146",
+    "prompt": "\ndef specialFilter(nums):\n    \"\"\"Write a function that takes an array of numbers as input and returns \n    the number of elements in the array that are greater than 10 and both \n    first and last digits of a number are odd (1, 3, 5, 7, 9).\n    For example:\n    specialFilter([15, -73, 14, -15]) => 1 \n    specialFilter([33, -2, -3, 45, 21, 109]) => 2\n    \"\"\"\n",
+    "entry_point": "specialFilter",
+    "canonical_solution": "    \n    count = 0\n    for num in nums:\n        if num > 10:\n            odd_digits = (1, 3, 5, 7, 9)\n            number_as_string = str(num)\n            if int(number_as_string[0]) in odd_digits and int(number_as_string[-1]) in odd_digits:\n                count += 1\n        \n    return count \n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate([5, -2, 1, -5]) == 0  \n    assert candidate([15, -73, 14, -15]) == 1\n    assert candidate([33, -2, -3, 45, 21, 109]) == 2\n    assert candidate([43, -12, 93, 125, 121, 109]) == 4\n    assert candidate([71, -2, -33, 75, 21, 19]) == 3\n\n\n    # Check some edge cases that are easy to work out by hand.\n    assert candidate([1]) == 0              \n    assert candidate([]) == 0                   \n\n"
+   },
+   "js": {
+    "name": "HumanEval_146_specialFilter",
+    "language": "js",
+    "prompt": "//Write a function that takes an array of numbers as input and returns \n// the number of elements in the array that are greater than 10 and both \n// first and last digits of a number are odd (1, 3, 5, 7, 9).\n// For example:\n// >>> specialFilter([15, -73, 14, -15])\n// 1\n// >>> specialFilter([33, -2, -3, 45, 21, 109])\n// 2\nfunction specialFilter(nums){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_146_specialFilter.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = specialFilter;\n  assert.deepEqual(candidate([5, -2, 1, -5]),0);\n  assert.deepEqual(candidate([15, -73, 14, -15]),1);\n  assert.deepEqual(candidate([33, -2, -3, 45, 21, 109]),2);\n  assert.deepEqual(candidate([43, -12, 93, 125, 121, 109]),4);\n  assert.deepEqual(candidate([71, -2, -33, 75, 21, 19]),3);\n  assert.deepEqual(candidate([1]),0);\n  assert.deepEqual(candidate([]),0);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_146_specialFilter",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Write a function that takes an array array list of numbers as input and returns \n    // the number of elements in the array array list that are greater than 10 and both \n    // first and last digits of a number are odd (1, 3, 5, 7, 9).\n    // For example:\n    // >>> specialFilter((new ArrayList<Long>(Arrays.asList((long)15l, (long)-73l, (long)14l, (long)-15l))))\n    // (1l)\n    // >>> specialFilter((new ArrayList<Long>(Arrays.asList((long)33l, (long)-2l, (long)-3l, (long)45l, (long)21l, (long)109l))))\n    // (2l)\n    public static long specialFilter(ArrayList<Long> nums) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_146_specialFilter.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(specialFilter((new ArrayList<Long>(Arrays.asList((long)5l, (long)-2l, (long)1l, (long)-5l)))) == (0l));\n    assert(specialFilter((new ArrayList<Long>(Arrays.asList((long)15l, (long)-73l, (long)14l, (long)-15l)))) == (1l));\n    assert(specialFilter((new ArrayList<Long>(Arrays.asList((long)33l, (long)-2l, (long)-3l, (long)45l, (long)21l, (long)109l)))) == (2l));\n    assert(specialFilter((new ArrayList<Long>(Arrays.asList((long)43l, (long)-12l, (long)93l, (long)125l, (long)121l, (long)109l)))) == (4l));\n    assert(specialFilter((new ArrayList<Long>(Arrays.asList((long)71l, (long)-2l, (long)-33l, (long)75l, (long)21l, (long)19l)))) == (3l));\n    assert(specialFilter((new ArrayList<Long>(Arrays.asList((long)1l)))) == (0l));\n    assert(specialFilter((new ArrayList<Long>(Arrays.asList()))) == (0l));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_146_specialFilter",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Write a function that takes a vector of numbers as input and returns \n// the number of elements in the vector that are greater than 10 and both \n// first and last digits of a number are odd (1, 3, 5, 7, 9).\n// For example:\n// >>> specialFilter((std::vector<long>({(long)15, (long)-73, (long)14, (long)-15})))\n// (1)\n// >>> specialFilter((std::vector<long>({(long)33, (long)-2, (long)-3, (long)45, (long)21, (long)109})))\n// (2)\nlong specialFilter(std::vector<long> nums) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_146_specialFilter.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = specialFilter;\n    assert(candidate((std::vector<long>({(long)5, (long)-2, (long)1, (long)-5}))) == (0));\n    assert(candidate((std::vector<long>({(long)15, (long)-73, (long)14, (long)-15}))) == (1));\n    assert(candidate((std::vector<long>({(long)33, (long)-2, (long)-3, (long)45, (long)21, (long)109}))) == (2));\n    assert(candidate((std::vector<long>({(long)43, (long)-12, (long)93, (long)125, (long)121, (long)109}))) == (4));\n    assert(candidate((std::vector<long>({(long)71, (long)-2, (long)-33, (long)75, (long)21, (long)19}))) == (3));\n    assert(candidate((std::vector<long>({(long)1}))) == (0));\n    assert(candidate((std::vector<long>())) == (0));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 148,
+   "python": {
+    "task_id": "HumanEval/148",
+    "prompt": "\ndef bf(planet1, planet2):\n    '''\n    There are eight planets in our solar system: the closerst to the Sun \n    is Mercury, the next one is Venus, then Earth, Mars, Jupiter, Saturn, \n    Uranus, Neptune.\n    Write a function that takes two planet names as strings planet1 and planet2. \n    The function should return a tuple containing all planets whose orbits are \n    located between the orbit of planet1 and the orbit of planet2, sorted by \n    the proximity to the sun. \n    The function should return an empty tuple if planet1 or planet2\n    are not correct planet names. \n    Examples\n    bf(\"Jupiter\", \"Neptune\") ==> (\"Saturn\", \"Uranus\")\n    bf(\"Earth\", \"Mercury\") ==> (\"Venus\")\n    bf(\"Mercury\", \"Uranus\") ==> (\"Venus\", \"Earth\", \"Mars\", \"Jupiter\", \"Saturn\")\n    '''\n",
+    "entry_point": "bf",
+    "canonical_solution": "    planet_names = (\"Mercury\", \"Venus\", \"Earth\", \"Mars\", \"Jupiter\", \"Saturn\", \"Uranus\", \"Neptune\")\n    if planet1 not in planet_names or planet2 not in planet_names or planet1 == planet2:\n        return ()\n    planet1_index = planet_names.index(planet1)\n    planet2_index = planet_names.index(planet2)\n    if planet1_index < planet2_index:\n        return (planet_names[planet1_index + 1: planet2_index])\n    else:\n        return (planet_names[planet2_index + 1 : planet1_index])\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate(\"Jupiter\", \"Neptune\") == (\"Saturn\", \"Uranus\"), \"First test error: \" + str(len(candidate(\"Jupiter\", \"Neptune\")))      \n    assert candidate(\"Earth\", \"Mercury\") == (\"Venus\",), \"Second test error: \" + str(candidate(\"Earth\", \"Mercury\"))  \n    assert candidate(\"Mercury\", \"Uranus\") == (\"Venus\", \"Earth\", \"Mars\", \"Jupiter\", \"Saturn\"), \"Third test error: \" + str(candidate(\"Mercury\", \"Uranus\"))      \n    assert candidate(\"Neptune\", \"Venus\") == (\"Earth\", \"Mars\", \"Jupiter\", \"Saturn\", \"Uranus\"), \"Fourth test error: \" + str(candidate(\"Neptune\", \"Venus\"))  \n\n\n    # Check some edge cases that are easy to work out by hand.\n    assert candidate(\"Earth\", \"Earth\") == ()\n    assert candidate(\"Mars\", \"Earth\") == ()\n    assert candidate(\"Jupiter\", \"Makemake\") == ()\n\n"
+   },
+   "js": {
+    "name": "HumanEval_148_bf",
+    "language": "js",
+    "prompt": "//There are eight planets in our solar system: the closerst to the Sun \n// is Mercury, the next one is Venus, then Earth, Mars, Jupiter, Saturn, \n// Uranus, Neptune.\n// Write a function that takes two planet names as strings planet1 and planet2. \n// The function should return an array containing all planets whose orbits are \n// located between the orbit of planet1 and the orbit of planet2, sorted by \n// the proximity to the sun. \n// The function should return an empty array if planet1 or planet2\n// are not correct planet names. \n// Examples\n// >>> bf(\"Jupiter\", \"Neptune\")\n// [\"Saturn\", \"Uranus\"]\n// >>> bf(\"Earth\", \"Mercury\")\n// \"Venus\"\n// >>> bf(\"Mercury\", \"Uranus\")\n// [\"Venus\", \"Earth\", \"Mars\", \"Jupiter\", \"Saturn\"]\nfunction bf(planet1, planet2){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_148_bf.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = bf;\n  assert.deepEqual(candidate(\"Jupiter\", \"Neptune\"),[\"Saturn\", \"Uranus\"]);\n  assert.deepEqual(candidate(\"Earth\", \"Mercury\"),[\"Venus\"]);\n  assert.deepEqual(candidate(\"Mercury\", \"Uranus\"),[\"Venus\", \"Earth\", \"Mars\", \"Jupiter\", \"Saturn\"]);\n  assert.deepEqual(candidate(\"Neptune\", \"Venus\"),[\"Earth\", \"Mars\", \"Jupiter\", \"Saturn\", \"Uranus\"]);\n  assert.deepEqual(candidate(\"Earth\", \"Earth\"),[]);\n  assert.deepEqual(candidate(\"Mars\", \"Earth\"),[]);\n  assert.deepEqual(candidate(\"Jupiter\", \"Makemake\"),[]);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_148_bf",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // There are eight planets in our solar system: the closerst to the Sun \n    // is Mercury, the next one is Venus, then Earth, Mars, Jupiter, Saturn, \n    // Uranus, Neptune.\n    // Write a function that takes two planet names as strings planet1 and planet2. \n    // The function should return a pair containing all planets whose orbits are \n    // located between the orbit of planet1 and the orbit of planet2, sorted by \n    // the proximity to the sun. \n    // The function should return an empty pair if planet1 or planet2\n    // are not correct planet names. \n    // Examples\n    // >>> bf((\"Jupiter\"), (\"Neptune\"))\n    // (new ArrayList<String>(Arrays.asList((String)\"Saturn\", (String)\"Uranus\")))\n    // >>> bf((\"Earth\"), (\"Mercury\"))\n    // (ArrayList<String>(\"Venus\"))\n    // >>> bf((\"Mercury\"), (\"Uranus\"))\n    // (new ArrayList<String>(Arrays.asList((String)\"Venus\", (String)\"Earth\", (String)\"Mars\", (String)\"Jupiter\", (String)\"Saturn\")))\n    public static ArrayList<String> bf(String planet1, String planet2) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_148_bf.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(bf((\"Jupiter\"), (\"Neptune\")).equals((new ArrayList<String>(Arrays.asList((String)\"Saturn\", (String)\"Uranus\")))));\n    assert(bf((\"Earth\"), (\"Mercury\")).equals((new ArrayList<String>(Arrays.asList((String)\"Venus\")))));\n    assert(bf((\"Mercury\"), (\"Uranus\")).equals((new ArrayList<String>(Arrays.asList((String)\"Venus\", (String)\"Earth\", (String)\"Mars\", (String)\"Jupiter\", (String)\"Saturn\")))));\n    assert(bf((\"Neptune\"), (\"Venus\")).equals((new ArrayList<String>(Arrays.asList((String)\"Earth\", (String)\"Mars\", (String)\"Jupiter\", (String)\"Saturn\", (String)\"Uranus\")))));\n    assert(bf((\"Earth\"), (\"Earth\")).equals((new ArrayList<String>(Arrays.asList()))));\n    assert(bf((\"Mars\"), (\"Earth\")).equals((new ArrayList<String>(Arrays.asList()))));\n    assert(bf((\"Jupiter\"), (\"Makemake\")).equals((new ArrayList<String>(Arrays.asList()))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_148_bf",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// There are eight planets in our solar system: the closerst to the Sun \n// is Mercury, the next one is Venus, then Earth, Mars, Jupiter, Saturn, \n// Uranus, Neptune.\n// Write a function that takes two planet names as strings planet1 and planet2. \n// The function should return a tuple containing all planets whose orbits are \n// located between the orbit of planet1 and the orbit of planet2, sorted by \n// the proximity to the sun. \n// The function should return an empty tuple if planet1 or planet2\n// are not correct planet names. \n// Examples\n// >>> bf((\"Jupiter\"), (\"Neptune\"))\n// (std::vector<std::string>({(std::string)\"Saturn\", (std::string)\"Uranus\"}))\n// >>> bf((\"Earth\"), (\"Mercury\"))\n// (std::vector<std::string>(\"Venus\"))\n// >>> bf((\"Mercury\"), (\"Uranus\"))\n// (std::vector<std::string>({(std::string)\"Venus\", (std::string)\"Earth\", (std::string)\"Mars\", (std::string)\"Jupiter\", (std::string)\"Saturn\"}))\nstd::vector<std::string> bf(std::string planet1, std::string planet2) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_148_bf.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = bf;\n    assert(candidate((\"Jupiter\"), (\"Neptune\")) == (std::vector<std::string>({(std::string)\"Saturn\", (std::string)\"Uranus\"})));\n    assert(candidate((\"Earth\"), (\"Mercury\")) == (std::vector<std::string>({(std::string)\"Venus\"})));\n    assert(candidate((\"Mercury\"), (\"Uranus\")) == (std::vector<std::string>({(std::string)\"Venus\", (std::string)\"Earth\", (std::string)\"Mars\", (std::string)\"Jupiter\", (std::string)\"Saturn\"})));\n    assert(candidate((\"Neptune\"), (\"Venus\")) == (std::vector<std::string>({(std::string)\"Earth\", (std::string)\"Mars\", (std::string)\"Jupiter\", (std::string)\"Saturn\", (std::string)\"Uranus\"})));\n    assert(candidate((\"Earth\"), (\"Earth\")) == (std::vector<std::string>()));\n    assert(candidate((\"Mars\"), (\"Earth\")) == (std::vector<std::string>()));\n    assert(candidate((\"Jupiter\"), (\"Makemake\")) == (std::vector<std::string>()));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 152,
+   "python": {
+    "task_id": "HumanEval/152",
+    "prompt": "\ndef compare(game,guess):\n    \"\"\"I think we all remember that feeling when the result of some long-awaited\n    event is finally known. The feelings and thoughts you have at that moment are\n    definitely worth noting down and comparing.\n    Your task is to determine if a person correctly guessed the results of a number of matches.\n    You are given two arrays of scores and guesses of equal length, where each index shows a match. \n    Return an array of the same length denoting how far off each guess was. If they have guessed correctly,\n    the value is 0, and if not, the value is the absolute difference between the guess and the score.\n    \n    \n    example:\n\n    compare([1,2,3,4,5,1],[1,2,3,4,2,-2]) -> [0,0,0,0,3,3]\n    compare([0,5,0,0,0,4],[4,1,1,0,0,-2]) -> [4,4,1,0,0,6]\n    \"\"\"\n",
+    "entry_point": "compare",
+    "canonical_solution": "    return [abs(x-y) for x,y in zip(game,guess)]\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate([1,2,3,4,5,1],[1,2,3,4,2,-2])==[0,0,0,0,3,3], \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([0,0,0,0,0,0],[0,0,0,0,0,0])==[0,0,0,0,0,0], \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([1,2,3],[-1,-2,-3])==[2,4,6], \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate([1,2,3,5],[-1,2,3,4])==[2,0,0,1], \"This prints if this assert fails 1 (good for debugging!)\"\n\n    # Check some edge cases that are easy to work out by hand.\n    assert True, \"This prints if this assert fails 2 (also good for debugging!)\"\n\n"
+   },
+   "js": {
+    "name": "HumanEval_152_compare",
+    "language": "js",
+    "prompt": "//I think we all remember that feeling when the result of some long-awaited\n// event is finally known. The feelings and thoughts you have at that moment are\n// definitely worth noting down and comparing.\n// Your task is to determine if a person correctly guessed the results of a number of matches.\n// You are given two arrays of scores and guesses of equal length, where each index shows a match. \n// Return an array of the same length denoting how far off each guess was. If they have guessed correctly,\n// the value is 0, and if not, the value is the absolute difference between the guess and the score.\n// example:\n// >>> compare([1, 2, 3, 4, 5, 1], [1, 2, 3, 4, 2, -2])\n// [0, 0, 0, 0, 3, 3]\n// >>> compare([0, 5, 0, 0, 0, 4], [4, 1, 1, 0, 0, -2])\n// [4, 4, 1, 0, 0, 6]\nfunction compare(game, guess){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_152_compare.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = compare;\n  assert.deepEqual(candidate([1, 2, 3, 4, 5, 1], [1, 2, 3, 4, 2, -2]),[0, 0, 0, 0, 3, 3]);\n  assert.deepEqual(candidate([0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]),[0, 0, 0, 0, 0, 0]);\n  assert.deepEqual(candidate([1, 2, 3], [-1, -2, -3]),[2, 4, 6]);\n  assert.deepEqual(candidate([1, 2, 3, 5], [-1, 2, 3, 4]),[2, 0, 0, 1]);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_152_compare",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // I think we all remember that feeling when the result of some long-awaited\n    // event is finally known. The feelings and thoughts you have at that moment are\n    // definitely worth noting down and comparing.\n    // Your task is to determine if a person correctly guessed the results of a number of matches.\n    // You are given two array array lists of scores and guesses of equal length, where each index shows a match. \n    // Return an array array list of the same length denoting how far off each guess was. If they have guessed correctly,\n    // the value is 0, and if not, the value is the absolute difference between the guess and the score.\n    // example:\n    // >>> compare((new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l, (long)4l, (long)5l, (long)1l))), (new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l, (long)4l, (long)2l, (long)-2l))))\n    // (new ArrayList<Long>(Arrays.asList((long)0l, (long)0l, (long)0l, (long)0l, (long)3l, (long)3l)))\n    // >>> compare((new ArrayList<Long>(Arrays.asList((long)0l, (long)5l, (long)0l, (long)0l, (long)0l, (long)4l))), (new ArrayList<Long>(Arrays.asList((long)4l, (long)1l, (long)1l, (long)0l, (long)0l, (long)-2l))))\n    // (new ArrayList<Long>(Arrays.asList((long)4l, (long)4l, (long)1l, (long)0l, (long)0l, (long)6l)))\n    public static ArrayList<Long> compare(ArrayList<Long> game, ArrayList<Long> guess) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_152_compare.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(compare((new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l, (long)4l, (long)5l, (long)1l))), (new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l, (long)4l, (long)2l, (long)-2l)))).equals((new ArrayList<Long>(Arrays.asList((long)0l, (long)0l, (long)0l, (long)0l, (long)3l, (long)3l)))));\n    assert(compare((new ArrayList<Long>(Arrays.asList((long)0l, (long)0l, (long)0l, (long)0l, (long)0l, (long)0l))), (new ArrayList<Long>(Arrays.asList((long)0l, (long)0l, (long)0l, (long)0l, (long)0l, (long)0l)))).equals((new ArrayList<Long>(Arrays.asList((long)0l, (long)0l, (long)0l, (long)0l, (long)0l, (long)0l)))));\n    assert(compare((new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l))), (new ArrayList<Long>(Arrays.asList((long)-1l, (long)-2l, (long)-3l)))).equals((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)6l)))));\n    assert(compare((new ArrayList<Long>(Arrays.asList((long)1l, (long)2l, (long)3l, (long)5l))), (new ArrayList<Long>(Arrays.asList((long)-1l, (long)2l, (long)3l, (long)4l)))).equals((new ArrayList<Long>(Arrays.asList((long)2l, (long)0l, (long)0l, (long)1l)))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_152_compare",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// I think we all remember that feeling when the result of some long-awaited\n// event is finally known. The feelings and thoughts you have at that moment are\n// definitely worth noting down and comparing.\n// Your task is to determine if a person correctly guessed the results of a number of matches.\n// You are given two vectors of scores and guesses of equal length, where each index shows a match. \n// Return a vector of the same length denoting how far off each guess was. If they have guessed correctly,\n// the value is 0, and if not, the value is the absolute difference between the guess and the score.\n// example:\n// >>> compare((std::vector<long>({(long)1, (long)2, (long)3, (long)4, (long)5, (long)1})), (std::vector<long>({(long)1, (long)2, (long)3, (long)4, (long)2, (long)-2})))\n// (std::vector<long>({(long)0, (long)0, (long)0, (long)0, (long)3, (long)3}))\n// >>> compare((std::vector<long>({(long)0, (long)5, (long)0, (long)0, (long)0, (long)4})), (std::vector<long>({(long)4, (long)1, (long)1, (long)0, (long)0, (long)-2})))\n// (std::vector<long>({(long)4, (long)4, (long)1, (long)0, (long)0, (long)6}))\nstd::vector<long> compare(std::vector<long> game, std::vector<long> guess) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_152_compare.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = compare;\n    assert(candidate((std::vector<long>({(long)1, (long)2, (long)3, (long)4, (long)5, (long)1})), (std::vector<long>({(long)1, (long)2, (long)3, (long)4, (long)2, (long)-2}))) == (std::vector<long>({(long)0, (long)0, (long)0, (long)0, (long)3, (long)3})));\n    assert(candidate((std::vector<long>({(long)0, (long)0, (long)0, (long)0, (long)0, (long)0})), (std::vector<long>({(long)0, (long)0, (long)0, (long)0, (long)0, (long)0}))) == (std::vector<long>({(long)0, (long)0, (long)0, (long)0, (long)0, (long)0})));\n    assert(candidate((std::vector<long>({(long)1, (long)2, (long)3})), (std::vector<long>({(long)-1, (long)-2, (long)-3}))) == (std::vector<long>({(long)2, (long)4, (long)6})));\n    assert(candidate((std::vector<long>({(long)1, (long)2, (long)3, (long)5})), (std::vector<long>({(long)-1, (long)2, (long)3, (long)4}))) == (std::vector<long>({(long)2, (long)0, (long)0, (long)1})));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 156,
+   "python": {
+    "task_id": "HumanEval/156",
+    "prompt": "\ndef int_to_mini_roman(number):\n    \"\"\"\n    Given a positive integer, obtain its roman numeral equivalent as a string,\n    and return it in lowercase.\n    Restrictions: 1 <= num <= 1000\n\n    Examples:\n    >>> int_to_mini_roman(19) == 'xix'\n    >>> int_to_mini_roman(152) == 'clii'\n    >>> int_to_mini_roman(426) == 'cdxxvi'\n    \"\"\"\n",
+    "entry_point": "int_to_mini_roman",
+    "canonical_solution": "    num = [1, 4, 5, 9, 10, 40, 50, 90,  \n           100, 400, 500, 900, 1000] \n    sym = [\"I\", \"IV\", \"V\", \"IX\", \"X\", \"XL\",  \n           \"L\", \"XC\", \"C\", \"CD\", \"D\", \"CM\", \"M\"] \n    i = 12\n    res = ''\n    while number: \n        div = number // num[i] \n        number %= num[i] \n        while div: \n            res += sym[i] \n            div -= 1\n        i -= 1\n    return res.lower()\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate(19) == 'xix'\n    assert candidate(152) == 'clii'\n    assert candidate(251) == 'ccli'\n    assert candidate(426) == 'cdxxvi'\n    assert candidate(500) == 'd'\n    assert candidate(1) == 'i'\n    assert candidate(4) == 'iv'\n    assert candidate(43) == 'xliii'\n    assert candidate(90) == 'xc'\n    assert candidate(94) == 'xciv'\n    assert candidate(532) == 'dxxxii'\n    assert candidate(900) == 'cm'\n    assert candidate(994) == 'cmxciv'\n    assert candidate(1000) == 'm'\n\n    # Check some edge cases that are easy to work out by hand.\n    assert True\n\n"
+   },
+   "js": {
+    "name": "HumanEval_156_int_to_mini_roman",
+    "language": "js",
+    "prompt": "//Given a positive integer, obtain its roman numeral equivalent as a string,\n// and return it in lowercase.\n// Restrictions: 1 <= num <= 1000\n// Examples:\n// >>> int_to_mini_roman(19)\n// \"xix\"\n// >>> int_to_mini_roman(152)\n// \"clii\"\n// >>> int_to_mini_roman(426)\n// \"cdxxvi\"\nfunction int_to_mini_roman(number){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_156_int_to_mini_roman.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = int_to_mini_roman;\n  assert.deepEqual(candidate(19),\"xix\");\n  assert.deepEqual(candidate(152),\"clii\");\n  assert.deepEqual(candidate(251),\"ccli\");\n  assert.deepEqual(candidate(426),\"cdxxvi\");\n  assert.deepEqual(candidate(500),\"d\");\n  assert.deepEqual(candidate(1),\"i\");\n  assert.deepEqual(candidate(4),\"iv\");\n  assert.deepEqual(candidate(43),\"xliii\");\n  assert.deepEqual(candidate(90),\"xc\");\n  assert.deepEqual(candidate(94),\"xciv\");\n  assert.deepEqual(candidate(532),\"dxxxii\");\n  assert.deepEqual(candidate(900),\"cm\");\n  assert.deepEqual(candidate(994),\"cmxciv\");\n  assert.deepEqual(candidate(1000),\"m\");\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_156_int_to_mini_roman",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Given a positive integer, obtain its roman numeral equivalent as a string,\n    // and return it in lowercase.\n    // Restrictions: 1 <= num <= 1000\n    // Examples:\n    // >>> intToMiniRoman((19l))\n    // (\"xix\")\n    // >>> intToMiniRoman((152l))\n    // (\"clii\")\n    // >>> intToMiniRoman((426l))\n    // (\"cdxxvi\")\n    public static String intToMiniRoman(long number) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_156_int_to_mini_roman.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(intToMiniRoman((19l)).equals((\"xix\")));\n    assert(intToMiniRoman((152l)).equals((\"clii\")));\n    assert(intToMiniRoman((251l)).equals((\"ccli\")));\n    assert(intToMiniRoman((426l)).equals((\"cdxxvi\")));\n    assert(intToMiniRoman((500l)).equals((\"d\")));\n    assert(intToMiniRoman((1l)).equals((\"i\")));\n    assert(intToMiniRoman((4l)).equals((\"iv\")));\n    assert(intToMiniRoman((43l)).equals((\"xliii\")));\n    assert(intToMiniRoman((90l)).equals((\"xc\")));\n    assert(intToMiniRoman((94l)).equals((\"xciv\")));\n    assert(intToMiniRoman((532l)).equals((\"dxxxii\")));\n    assert(intToMiniRoman((900l)).equals((\"cm\")));\n    assert(intToMiniRoman((994l)).equals((\"cmxciv\")));\n    assert(intToMiniRoman((1000l)).equals((\"m\")));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_156_int_to_mini_roman",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Given a positive integer, obtain its roman numeral equivalent as a string,\n// and return it in lowercase.\n// Restrictions: 1 <= num <= 1000\n// Examples:\n// >>> int_to_mini_roman((19))\n// (\"xix\")\n// >>> int_to_mini_roman((152))\n// (\"clii\")\n// >>> int_to_mini_roman((426))\n// (\"cdxxvi\")\nstd::string int_to_mini_roman(long number) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_156_int_to_mini_roman.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = int_to_mini_roman;\n    assert(candidate((19)) == (\"xix\"));\n    assert(candidate((152)) == (\"clii\"));\n    assert(candidate((251)) == (\"ccli\"));\n    assert(candidate((426)) == (\"cdxxvi\"));\n    assert(candidate((500)) == (\"d\"));\n    assert(candidate((1)) == (\"i\"));\n    assert(candidate((4)) == (\"iv\"));\n    assert(candidate((43)) == (\"xliii\"));\n    assert(candidate((90)) == (\"xc\"));\n    assert(candidate((94)) == (\"xciv\"));\n    assert(candidate((532)) == (\"dxxxii\"));\n    assert(candidate((900)) == (\"cm\"));\n    assert(candidate((994)) == (\"cmxciv\"));\n    assert(candidate((1000)) == (\"m\"));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 159,
+   "python": {
+    "task_id": "HumanEval/159",
+    "prompt": "\ndef eat(number, need, remaining):\n    \"\"\"\n    You're a hungry rabbit, and you already have eaten a certain number of carrots,\n    but now you need to eat more carrots to complete the day's meals.\n    you should return an array of [ total number of eaten carrots after your meals,\n                                    the number of carrots left after your meals ]\n    if there are not enough remaining carrots, you will eat all remaining carrots, but will still be hungry.\n    \n    Example:\n    * eat(5, 6, 10) -> [11, 4]\n    * eat(4, 8, 9) -> [12, 1]\n    * eat(1, 10, 10) -> [11, 0]\n    * eat(2, 11, 5) -> [7, 0]\n    \n    Variables:\n    @number : integer\n        the number of carrots that you have eaten.\n    @need : integer\n        the number of carrots that you need to eat.\n    @remaining : integer\n        the number of remaining carrots thet exist in stock\n    \n    Constrain:\n    * 0 <= number <= 1000\n    * 0 <= need <= 1000\n    * 0 <= remaining <= 1000\n\n    Have fun :)\n    \"\"\"\n",
+    "entry_point": "eat",
+    "canonical_solution": "    if(need <= remaining):\n        return [ number + need , remaining-need ]\n    else:\n        return [ number + remaining , 0]\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert True, \"This prints if this assert fails 1 (good for debugging!)\"\n    assert candidate(5, 6, 10) == [11, 4], \"Error\"\n    assert candidate(4, 8, 9) == [12, 1], \"Error\"\n    assert candidate(1, 10, 10) == [11, 0], \"Error\"\n    assert candidate(2, 11, 5) == [7, 0], \"Error\"\n\n    # Check some edge cases that are easy to work out by hand.\n    assert True, \"This prints if this assert fails 2 (also good for debugging!)\"\n    assert candidate(4, 5, 7) == [9, 2], \"Error\"\n    assert candidate(4, 5, 1) == [5, 0], \"Error\"\n\n"
+   },
+   "js": {
+    "name": "HumanEval_159_eat",
+    "language": "js",
+    "prompt": "//You're a hungry rabbit, and you already have eaten a certain number of carrots,\n// but now you need to eat more carrots to complete the day's meals.\n// you should return an array of [ total number of eaten carrots after your meals,\n// the number of carrots left after your meals ]\n// if there are not enough remaining carrots, you will eat all remaining carrots, but will still be hungry.\n// Example:\n// >>> eat(5, 6, 10)\n// [11, 4]\n// >>> eat(4, 8, 9)\n// [12, 1]\n// >>> eat(1, 10, 10)\n// [11, 0]\n// >>> eat(2, 11, 5)\n// [7, 0]\n// Variables:\n// @number : integer\n// the number of carrots that you have eaten.\n// @need : integer\n// the number of carrots that you need to eat.\n// @remaining : integer\n// the number of remaining carrots thet exist in stock\n// Constrain:\n// * 0 <= number <= 1000\n// * 0 <= need <= 1000\n// * 0 <= remaining <= 1000\n// Have fun :)\nfunction eat(number, need, remaining){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_159_eat.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = eat;\n  assert.deepEqual(candidate(5, 6, 10),[11, 4]);\n  assert.deepEqual(candidate(4, 8, 9),[12, 1]);\n  assert.deepEqual(candidate(1, 10, 10),[11, 0]);\n  assert.deepEqual(candidate(2, 11, 5),[7, 0]);\n  assert.deepEqual(candidate(4, 5, 7),[9, 2]);\n  assert.deepEqual(candidate(4, 5, 1),[5, 0]);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_159_eat",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // You're a hungry rabbit, and you already have eaten a certain number of carrots,\n    // but now you need to eat more carrots to complete the day's meals.\n    // you should return an array array list of [ total number of eaten carrots after your meals,\n    // the number of carrots left after your meals ]\n    // if there are not enough remaining carrots, you will eat all remaining carrots, but will still be hungry.\n    // Example:\n    // >>> eat((5l), (6l), (10l))\n    // (new ArrayList<Long>(Arrays.asList((long)11l, (long)4l)))\n    // >>> eat((4l), (8l), (9l))\n    // (new ArrayList<Long>(Arrays.asList((long)12l, (long)1l)))\n    // >>> eat((1l), (10l), (10l))\n    // (new ArrayList<Long>(Arrays.asList((long)11l, (long)0l)))\n    // >>> eat((2l), (11l), (5l))\n    // (new ArrayList<Long>(Arrays.asList((long)7l, (long)0l)))\n    // Variables:\n    // @number : integer\n    // the number of carrots that you have eaten.\n    // @need : integer\n    // the number of carrots that you need to eat.\n    // @remaining : integer\n    // the number of remaining carrots thet exist in stock\n    // Constrain:\n    // * 0 <= number <= 1000\n    // * 0 <= need <= 1000\n    // * 0 <= remaining <= 1000\n    // Have fun :)\n    public static ArrayList<Long> eat(long number, long need, long remaining) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_159_eat.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(eat((5l), (6l), (10l)).equals((new ArrayList<Long>(Arrays.asList((long)11l, (long)4l)))));\n    assert(eat((4l), (8l), (9l)).equals((new ArrayList<Long>(Arrays.asList((long)12l, (long)1l)))));\n    assert(eat((1l), (10l), (10l)).equals((new ArrayList<Long>(Arrays.asList((long)11l, (long)0l)))));\n    assert(eat((2l), (11l), (5l)).equals((new ArrayList<Long>(Arrays.asList((long)7l, (long)0l)))));\n    assert(eat((4l), (5l), (7l)).equals((new ArrayList<Long>(Arrays.asList((long)9l, (long)2l)))));\n    assert(eat((4l), (5l), (1l)).equals((new ArrayList<Long>(Arrays.asList((long)5l, (long)0l)))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_159_eat",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// You're a hungry rabbit, and you already have eaten a certain number of carrots,\n// but now you need to eat more carrots to complete the day's meals.\n// you should return a vector of [ total number of eaten carrots after your meals,\n// the number of carrots left after your meals ]\n// if there are not enough remaining carrots, you will eat all remaining carrots, but will still be hungry.\n// Example:\n// >>> eat((5), (6), (10))\n// (std::vector<long>({(long)11, (long)4}))\n// >>> eat((4), (8), (9))\n// (std::vector<long>({(long)12, (long)1}))\n// >>> eat((1), (10), (10))\n// (std::vector<long>({(long)11, (long)0}))\n// >>> eat((2), (11), (5))\n// (std::vector<long>({(long)7, (long)0}))\n// Variables:\n// @number : integer\n// the number of carrots that you have eaten.\n// @need : integer\n// the number of carrots that you need to eat.\n// @remaining : integer\n// the number of remaining carrots thet exist in stock\n// Constrain:\n// * 0 <= number <= 1000\n// * 0 <= need <= 1000\n// * 0 <= remaining <= 1000\n// Have fun :)\nstd::vector<long> eat(long number, long need, long remaining) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_159_eat.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = eat;\n    assert(candidate((5), (6), (10)) == (std::vector<long>({(long)11, (long)4})));\n    assert(candidate((4), (8), (9)) == (std::vector<long>({(long)12, (long)1})));\n    assert(candidate((1), (10), (10)) == (std::vector<long>({(long)11, (long)0})));\n    assert(candidate((2), (11), (5)) == (std::vector<long>({(long)7, (long)0})));\n    assert(candidate((4), (5), (7)) == (std::vector<long>({(long)9, (long)2})));\n    assert(candidate((4), (5), (1)) == (std::vector<long>({(long)5, (long)0})));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  },
+  {
+   "number": 163,
+   "python": {
+    "task_id": "HumanEval/163",
+    "prompt": "\ndef generate_integers(a, b):\n    \"\"\"\n    Given two positive integers a and b, return the even digits between a\n    and b, in ascending order.\n\n    For example:\n    generate_integers(2, 8) => [2, 4, 6, 8]\n    generate_integers(8, 2) => [2, 4, 6, 8]\n    generate_integers(10, 14) => []\n    \"\"\"\n",
+    "entry_point": "generate_integers",
+    "canonical_solution": "    lower = max(2, min(a, b))\n    upper = min(8, max(a, b))\n\n    return [i for i in range(lower, upper+1) if i % 2 == 0]\n",
+    "test": "def check(candidate):\n\n    # Check some simple cases\n    assert candidate(2, 10) == [2, 4, 6, 8], \"Test 1\"\n    assert candidate(10, 2) == [2, 4, 6, 8], \"Test 2\"\n    assert candidate(132, 2) == [2, 4, 6, 8], \"Test 3\"\n    assert candidate(17,89) == [], \"Test 4\"\n\n    # Check some edge cases that are easy to work out by hand.\n    assert True, \"This prints if this assert fails 2 (also good for debugging!)\"\n\n"
+   },
+   "js": {
+    "name": "HumanEval_163_generate_integers",
+    "language": "js",
+    "prompt": "//Given two positive integers a and b, return the even digits between a\n// and b, in ascending order.\n// For example:\n// >>> generate_integers(2, 8)\n// [2, 4, 6, 8]\n// >>> generate_integers(8, 2)\n// [2, 4, 6, 8]\n// >>> generate_integers(10, 14)\n// []\nfunction generate_integers(a, b){\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_163_generate_integers.py",
+    "prompt_terminology": "reworded",
+    "tests": "const assert = require('node:assert');\n\n\nfunction test() {\n  let candidate = generate_integers;\n  assert.deepEqual(candidate(2, 10),[2, 4, 6, 8]);\n  assert.deepEqual(candidate(10, 2),[2, 4, 6, 8]);\n  assert.deepEqual(candidate(132, 2),[2, 4, 6, 8]);\n  assert.deepEqual(candidate(17, 89),[]);\n}\n\ntest();",
+    "stop_tokens": [
+     "\nfunction ",
+     "\n/*",
+     "\n//",
+     "\nconsole.log"
+    ]
+   },
+   "java": {
+    "name": "HumanEval_163_generate_integers",
+    "language": "java",
+    "prompt": "import java.util.*;\nimport java.lang.reflect.*;\nimport org.javatuples.*;\nimport java.security.*;\nimport java.math.*;\nimport java.io.*;\nimport java.util.stream.*;\nclass Problem {\n    // Given two positive integers a and b, return the even digits between a\n    // and b, in ascending order.\n    // For example:\n    // >>> generateIntegers((2l), (8l))\n    // (new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)6l, (long)8l)))\n    // >>> generateIntegers((8l), (2l))\n    // (new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)6l, (long)8l)))\n    // >>> generateIntegers((10l), (14l))\n    // (new ArrayList<Long>(Arrays.asList()))\n    public static ArrayList<Long> generateIntegers(long a, long b) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_163_generate_integers.py",
+    "prompt_terminology": "reworded",
+    "tests": "    }\n    public static void main(String[] args) {\n    assert(generateIntegers((2l), (10l)).equals((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)6l, (long)8l)))));\n    assert(generateIntegers((10l), (2l)).equals((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)6l, (long)8l)))));\n    assert(generateIntegers((132l), (2l)).equals((new ArrayList<Long>(Arrays.asList((long)2l, (long)4l, (long)6l, (long)8l)))));\n    assert(generateIntegers((17l), (89l)).equals((new ArrayList<Long>(Arrays.asList()))));\n    }\n\n}\n",
+    "stop_tokens": [
+     "\n    }\n"
+    ]
+   },
+   "cpp": {
+    "name": "HumanEval_163_generate_integers",
+    "language": "cpp",
+    "prompt": "#include<assert.h>\n#include<bits/stdc++.h>\n// Given two positive integers a and b, return the even digits between a\n// and b, in ascending order.\n// For example:\n// >>> generate_integers((2), (8))\n// (std::vector<long>({(long)2, (long)4, (long)6, (long)8}))\n// >>> generate_integers((8), (2))\n// (std::vector<long>({(long)2, (long)4, (long)6, (long)8}))\n// >>> generate_integers((10), (14))\n// (std::vector<long>())\nstd::vector<long> generate_integers(long a, long b) {\n",
+    "doctests": "transform",
+    "original": "/work/arjunguha-research-group/arjun/repos/nuprl/MultiPL-E/datasets/../datasets/originals-with-cleaned-doctests/HumanEval_163_generate_integers.py",
+    "prompt_terminology": "reworded",
+    "tests": "}\nint main() {\n    auto candidate = generate_integers;\n    assert(candidate((2), (10)) == (std::vector<long>({(long)2, (long)4, (long)6, (long)8})));\n    assert(candidate((10), (2)) == (std::vector<long>({(long)2, (long)4, (long)6, (long)8})));\n    assert(candidate((132), (2)) == (std::vector<long>({(long)2, (long)4, (long)6, (long)8})));\n    assert(candidate((17), (89)) == (std::vector<long>()));\n}\n",
+    "stop_tokens": [
+     "\n}"
+    ]
+   }
+  }
+ ]
+}

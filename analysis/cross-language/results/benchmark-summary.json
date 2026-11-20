@@ -1,0 +1,695 @@
+{
+ "problems": 20,
+ "attempts_per_problem": 1,
+ "decoding": "greedy, raw completion prompt, max 512 new tokens",
+ "languages": {
+  "python": {
+   "base_passed": 3,
+   "adapter_passed": 6,
+   "problems": 20,
+   "gained": [
+    0,
+    152,
+    159
+   ],
+   "lost": []
+  },
+  "js": {
+   "base_passed": 4,
+   "adapter_passed": 6,
+   "problems": 20,
+   "gained": [
+    136,
+    152
+   ],
+   "lost": []
+  },
+  "java": {
+   "base_passed": 4,
+   "adapter_passed": 5,
+   "problems": 20,
+   "gained": [
+    152
+   ],
+   "lost": []
+  },
+  "cpp": {
+   "base_passed": 6,
+   "adapter_passed": 6,
+   "problems": 20,
+   "gained": [
+    76
+   ],
+   "lost": [
+    0
+   ]
+  }
+ },
+ "per_question": [
+  {
+   "number": 0,
+   "language": "python",
+   "base": "fail",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 20,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 26,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 28,
+   "language": "python",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 30,
+   "language": "python",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 60,
+   "language": "python",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 64,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 76,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 84,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 111,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 116,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 130,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 133,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 136,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 146,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 148,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 152,
+   "language": "python",
+   "base": "fail",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 156,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 159,
+   "language": "python",
+   "base": "fail",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 163,
+   "language": "python",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 0,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 20,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 26,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 28,
+   "language": "js",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 30,
+   "language": "js",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 60,
+   "language": "js",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 64,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 76,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 84,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 111,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 116,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 130,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 133,
+   "language": "js",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 136,
+   "language": "js",
+   "base": "fail",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 146,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 148,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 152,
+   "language": "js",
+   "base": "fail",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 156,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 159,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 163,
+   "language": "js",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 0,
+   "language": "java",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 20,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 26,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 28,
+   "language": "java",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 30,
+   "language": "java",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 60,
+   "language": "java",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 64,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 76,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 84,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 111,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 116,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 130,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 133,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 136,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 146,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 148,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 152,
+   "language": "java",
+   "base": "fail",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 156,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 159,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 163,
+   "language": "java",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 0,
+   "language": "cpp",
+   "base": "pass",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 20,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 26,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 28,
+   "language": "cpp",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 30,
+   "language": "cpp",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 60,
+   "language": "cpp",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 64,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 76,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "pass",
+   "base_stage": "compile",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 84,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 111,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 116,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 130,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "compile",
+   "adapter_stage": "compile"
+  },
+  {
+   "number": 133,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 136,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 146,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 148,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 152,
+   "language": "cpp",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 156,
+   "language": "cpp",
+   "base": "pass",
+   "adapter": "pass",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 159,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  },
+  {
+   "number": 163,
+   "language": "cpp",
+   "base": "fail",
+   "adapter": "fail",
+   "base_stage": "run",
+   "adapter_stage": "run"
+  }
+ ],
+ "totals": {
+  "base": 17,
+  "adapter": 23,
+  "out_of": 80
+ }
+}

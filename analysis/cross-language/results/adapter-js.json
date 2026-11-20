@@ -1,0 +1,168 @@
+{
+ "model": "adapter",
+ "language": "js",
+ "problems": 20,
+ "passed": 6,
+ "outcomes": [
+  {
+   "number": 0,
+   "name": "HumanEval_0_has_close_elements",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "1546:14)\n    at Object..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: undefined,\n  expected: true,\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 20,
+   "name": "HumanEval_20_find_closest_elements",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "14)\n    at Object..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: [ 2, 2 ],\n  expected: [ 3.9, 4 ],\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 26,
+   "name": "HumanEval_26_remove_duplicates",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "e:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: [\n    1, 2, 3, 2,\n    4, 3, 5\n  ],\n  expected: [ 1, 4, 5 ],\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 28,
+   "name": "HumanEval_28_concatenate",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 30,
+   "name": "HumanEval_30_get_positive",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 60,
+   "name": "HumanEval_60_sum_to_n",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 64,
+   "name": "HumanEval_64_vowels_count",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "cjs/loader:1546:14)\n    at Object..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 2,\n  expected: 3,\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 76,
+   "name": "HumanEval_76_is_simple_power",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "der:1546:14)\n    at Object..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: true,\n  expected: false,\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 84,
+   "name": "HumanEval_84_solve",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "loader:1546:14)\n    at Object..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: '6',\n  expected: '1',\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 111,
+   "name": "HumanEval_111_histogram",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "6:14)\n    at Object..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: {},\n  expected: { a: 2, b: 2 },\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 116,
+   "name": "HumanEval_116_sort_array",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "at Object..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: undefined,\n  expected: [ 1, 2, 4, 3, 5 ],\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 130,
+   "name": "HumanEval_130_tri",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "'\n    at wrapSafe (node:internal/modules/cjs/loader:1469:18)\n    at Module._compile (node:internal/modules/cjs/loader:1491:20)\n    at Object..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 133,
+   "name": "HumanEval_133_sum_squares",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 136,
+   "name": "HumanEval_136_largest_smallest_integers",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 146,
+   "name": "HumanEval_146_specialFilter",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "cjs/loader:1546:14)\n    at Object..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 3,\n  expected: 0,\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 148,
+   "name": "HumanEval_148_bf",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: [ 'Mercury', 'Earth', 'Mars', 'Jupiter' ],\n  expected: [ 'Saturn', 'Uranus' ],\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 152,
+   "name": "HumanEval_152_compare",
+   "status": "pass",
+   "stage": "run",
+   "returncode": 0,
+   "output_tail": ""
+  },
+  {
+   "number": 156,
+   "name": "HumanEval_156_int_to_mini_roman",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 'nannannannannannannannannannannannannan',\n  expected: 'xix',\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 159,
+   "name": "HumanEval_159_eat",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": ":14)\n    at Object..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: [ 13, 0 ],\n  expected: [ 7, 0 ],\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  },
+  {
+   "number": 163,
+   "name": "HumanEval_163_generate_integers",
+   "status": "fail",
+   "stage": "run",
+   "returncode": 1,
+   "output_tail": "t..js (node:internal/modules/cjs/loader:1689:10)\n    at Module.load (node:internal/modules/cjs/loader:1318:32)\n    at Function._load (node:internal/modules/cjs/loader:1128:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:315:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:218:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)\n    at node:internal/main/run_main_module:36:49 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: [ 2, 4, 6, 8, 1, 0 ],\n  expected: [ 2, 4, 6, 8 ],\n  operator: 'deepEqual'\n}\n\nNode.js v22.11.0"
+  }
+ ]
+}
