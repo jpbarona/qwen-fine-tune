@@ -5,13 +5,23 @@ Run this on the GPU host with the vLLM environment:
     ~/env-vllm/bin/python scripts/smoke_lfm_vllm.py
 
 The script builds a small PEFT-format LoRA adapter from the model's own linear
-weight shapes, so it needs no PEFT package. It then:
+weight shapes, so it needs no PEFT package. Sampling is greedy, so repeated
+samples of the same prompt are comparable. It then:
 
 1. loads the adapter into the engine and samples a few greedy tokens,
 2. samples the same prompt without the adapter and compares the chosen token
    logprob, which proves the adapter changed the weights,
-3. writes a second adapter and hands it over again, which proves the step-time
-   update path loads a new adapter rather than reusing the first one.
+3. samples adapter one a second time and requires an identical first token and
+   logprob, which proves sampling is deterministic,
+4. writes a second adapter and hands it over, then requires its first token or
+   logprob to differ from adapter one, which proves the engine reloaded the
+   adapter rather than reusing the first one.
+
+Limit: the script drives `VLLMEngine.set_adapter` directly with a synthetic
+adapter. It does not call `VLLMGenerator.apply_update`, does not save an adapter
+from a trained model, and does not run an optimizer step. The per-step handoff
+from the trainer is unproven by this script. Proving it needs a trainer-driven
+two-step run on the GPU host.
 
 The adapter is deliberately strong so the logprob difference is visible. It is
 a loading test, not a quality test. GPU memory is read before the engine is
@@ -210,7 +220,8 @@ def main() -> int:
         max_num_seqs=1,
         enforce_eager=True,
     )
-    print(f"engine ready at {time.monotonic() - started:.1f}s", flush=True)
+    engine_ready = time.monotonic()
+    print(f"engine ready at {engine_ready - started:.1f}s", flush=True)
 
     tokenizer = engine._llm.get_tokenizer()
     text = tokenizer.apply_chat_template(
@@ -231,6 +242,12 @@ def main() -> int:
         lora_request=engine._lora_request,
         max_tokens=args.max_tokens,
     )
+    repeat, repeat_tokens = sample(
+        engine._llm,
+        prompt_ids,
+        lora_request=engine._lora_request,
+        max_tokens=args.max_tokens,
+    )
 
     engine.set_adapter(adapter_two)
     two, two_tokens = sample(
@@ -240,36 +257,47 @@ def main() -> int:
         max_tokens=args.max_tokens,
     )
 
-    if base is None or one is None or two is None:
+    finished = time.monotonic()
+    if base is None or one is None or two is None or repeat is None:
         print("sampling returned no logprobs", file=sys.stderr)
         return 3
-    if base["logprob"] == one["logprob"]:
+    if base["logprob"] == one["logprob"] and base_tokens == one_tokens:
         print(
             "adapter one did not change the chosen token logprob, so the engine "
             "may have ignored it",
             file=sys.stderr,
         )
         return 4
-    if one["logprob"] == two["logprob"]:
+    if one != repeat or one_tokens != repeat_tokens:
         print(
-            "adapter two produced the same logprob as adapter one, so the engine "
-            "did not reload the adapter",
+            "sampling adapter one twice gave different output, so greedy "
+            "sampling is not deterministic here",
             file=sys.stderr,
         )
         return 5
+    if one["logprob"] == two["logprob"] and one_tokens == two_tokens:
+        print(
+            "adapter two produced the same output as adapter one, so the engine "
+            "did not reload the adapter",
+            file=sys.stderr,
+        )
+        return 6
 
     result = {
         "gpu_utilisation": round(utilisation, 3),
         "target_modules": len(targets),
         "base_first_token": base,
         "adapter_one_first_token": one,
+        "adapter_one_repeat_first_token": repeat,
         "adapter_two_first_token": two,
         "adapter_one_id": 1,
         "adapter_two_id": 2,
         "base_tokens": base_tokens,
         "adapter_one_tokens": one_tokens,
+        "adapter_one_repeat_tokens": repeat_tokens,
         "adapter_two_tokens": two_tokens,
-        "seconds": round(time.monotonic() - started, 1),
+        "engine_startup_seconds": round(engine_ready - started, 1),
+        "total_seconds": round(finished - started, 1),
     }
     print(json.dumps(result, indent=2))
     return 0

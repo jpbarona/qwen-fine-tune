@@ -119,8 +119,10 @@ class VLLMEngine:
         """Point the engine at the trainer's current LoRA adapter.
 
         The adapter is a PEFT directory on disk. vLLM loads it on first use of
-        the new `LoRARequest` and keeps it under a new integer id. The previous
-        adapter is dropped so a long run does not accumulate them in GPU memory.
+        the new `LoRARequest` and keeps it under a new integer id. The new
+        adapter is added before the previous one is dropped, so a refused load
+        leaves the previous adapter serving. Dropping the previous one keeps a
+        long run from accumulating adapters in GPU memory.
         """
         engine = getattr(self._llm, "llm_engine", None)
         if engine is None:
@@ -142,17 +144,18 @@ class VLLMEngine:
         request = LoRARequest(
             f"rlvr-policy-{self._adapter_id}", self._adapter_id, str(path)
         )
-        if previous:
-            remove = getattr(engine, "remove_lora", None)
-            if remove is not None:
-                remove(previous)
         loaded = add(request)
         if loaded is False:
             raise RuntimeError(
                 f"vLLM refused to load the LoRA adapter at {path}. Check that "
-                "the adapter target modules are supported by this model."
+                "the adapter target modules are supported by this model. The "
+                "previous adapter stays loaded."
             )
         self._lora_request = request
+        if previous:
+            remove = getattr(engine, "remove_lora", None)
+            if remove is not None:
+                remove(previous)
 
     def close(self) -> None:
         """Release the engine and its worker processes."""
