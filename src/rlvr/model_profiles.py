@@ -20,6 +20,10 @@ class ModelProfile:
     attention_targets: tuple[str, ...]
     supports_thinking_toggle: bool
     minimum_transformers_major: int = 4
+    #: Oldest vLLM release that can serve this architecture with LoRA.
+    #: LFM2 landed in 0.10.2, and LoRA over its fused MLP and short
+    #: convolution landed in 0.17.0.
+    minimum_vllm: tuple[int, int] = (0, 10)
 
 
 QWEN3 = ModelProfile("qwen3", ("q_proj", "k_proj", "v_proj", "o_proj"), True)
@@ -33,6 +37,7 @@ LFM2 = ModelProfile(
     ),
     False,
     5,
+    (0, 17),
 )
 
 
@@ -59,10 +64,43 @@ def validate_transformers_version(profile: ModelProfile, version: str) -> None:
         )
 
 
-def validate_inference_engine(model_name: str, engine: str) -> None:
-    """The pinned vLLM stack serves Qwen adapters. LFM uses Hugging Face."""
-    if model_profile(model_name) == LFM2 and engine == "vllm":
+def validate_inference_engine(
+    model_name: str, engine: str, *, vllm_version: str | None = None
+) -> None:
+    """Check the installed vLLM can serve this architecture with LoRA.
+
+    Qwen runs on the pinned 0.10.1 stack. LFM2 needs 0.17.0 or newer, because
+    earlier releases cannot place LoRA on the fused MLP and short convolution.
+    A missing package is left to the engine builder, which reports the install
+    command. `vllm_version` lets a test pin the version without the package.
+    """
+    if engine != "vllm":
+        return
+    profile = model_profile(model_name)
+    if vllm_version is None:
+        try:
+            from importlib.metadata import PackageNotFoundError, version
+        except ImportError:  # pragma: no cover - Python always ships it
+            return
+        try:
+            vllm_version = version("vllm")
+        except PackageNotFoundError:
+            return
+    installed = _major_minor(vllm_version)
+    if installed < profile.minimum_vllm:
+        minimum = ".".join(str(part) for part in profile.minimum_vllm) + ".0"
+        extra = "vllm-lfm" if profile == LFM2 else "vllm"
         raise ValueError(
-            'LFM training requires training.engine = "hf" and the [lfm] extra. '
-            "The pinned Qwen vLLM environment does not support this LFM tokenizer."
+            f"{profile.model_type} rollouts on vLLM require vllm >= {minimum}, "
+            f"but version {vllm_version} is installed. Install it with "
+            f"pip install -e '.[{extra}]' or set training.engine = \"hf\"."
         )
+
+
+def _major_minor(version: str) -> tuple[int, int]:
+    """The first two numeric parts of a version string, for a floor check."""
+    parts = version.split(".")
+    try:
+        return int(parts[0]), int(parts[1])
+    except (IndexError, ValueError) as error:
+        raise ValueError(f"cannot read a version from {version!r}") from error

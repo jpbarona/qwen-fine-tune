@@ -27,6 +27,13 @@ def test_train_extra_does_not_pin_torch_via_a_range() -> None:
     assert all(">=" not in requirement and "<" not in requirement for requirement in train)
 
 
+def test_lfm_vllm_extra_has_its_own_version_floor() -> None:
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    extras = pyproject["project"]["optional-dependencies"]
+    assert extras["vllm"] == ["vllm==0.10.1"]
+    assert extras["vllm-lfm"] == ["vllm>=0.17,<0.35"]
+
+
 def test_requires_python_is_3_12_or_newer() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert pyproject["project"]["requires-python"] == ">=3.12"

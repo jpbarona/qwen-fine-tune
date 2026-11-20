@@ -28,6 +28,12 @@ train = [
 # from the cu128 index. Install after the train extra, on a CUDA 12 host.
 vllm = ["vllm==0.10.1"]
 
+# LFM2.5 rollout on vLLM. Kept separate from the Qwen pin because LFM needs
+# LoRA on the fused MLP and short convolution, which first shipped in 0.17.0.
+# vLLM 0.17 and newer pull their own torch and Transformers 5, so install this
+# in its own environment, not beside the [train] extra.
+vllm-lfm = ["vllm>=0.17,<0.35"]
+
 # LFM2.5 has a Transformers 5 tokenizer. Install in its own environment with
 # .[lfm], since the Qwen vLLM extra pins a Transformers 4 stack.
 lfm = [
