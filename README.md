@@ -57,7 +57,13 @@ Model identity, revision, split seed, and fake/real mode are checked against
 saved metadata before run records are truncated.
 
 The LFM profile pins `LiquidAI/LFM2.5-2.6B` at revision
-`7141b56cd4650af95c7c7b86983443aed050c96a`. It uses `engine = "hf"`.
+`7141b56cd4650af95c7c7b86983443aed050c96a`. It defaults to `engine = "hf"`.
+Set `engine = "vllm"` to sample with vLLM, which needs vLLM 0.17 or newer for
+LoRA over the fused MLP and short convolution. Install that stack from the
+`vllm-lfm` extra in its own environment, together with PEFT for the trainer.
+The shipped Qwen `vllm` extra stays at 0.10.1. `scripts/smoke_lfm_vllm.py`
+serves the model, loads an adapter, samples, and swaps in a second adapter
+without training.
 The native LFM template always opens a reasoning block, including for screening
 and evaluation. The comparison starts from Qwen's hyperparameters. The
 `[training] lora_targets` key chooses the adapter placement: `attention` adapts

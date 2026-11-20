@@ -287,9 +287,53 @@ def test_set_adapter_needs_an_engine_to_hand_the_adapter_to() -> None:
         engine.set_adapter("/tmp/adapter")
 
 
-def test_lfm_uses_hf_until_vllm_adapter_runtime_is_supported() -> None:
+def test_lfm_vllm_needs_the_engine_that_supports_its_lora_layers() -> None:
     from rlvr.model_profiles import validate_inference_engine
 
     validate_inference_engine("LiquidAI/LFM2.5-2.6B", "hf")
-    with pytest.raises(ValueError, match='training.engine = "hf"'):
-        validate_inference_engine("LiquidAI/LFM2.5-2.6B", "vllm")
+    validate_inference_engine(
+        "LiquidAI/LFM2.5-2.6B", "vllm", vllm_version="0.17.0"
+    )
+    validate_inference_engine(
+        "LiquidAI/LFM2.5-2.6B", "vllm", vllm_version="0.34.0"
+    )
+    with pytest.raises(ValueError, match="vllm >= 0.17.0"):
+        validate_inference_engine(
+            "LiquidAI/LFM2.5-2.6B", "vllm", vllm_version="0.10.1"
+        )
+
+
+def test_qwen_keeps_the_pinned_vllm_floor() -> None:
+    from rlvr.model_profiles import validate_inference_engine
+
+    validate_inference_engine("Qwen/Qwen3-0.6B", "vllm", vllm_version="0.10.1")
+
+
+def test_a_refused_adapter_load_is_an_error(tmp_path, monkeypatch) -> None:
+    import types
+
+    vllm = types.ModuleType("vllm")
+    lora = types.ModuleType("vllm.lora")
+    request_module = types.ModuleType("vllm.lora.request")
+
+    class LoRARequest:
+        def __init__(self, name, adapter_id, path):
+            self.name = name
+            self.adapter_id = adapter_id
+            self.path = path
+
+    request_module.LoRARequest = LoRARequest
+    monkeypatch.setitem(sys.modules, "vllm", vllm)
+    monkeypatch.setitem(sys.modules, "vllm.lora", lora)
+    monkeypatch.setitem(sys.modules, "vllm.lora.request", request_module)
+
+    class Engine:
+        llm_engine = types.SimpleNamespace(add_lora=lambda request: False)
+
+    engine = object.__new__(VLLMEngine)
+    engine._llm = Engine()
+    engine._adapter_id = 0
+    engine._lora_request = None
+
+    with pytest.raises(RuntimeError, match="refused to load"):
+        engine.set_adapter(tmp_path)

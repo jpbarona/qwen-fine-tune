@@ -51,6 +51,8 @@ class VLLMEngine:
         gpu_memory_utilisation: float,
         max_model_len: int,
         max_lora_rank: int,
+        max_num_seqs: int | None = None,
+        enforce_eager: bool = False,
     ) -> None:
         import vllm  # lazy: the package is optional on a CPU host
 
@@ -62,6 +64,13 @@ class VLLMEngine:
         self._vllm = vllm
         self._lora_request: Any = None
         self._adapter_id = 0
+        engine_options: dict[str, Any] = {}
+        if max_num_seqs is not None:
+            if int(max_num_seqs) < 1:
+                raise ValueError(f"max_num_seqs must be at least 1, got {max_num_seqs}")
+            engine_options["max_num_seqs"] = int(max_num_seqs)
+        if enforce_eager:
+            engine_options["enforce_eager"] = True
         self._llm: Any = vllm.LLM(
             model=model_name,
             revision=revision,
@@ -69,6 +78,7 @@ class VLLMEngine:
             max_model_len=self.max_model_len,
             max_lora_rank=self.max_lora_rank,
             enable_lora=True,
+            **engine_options,
         )
 
     def generate(
@@ -121,6 +131,12 @@ class VLLMEngine:
 
         from vllm.lora.request import LoRARequest  # lazy: optional package
 
+        add = getattr(engine, "add_lora", None)
+        if add is None:
+            raise RuntimeError(
+                "this vLLM build cannot add a LoRA adapter at runtime, so the "
+                "trainer's adapter cannot be served."
+            )
         previous = self._adapter_id
         self._adapter_id += 1
         request = LoRARequest(
@@ -130,9 +146,12 @@ class VLLMEngine:
             remove = getattr(engine, "remove_lora", None)
             if remove is not None:
                 remove(previous)
-        add = getattr(engine, "add_lora", None)
-        if add is not None:
-            add(request)
+        loaded = add(request)
+        if loaded is False:
+            raise RuntimeError(
+                f"vLLM refused to load the LoRA adapter at {path}. Check that "
+                "the adapter target modules are supported by this model."
+            )
         self._lora_request = request
 
     def close(self) -> None:
