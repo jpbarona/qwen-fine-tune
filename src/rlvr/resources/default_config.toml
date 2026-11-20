@@ -70,6 +70,9 @@ kl_beta = 0.0
 # group's measured footprint, in MiB, then stays at the largest size that fit.
 # Never a percentage, never below one prompt.
 memory_floor_mib = 512
+# Largest prompt count one step may take, whatever free memory allows. Unset
+# means no cap. At eight rollouts per prompt, 20 prompts is 160 sequences.
+# max_prompts = 20
 # Bound concurrent sandboxed test containers. Each keeps its own limits.
 test_workers = 4
 # Greedy evaluation questions decoded together. OOM retries halve this size.

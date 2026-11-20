@@ -38,6 +38,7 @@ def resume_batch_policy(config: Config, manifest: dict) -> BatchSizePolicy | Non
         return None
     return BatchSizePolicy(
         floor_mib=config.memory_floor_mib,
+        max_prompts=config.max_prompts,
         current=current,
         largest_fit=largest_fit,
         settled=settled,

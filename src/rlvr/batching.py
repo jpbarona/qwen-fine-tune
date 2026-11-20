@@ -92,7 +92,9 @@ class BatchSizePolicy:
     MiB, from the growth between two steps. The effective floor is the larger of
     `floor_mib` and this figure, so one more group must actually fit.
 
-    `max_prompts` is a test and debugging pin. The run leaves it None.
+    `max_prompts` caps the prompt count the policy will hand out. A value of
+    None means no cap and growth is limited by memory alone. The cap also
+    bounds a resumed policy whose saved `current` is larger.
     """
 
     floor_mib: int = DEFAULT_MEMORY_FLOOR_MIB
