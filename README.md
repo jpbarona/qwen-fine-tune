@@ -59,11 +59,32 @@ saved metadata before run records are truncated.
 The LFM profile pins `LiquidAI/LFM2.5-2.6B` at revision
 `7141b56cd4650af95c7c7b86983443aed050c96a`. It defaults to `engine = "hf"`.
 Set `engine = "vllm"` to sample with vLLM, which needs vLLM 0.17 or newer for
-LoRA over the fused MLP and short convolution. Install that stack from the
-`vllm-lfm` extra in its own environment, together with PEFT for the trainer.
-The shipped Qwen `vllm` extra stays at 0.10.1. `scripts/smoke_lfm_vllm.py`
-serves the model, loads an adapter, samples, and swaps in a second adapter
-without training.
+LoRA over the fused MLP and short convolution. The shipped Qwen `vllm` extra
+stays at 0.10.1. `scripts/smoke_lfm_vllm.py` serves the model, loads an
+adapter, samples, and swaps in a second adapter without training.
+
+### One environment for LFM training and serving
+
+The `vllm-lfm` extra contains only vLLM. vLLM 0.17 and newer bring their own
+torch and Transformers, so the `lfm` extra pins (torch 2.7.1, Transformers
+5.0.0) cannot be installed beside it. An environment that both trains and
+serves LFM needs vLLM's torch and Transformers, plus PEFT and Accelerate:
+
+```bash
+python3 -m venv .venv-lfm-vllm
+.venv-lfm-vllm/bin/pip install -e ".[vllm-lfm]"
+.venv-lfm-vllm/bin/pip install "peft==0.18.1" "accelerate==1.8.1"
+.venv-lfm-vllm/bin/pip install "pytest>=9,<10"
+RLVR_VENV=.venv-lfm-vllm ./run.sh code-score --config configs/lfm.toml --runs-root runs-lfm
+```
+
+The first install resolves vLLM 0.34.0, which installs torch 2.14.0,
+Transformers 5.22.2, safetensors 0.8.0, and huggingface-hub 2.4.0 on Python
+3.12. The second adds PEFT 0.18.1 and Accelerate 1.8.1 without changing torch
+or Transformers. Do not install the `lfm` extra in this environment. Its torch
+and Transformers pins conflict with vLLM and pip will replace one or the other.
+`scripts/setup-lfm-env.sh` still builds `.venv-lfm`, the Hugging Face only
+environment from the `lfm` extra, which cannot serve vLLM.
 The native LFM template always opens a reasoning block, including for screening
 and evaluation. The comparison starts from Qwen's hyperparameters. The
 `[training] lora_targets` key chooses the adapter placement: `attention` adapts

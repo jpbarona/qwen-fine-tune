@@ -303,10 +303,80 @@ def test_lfm_vllm_needs_the_engine_that_supports_its_lora_layers() -> None:
         )
 
 
-def test_qwen_keeps_the_pinned_vllm_floor() -> None:
+def test_lfm_vllm_rejects_the_release_before_the_lora_support() -> None:
     from rlvr.model_profiles import validate_inference_engine
 
-    validate_inference_engine("Qwen/Qwen3-0.6B", "vllm", vllm_version="0.10.1")
+    with pytest.raises(ValueError, match="vllm >= 0.17.0"):
+        validate_inference_engine(
+            "LiquidAI/LFM2.5-2.6B", "vllm", vllm_version="0.16.9"
+        )
+
+
+def test_lfm_vllm_accepts_a_development_build_at_the_floor() -> None:
+    from rlvr.model_profiles import validate_inference_engine
+
+    validate_inference_engine(
+        "LiquidAI/LFM2.5-2.6B", "vllm", vllm_version="0.17.0.dev0"
+    )
+
+
+def test_qwen_keeps_no_vllm_floor() -> None:
+    from rlvr.model_profiles import validate_inference_engine
+
+    for version in ("0.9.0", "0.10.1", "0.17.0"):
+        validate_inference_engine("Qwen/Qwen3-0.6B", "vllm", vllm_version=version)
+
+
+def test_a_source_checkout_version_comes_from_the_module(monkeypatch) -> None:
+    import types
+    from importlib.metadata import PackageNotFoundError
+
+    import rlvr.model_profiles as profiles
+
+    def missing(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr("importlib.metadata.version", missing)
+    module = types.ModuleType("vllm")
+    module.__version__ = "0.17.0"
+    monkeypatch.setitem(sys.modules, "vllm", module)
+
+    profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B", "vllm")
+
+    module.__version__ = "0.16.9"
+    with pytest.raises(ValueError, match="vllm >= 0.17.0"):
+        profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B", "vllm")
+
+
+def test_an_importable_vllm_with_no_version_is_an_error(monkeypatch) -> None:
+    import types
+    from importlib.metadata import PackageNotFoundError
+
+    import rlvr.model_profiles as profiles
+
+    def missing(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr("importlib.metadata.version", missing)
+    monkeypatch.setitem(sys.modules, "vllm", types.ModuleType("vllm"))
+
+    with pytest.raises(ValueError, match="cannot read the vllm version"):
+        profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B", "vllm")
+
+
+def test_a_missing_vllm_package_is_left_to_the_engine_builder(monkeypatch) -> None:
+    import types
+    from importlib.metadata import PackageNotFoundError
+
+    import rlvr.model_profiles as profiles
+
+    def missing(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr("importlib.metadata.version", missing)
+    monkeypatch.setitem(sys.modules, "vllm", None)
+
+    profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B", "vllm")
 
 
 def test_a_refused_adapter_load_is_an_error(tmp_path, monkeypatch) -> None:
@@ -337,3 +407,84 @@ def test_a_refused_adapter_load_is_an_error(tmp_path, monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="refused to load"):
         engine.set_adapter(tmp_path)
+
+
+def _lora_modules(monkeypatch):
+    import types
+
+    vllm = types.ModuleType("vllm")
+    lora = types.ModuleType("vllm.lora")
+    request_module = types.ModuleType("vllm.lora.request")
+
+    class LoRARequest:
+        def __init__(self, name, adapter_id, path):
+            self.name = name
+            self.adapter_id = adapter_id
+            self.path = path
+
+    request_module.LoRARequest = LoRARequest
+    monkeypatch.setitem(sys.modules, "vllm", vllm)
+    monkeypatch.setitem(sys.modules, "vllm.lora", lora)
+    monkeypatch.setitem(sys.modules, "vllm.lora.request", request_module)
+
+
+def test_a_new_adapter_is_added_before_the_previous_one_is_removed(
+    tmp_path, monkeypatch
+) -> None:
+    import types
+
+    _lora_modules(monkeypatch)
+    events: list[tuple[str, int]] = []
+
+    def add(request):
+        events.append(("add", request.adapter_id))
+        return True
+
+    def remove(adapter_id):
+        events.append(("remove", adapter_id))
+
+    class Engine:
+        llm_engine = types.SimpleNamespace(
+            add_lora=add, remove_lora=remove
+        )
+
+    engine = object.__new__(VLLMEngine)
+    engine._llm = Engine()
+    engine._adapter_id = 0
+    engine._lora_request = None
+
+    engine.set_adapter(tmp_path)
+    engine.set_adapter(tmp_path)
+
+    assert events == [("add", 1), ("add", 2), ("remove", 1)]
+    assert engine._lora_request.adapter_id == 2
+
+
+def test_a_refused_adapter_keeps_the_previous_one_loaded(tmp_path, monkeypatch) -> None:
+    import types
+
+    _lora_modules(monkeypatch)
+    events: list[tuple[str, int]] = []
+    answer = [True, False]
+
+    def add(request):
+        events.append(("add", request.adapter_id))
+        return answer.pop(0)
+
+    def remove(adapter_id):
+        events.append(("remove", adapter_id))
+
+    class Engine:
+        llm_engine = types.SimpleNamespace(add_lora=add, remove_lora=remove)
+
+    engine = object.__new__(VLLMEngine)
+    engine._llm = Engine()
+    engine._adapter_id = 0
+    engine._lora_request = None
+
+    engine.set_adapter(tmp_path)
+    with pytest.raises(RuntimeError, match="previous adapter stays loaded"):
+        engine.set_adapter(tmp_path)
+
+    assert events == [("add", 1), ("add", 2)]
+    assert engine._lora_request.adapter_id == 1

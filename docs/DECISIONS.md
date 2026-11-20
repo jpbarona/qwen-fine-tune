@@ -207,9 +207,12 @@ LFM2.5 uses a separate `vllm-lfm` extra with `vllm>=0.17,<0.35`, because LoRA
 over its fused MLP and short convolution first shipped in 0.17.0. The startup
 check reads the installed version and refuses an older engine. A smoke on
 2026-11-20 served LFM2.5-2.6B on vLLM 0.34.0, loaded a 166-module all-linear
-adapter, and swapped in a second adapter in 81 seconds, of which 75 were engine
-startup. The chosen token logprob changed after each handoff, so the engine
-applied both adapters.
+adapter, and swapped in a second adapter. The chosen token logprob changed
+after each handoff, so the engine applied both adapters. That run's output was
+not kept, so no timing is quoted here. `scripts/smoke_lfm_vllm.py` now writes
+`engine_startup_seconds` and `total_seconds` to its JSON result. The script
+uses a synthetic adapter and does not call the trainer's `apply_update`, so the
+per-step handoff from the trainer remains unproven.
 
 ## D12. Thinking budget schedule
 
