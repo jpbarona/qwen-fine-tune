@@ -32,8 +32,8 @@ test_size = 250
 
 [training]
 method = "grpo"
-# LFM uses the Hugging Face sampler with the same trainer and reward loop.
-engine = "hf"
+# LFM serves rollouts on vLLM 0.17 or newer, with the adapter refreshed each step.
+engine = "vllm"
 generations_per_prompt = 8
 temperature = 0.9
 learning_rate = 1e-4
