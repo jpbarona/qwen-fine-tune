@@ -27,6 +27,7 @@ from rlvr.experiment import Experiment, Generation, Outcome, Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 from rlvr.memory import MemoryReport
 from rlvr.qwen import group_advantages
+from rlvr.resume import resume_batch_policy
 from rlvr.runs import RunStore
 
 TIMESTAMP = "20261112T000000Z"
@@ -575,6 +576,22 @@ def test_an_uncapped_run_grows_as_before(tmp_path) -> None:
     assert store.meta["trainer"]["max_prompts"] is None
 
 
+def test_a_caller_policy_cap_is_recorded_in_meta(tmp_path) -> None:
+    experiment, store = run_experiment(
+        tmp_path,
+        prompts=make_prompts(6),
+        steps=2,
+        memory=lambda: report(free_mib=8000.0),
+        max_prompts=5,
+        batch_policy=BatchSizePolicy(current=2, max_prompts=2),
+    )
+    experiment.run()
+
+    # The metrics row and meta record the policy value, not the config value.
+    assert [row["max_prompts"] for row in store.metrics] == [2, 2]
+    assert store.meta["trainer"]["max_prompts"] == 2
+
+
 def test_without_a_memory_reader_the_batch_holds_its_start(tmp_path) -> None:
     experiment, store = run_experiment(tmp_path, prompts=make_prompts(6), steps=3)
     experiment.run()
@@ -770,3 +787,23 @@ def test_resume_on_a_batch_boundary_keeps_the_same_schedule(tmp_path) -> None:
 
     resumed_pairs = [(step, prompt_id) for step, prompt_id in _run_pairs(part_store) if step > 2]
     assert resumed_pairs == [(step, prompt_id) for step, prompt_id in full_pairs if step > 2]
+
+
+def test_a_resume_clamps_a_saved_batch_above_the_cap(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(config_text(max_prompts=2), encoding="utf-8")
+    config = load_config(path)
+    policy = resume_batch_policy(
+        config, {"batch": {"current": 9, "largest_fit": 8, "settled": False}}
+    )
+    assert policy is not None
+    # The saved size is above the cap, so both fields drop to it at once.
+    assert policy.current == 2
+    assert policy.largest_fit == 2
+    assert policy.count(10) == 2
+
+    # A good measurement afterwards leaves both fields at the cap, so the
+    # next manifest cannot save the old batch.
+    policy.observe(report(free_mib=8000.0), prompts=policy.count(10))
+    assert policy.current == 2
+    assert policy.largest_fit == 2

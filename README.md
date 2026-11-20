@@ -214,7 +214,11 @@ Each step takes a batch of prompts, one group of 8 samples per prompt, all
 sampled in one padded call. The batch starts at two prompts. After each step the
 free memory is read. While it stays at or above `[training] memory_floor_mib` the
 next step takes one more prompt. The first step below the floor settles the size
-at the largest batch that fit, and the run keeps that size. Gradients accumulate
+at the largest batch that fit, and the run keeps that size.
+`[training] max_prompts` caps the prompt count per step when memory would allow
+more. An absent key means no cap. The cap limits sequences per step. Step time
+is unverified, because test containers and judge calls run outside the batch.
+Gradients accumulate
 across the prompt groups and the optimizer steps once at the end of the step, so
 the step count is the number of weight updates. A group is normalised on its own
 rewards, never across the batch.

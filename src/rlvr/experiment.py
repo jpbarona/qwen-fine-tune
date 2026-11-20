@@ -636,6 +636,10 @@ class Experiment:
     def build_meta(self) -> dict[str, Any]:
         """The reproducibility record. Written to meta.json."""
         config = self.config
+        # A caller-supplied policy may pin a different cap than the config.
+        # Record the value the run uses, so meta and the metrics agree.
+        policy = self._policy or self.batch_policy
+        max_prompts = policy.max_prompts if policy is not None else config.max_prompts
         return {
             "arm": self.arm,
             "timestamp": self.store.timestamp,
@@ -676,7 +680,7 @@ class Experiment:
                 "kl_beta": config.kl_beta,
                 "batch_size": "adaptive",
                 "batch_start_prompts": START_PROMPTS,
-                "max_prompts": config.max_prompts,
+                "max_prompts": max_prompts,
                 "gradient_accumulation": config.generations_per_prompt,
                 "optimizer_updates_per_step": 1,
                 "memory_floor_mib": config.memory_floor_mib,

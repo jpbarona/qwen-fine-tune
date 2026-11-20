@@ -68,9 +68,10 @@ this figure and one prompt group's measured footprint from the previous step.
 It is an absolute figure, never a percentage.
 
 `max_prompts` is the largest prompt count one step may take, whatever the
-memory allows. It bounds the step time on a card that never runs short of
-memory. The value is at least one. An absent key means no cap, so a config
-written before this key keeps its old growth behaviour.
+memory allows. It caps sequences per step. Step time is unverified, because
+test containers and judge calls run outside the batch. The value is at least
+one. An absent key means no cap, so a config written before this key keeps its
+old growth behaviour.
 
 `[curriculum] stage` is the band a run starts at and must be one of the four
 fixed bands. `[curriculum] carry_over_ratio` is the share of the previous band

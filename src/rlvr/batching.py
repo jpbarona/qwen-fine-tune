@@ -92,9 +92,11 @@ class BatchSizePolicy:
     MiB, from the growth between two steps. The effective floor is the larger of
     `floor_mib` and this figure, so one more group must actually fit.
 
-    `max_prompts` caps the prompt count the policy will hand out. A value of
-    None means no cap and growth is limited by memory alone. The cap also
-    bounds a resumed policy whose saved `current` is larger.
+    `max_prompts` caps the prompt count the policy will hand out and caps
+    sequences per step. Step time is unverified, because test containers and
+    judge calls run outside the batch. A value of None means no cap and growth
+    is limited by memory alone. The cap also limits a resumed policy whose
+    saved `current` is larger.
     """
 
     floor_mib: int = DEFAULT_MEMORY_FLOOR_MIB
@@ -121,11 +123,19 @@ class BatchSizePolicy:
             raise ValueError(
                 f"group footprint must not be negative, got {self.group_footprint_mib}"
             )
+        self.current = self._limit(self.current)
+        self.largest_fit = self._limit(self.largest_fit)
 
     @property
     def effective_floor_mib(self) -> float:
         """The free memory that must remain before the batch grows."""
         return max(float(self.floor_mib), self.group_footprint_mib)
+
+    def _limit(self, count: int) -> int:
+        """`count` reduced to `max_prompts` when a cap is set."""
+        if self.max_prompts is None:
+            return count
+        return min(count, self.max_prompts)
 
     def count(self, available: int) -> int:
         """The prompt count for the next step, clamped to the pool size.
@@ -173,14 +183,14 @@ class BatchSizePolicy:
         self._last_prompts = prompts
 
         if free_memory_mib(report) >= self.effective_floor_mib:
-            self.largest_fit = max(self.largest_fit, prompts)
+            self.largest_fit = self._limit(max(self.largest_fit, prompts))
             if not self.settled:
                 # A short pool caps the step without lowering the target. The
                 # next larger pool still gets the size memory allowed.
-                self.current = max(self.current, prompts + 1)
+                self.current = self._limit(max(self.current, prompts + 1))
             return
         self.settled = True
-        self.current = max(self.largest_fit, MIN_PROMPTS)
+        self.current = self._limit(max(self.largest_fit, MIN_PROMPTS))
 
     def settle(self, *, failed_prompts: int | None = None) -> None:
         """Stop growing and keep the largest batch that fit.
@@ -190,7 +200,8 @@ class BatchSizePolicy:
         finished a step yet.
         """
         self.settled = True
-        self.current = max(self.largest_fit, MIN_PROMPTS)
+        self.largest_fit = self._limit(self.largest_fit)
+        self.current = self._limit(max(self.largest_fit, MIN_PROMPTS))
         if failed_prompts is not None:
             if failed_prompts < MIN_PROMPTS:
                 raise ValueError("failed prompt count must be positive")
