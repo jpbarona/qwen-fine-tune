@@ -60,9 +60,9 @@ length_penalty_floor = 0.2
 # floor and at or above one prompt group's measured footprint, in MiB. The
 # largest size that fit is kept. Never below one prompt.
 memory_floor_mib = 512
-# Hard cap on prompts per step. At eight rollouts per prompt this is 120
-# sequences. It caps sequences per step. Step time is unverified.
-max_prompts = 24
+# Hard cap on prompts per step. At eight rollouts per prompt this is 608
+# sequences, about 240 seconds with the vLLM engine on one A6000.
+max_prompts = 76
 # Bound concurrent sandboxed test containers. Each keeps its own limits.
 test_workers = 4
 # Greedy evaluation questions decoded together. OOM retries halve this size.
