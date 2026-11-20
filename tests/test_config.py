@@ -362,6 +362,24 @@ def test_the_memory_floor_defaults_to_512_mib(write_config) -> None:
     assert load_config(write_config(GOOD)).memory_floor_mib == 512
 
 
+def test_the_batch_cap_defaults_to_none(write_config) -> None:
+    assert load_config(write_config(GOOD)).max_prompts is None
+
+
+def test_the_batch_cap_is_read_from_config(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(GOOD + "\n[training]\nmax_prompts = 20\n", encoding="utf-8")
+    assert load_config(path).max_prompts == 20
+
+
+@pytest.mark.parametrize("value", ["0", "-3", "1.5", '"20"'])
+def test_a_bad_batch_cap_is_named(tmp_path, value: str) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(GOOD + f"\n[training]\nmax_prompts = {value}\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="training.max_prompts"):
+        load_config(path)
+
+
 def test_the_memory_floor_is_read_from_config(tmp_path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(GOOD + "\n[training]\nmemory_floor_mib = 1024\n", encoding="utf-8")

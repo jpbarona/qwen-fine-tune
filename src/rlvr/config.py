@@ -38,6 +38,7 @@ Optional keys, with the defaults shown:
     [training] length_penalty_per_token = 0.001
     [training] length_penalty_floor = 0.2
     [training] memory_floor_mib = 512
+    [training] max_prompts = (unset: no cap)
     [training] test_workers = 4
     [training] eval_batch_size = 8
     [training] prefetch_scoring = true
@@ -65,6 +66,11 @@ Zero turns the measurement off. A negative value is rejected.
 before the next step takes more prompts. The effective floor is the larger of
 this figure and one prompt group's measured footprint from the previous step.
 It is an absolute figure, never a percentage.
+
+`max_prompts` is the largest prompt count one step may take, whatever the
+memory allows. It bounds the step time on a card that never runs short of
+memory. The value is at least one. An absent key means no cap, so a config
+written before this key keeps its old growth behaviour.
 
 `[curriculum] stage` is the band a run starts at and must be one of the four
 fixed bands. `[curriculum] carry_over_ratio` is the share of the previous band
@@ -174,6 +180,7 @@ class Config:
     length_penalty_per_token: float = DEFAULT_LENGTH_PENALTY_PER_TOKEN
     length_penalty_floor: float = DEFAULT_LENGTH_PENALTY_FLOOR
     memory_floor_mib: int = DEFAULT_MEMORY_FLOOR_MIB
+    max_prompts: int | None = None
     test_workers: int = 4
     eval_batch_size: int = 8
     prefetch_scoring: bool = True
@@ -449,6 +456,7 @@ def load_config(path: str | Path) -> Config:
         memory_floor_mib=_optional_non_negative_int(
             raw, "training.memory_floor_mib", DEFAULT_MEMORY_FLOOR_MIB
         ),
+        max_prompts=_optional_int_none(raw, "training.max_prompts"),
         test_workers=_optional_positive_int(raw, "training.test_workers", 4),
         eval_batch_size=_optional_positive_int(raw, "training.eval_batch_size", 8),
         prefetch_scoring=_optional_bool(raw, "training.prefetch_scoring", True),

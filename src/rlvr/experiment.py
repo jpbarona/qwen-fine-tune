@@ -427,7 +427,8 @@ class Experiment:
         # A rerun starts from the same place, so a reused Experiment is
         # deterministic. An injected policy is left as the caller set it.
         policy = self.batch_policy or BatchSizePolicy(
-            floor_mib=self.config.memory_floor_mib
+            floor_mib=self.config.memory_floor_mib,
+            max_prompts=self.config.max_prompts,
         )
         self._policy = policy
         self._prompt_cursor = self.resume_prompt_cursor
@@ -529,6 +530,7 @@ class Experiment:
                     update_norm=result.update_norm,
                     memory=memory,
                     timings=result.timings,
+                    max_prompts=policy.max_prompts,
                 )
             )
             policy.observe(memory, prompts=result.prompts)
@@ -674,6 +676,7 @@ class Experiment:
                 "kl_beta": config.kl_beta,
                 "batch_size": "adaptive",
                 "batch_start_prompts": START_PROMPTS,
+                "max_prompts": config.max_prompts,
                 "gradient_accumulation": config.generations_per_prompt,
                 "optimizer_updates_per_step": 1,
                 "memory_floor_mib": config.memory_floor_mib,
@@ -1201,6 +1204,7 @@ class Experiment:
         update_norm: float | None = None,
         memory: MemoryReport | None = None,
         timings: Mapping[str, float] | None = None,
+        max_prompts: int | None = None,
     ) -> dict[str, Any]:
         """One metrics row. Entropy is present only on a measurement step.
 
@@ -1223,6 +1227,7 @@ class Experiment:
             "prompts": prompts,
             "sequences": count,
             "rollouts": count,
+            "max_prompts": max_prompts,
             "mean_reward": sum(record.reward for record in records) / count,
             "pass_rate": passed / count,
             "mean_completion_tokens": sum(record.completion_tokens for record in records) / count,

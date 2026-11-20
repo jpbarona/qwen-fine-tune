@@ -37,6 +37,7 @@ def config_text(
     *,
     checkpoint_every_steps: int = 100,
     memory_floor_mib: int | None = None,
+    max_prompts: int | None = None,
     entropy_every_steps: int | None = None,
 ) -> str:
     text = f"""\
@@ -59,6 +60,8 @@ checkpoint_every_steps = {checkpoint_every_steps}
     training = []
     if memory_floor_mib is not None:
         training.append(f"memory_floor_mib = {memory_floor_mib}")
+    if max_prompts is not None:
+        training.append(f"max_prompts = {max_prompts}")
     if entropy_every_steps is not None:
         training.append(f"entropy_every_steps = {entropy_every_steps}")
     if training:
@@ -205,6 +208,7 @@ def run_experiment(
     config_steps: int | None = None,
     checkpoint_every_steps: int = 100,
     memory_floor_mib: int | None = None,
+    max_prompts: int | None = None,
     entropy_every_steps: int | None = None,
     store=None,
     resume_step: int = 0,
@@ -218,6 +222,7 @@ def run_experiment(
             steps=steps if config_steps is None else config_steps,
             checkpoint_every_steps=checkpoint_every_steps,
             memory_floor_mib=memory_floor_mib,
+            max_prompts=max_prompts,
             entropy_every_steps=entropy_every_steps,
         ),
         encoding="utf-8",
@@ -368,6 +373,22 @@ def test_the_prompt_count_is_clamped_to_the_pool_and_the_pin() -> None:
 
     pinned = BatchSizePolicy(current=8, max_prompts=2)
     assert pinned.count(10) == 2
+
+
+def test_the_cap_holds_at_every_memory_level() -> None:
+    for free in (0.0, 100.0, 512.0, 4096.0, 80000.0):
+        policy = BatchSizePolicy(current=2, max_prompts=4)
+        for _ in range(10):
+            assert policy.count(50) <= 4
+            policy.observe(report(free_mib=free), prompts=policy.count(50))
+        assert policy.count(50) <= 4
+        if free >= 512.0:
+            assert policy.count(50) == 4
+
+
+def test_a_cap_below_the_minimum_is_rejected() -> None:
+    with pytest.raises(ValueError, match="max_prompts"):
+        BatchSizePolicy(max_prompts=0)
 
 
 def test_free_memory_is_the_part_the_allocator_does_not_hold() -> None:
@@ -523,6 +544,35 @@ def test_the_configured_memory_floor_decides_growth(tmp_path) -> None:
     experiment.run()
 
     assert [row["prompts"] for row in store.metrics] == [2, 1]
+
+
+def test_a_configured_cap_limits_the_batch_and_is_recorded(tmp_path) -> None:
+    experiment, store = run_experiment(
+        tmp_path,
+        prompts=make_prompts(10),
+        steps=4,
+        memory=lambda: report(free_mib=8000.0),
+        max_prompts=3,
+    )
+    experiment.run()
+
+    assert [row["prompts"] for row in store.metrics] == [2, 3, 3, 3]
+    assert [row["max_prompts"] for row in store.metrics] == [3, 3, 3, 3]
+    assert store.meta["trainer"]["max_prompts"] == 3
+
+
+def test_an_uncapped_run_grows_as_before(tmp_path) -> None:
+    experiment, store = run_experiment(
+        tmp_path,
+        prompts=make_prompts(10),
+        steps=3,
+        memory=lambda: report(free_mib=8000.0),
+    )
+    experiment.run()
+
+    assert [row["prompts"] for row in store.metrics] == [2, 3, 4]
+    assert [row["max_prompts"] for row in store.metrics] == [None, None, None]
+    assert store.meta["trainer"]["max_prompts"] is None
 
 
 def test_without_a_memory_reader_the_batch_holds_its_start(tmp_path) -> None:
