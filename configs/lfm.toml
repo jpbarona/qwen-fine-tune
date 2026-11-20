@@ -62,7 +62,7 @@ length_penalty_floor = 0.2
 memory_floor_mib = 512
 # Hard cap on prompts per step. At eight rollouts per prompt this is 120
 # sequences. It caps sequences per step. Step time is unverified.
-max_prompts = 15
+max_prompts = 24
 # Bound concurrent sandboxed test containers. Each keeps its own limits.
 test_workers = 4
 # Greedy evaluation questions decoded together. OOM retries halve this size.
