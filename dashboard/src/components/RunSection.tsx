@@ -218,8 +218,13 @@ export default function RunSection({ run }: { run: Run }) {
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] tabular-nums text-[#7b7b84]">
           <Status status={run.status} />
+          {run.pool_policy ? (
+            <span>
+              pool <span className="text-[#d9d9de]">{run.pool_policy}</span>
+            </span>
+          ) : null}
           <span>
-            stage <span className="text-[#d9d9de]">{run.stage ?? '-'}</span>
+            stage <span className="text-[#d9d9de]">{run.stage ?? 'unstaged'}</span>
           </span>
           <span className={slow ? 'text-[#e9b153]' : undefined}>last write {age(ageSeconds)}</span>
           <span>started {run.started_utc ?? '-'}</span>
@@ -281,10 +286,10 @@ export default function RunSection({ run }: { run: Run }) {
           </Panel>
         ) : null}
         <Panel title="reward per step" right={num(latest.mean_reward)}>
-          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.mean_reward) }]} />
+          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.mean_reward) }]} yMin={-1} yMax={1} />
         </Panel>
         <Panel title="pass rate per step" right={rate(latest.pass_rate)}>
-          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.pass_rate) }]} format={percentTick} />
+          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.pass_rate) }]} yMin={0} yMax={1} format={percentTick} />
         </Panel>
         {hasPassAtOne ? (
           <Panel
@@ -324,7 +329,7 @@ export default function RunSection({ run }: { run: Run }) {
           />
         </Panel>
         <Panel title="truncation rate per step" right={rate(latest.truncation_rate)}>
-          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.truncation_rate) }]} format={percentTick} />
+          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.truncation_rate) }]} yMin={0} yMax={1} format={percentTick} />
         </Panel>
         <Panel
           title="prompts and sequences per step"
@@ -343,6 +348,38 @@ export default function RunSection({ run }: { run: Run }) {
             yMin={0}
             format={(value) => String(Math.round(value))}
           />
+        </Panel>
+        <Panel
+          title="pool composition"
+          legend={
+            <>
+              <Swatch color={ACCENT} label="train prompts" />
+              <Swatch color={MUTED} label="parked prompts" />
+            </>
+          }
+        >
+          <LineChart
+            series={[
+              { color: ACCENT, points: pairs(steps, run.series.train_prompts) },
+              { color: MUTED, points: pairs(steps, run.series.parked_prompts) },
+            ]}
+            yMin={0}
+            format={(value) => String(Math.round(value))}
+            empty="no pool data"
+          />
+          <div className="mt-1 border-t border-white/[0.06] pt-1">
+            <div className="flex items-baseline justify-between font-mono text-[10px] text-[#6b6b73]">
+              <Swatch color={DIM} label="advantage share" />
+              <span className="tabular-nums text-[#8b8b94]">{num(latest.advantage_share)}</span>
+            </div>
+            <LineChart
+              series={[{ color: DIM, points: pairs(steps, run.series.advantage_share) }]}
+              yMin={0}
+              yMax={1}
+              format={percentTick}
+              empty="no pool data"
+            />
+          </div>
         </Panel>
         <Panel title="stage completion per step (%)" right={run.stage_progress.band ?? undefined}>
           <LineChart series={stageSegments(run.stage_progress.points)} format={(value) => `${value.toFixed(0)}%`} />

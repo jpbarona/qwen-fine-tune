@@ -124,10 +124,19 @@ SERIES_FIELDS: tuple[str, ...] = (
     "step_seconds",
     "completion_tokens_per_second",
     "sequences_per_second",
+    "train_prompts",
+    "parked_prompts",
+    "advantage_share",
 )
 
 #: Fields that are whole counts and are read as integers, not floats.
-COUNT_SERIES_FIELDS: tuple[str, ...] = ("cache_hits", "prompts", "sequences")
+COUNT_SERIES_FIELDS: tuple[str, ...] = (
+    "cache_hits",
+    "prompts",
+    "sequences",
+    "train_prompts",
+    "parked_prompts",
+)
 
 LATEST_FIELDS: tuple[str, ...] = SERIES_FIELDS + ("rollouts",)
 
@@ -254,6 +263,22 @@ def _schedule_step_prompts(meta: Mapping[str, Any]) -> int | None:
     if not isinstance(schedule, Mapping):
         return None
     return _positive_int(schedule.get("step_prompts"))
+
+
+def _pool_policy(meta: Mapping[str, Any]) -> str | None:
+    """The pool re-screen policy the run used, or None for an unpooled run.
+
+    `pool_policy` is the current key. A meta file written before it was
+    promoted to the top level still carries the policy inside `schedule`, so
+    that value is read as the fallback.
+    """
+    policy = _string(meta.get("pool_policy"))
+    if policy is not None:
+        return policy
+    schedule = meta.get("schedule")
+    if isinstance(schedule, Mapping):
+        return _string(schedule.get("policy"))
+    return None
 
 
 def _pool_train_size(meta: Mapping[str, Any]) -> int | None:
@@ -988,6 +1013,7 @@ def _waiting_run(arm: str) -> dict[str, Any]:
         "prompt_samples": 0,
         "prompt_sample_target": None,
         "entropy_every_steps": None,
+        "pool_policy": None,
         "stage": None,
         "bands": [],
         "stage_progress": {
@@ -1043,6 +1069,7 @@ def _collect_run(
         "prompt_samples": _prompt_samples(rows),
         "prompt_sample_target": _prompt_sample_target(meta),
         "entropy_every_steps": _entropy_every_steps(meta),
+        "pool_policy": _pool_policy(meta),
         "stage": _string(rows[-1].get("stage")) if rows else None,
         "bands": _band_pass_rates(run_dir),
         "stage_progress": _stage_progress(run_dir, meta, dropped_by_band),

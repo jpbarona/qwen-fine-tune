@@ -494,6 +494,67 @@ def test_target_steps_absent_when_unknown(tmp_path) -> None:
     assert data["runs"][0]["target_steps"] is None
 
 
+def test_a_pooled_run_reports_the_policy_and_the_step_series(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "train_prompts": 30,
+            "parked_prompts": 8,
+            "advantage_share": 0.25,
+            "pool_policy": "sweep",
+            "mean_reward": 0.5,
+        },
+        {
+            "step": 2,
+            "arm": "code-score",
+            "train_prompts": 34,
+            "parked_prompts": 4,
+            "advantage_share": 0.75,
+            "pool_policy": "sweep",
+            "mean_reward": 0.6,
+        },
+    ]
+    run_dir = write_run(
+        tmp_path / "runs",
+        rows=rows,
+        meta_extra={"pool_policy": "sweep", "mode": "real"},
+    )
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["pool_policy"] == "sweep"
+    assert run["series"]["train_prompts"] == [30, 34]
+    assert run["series"]["parked_prompts"] == [8, 4]
+    assert run["series"]["advantage_share"] == [
+        pytest.approx(0.25),
+        pytest.approx(0.75),
+    ]
+    assert run["latest"]["train_prompts"] == 34
+    assert run["latest"]["parked_prompts"] == 4
+    assert run["latest"]["advantage_share"] == pytest.approx(0.75)
+
+
+def test_the_policy_falls_back_to_the_schedule_record(tmp_path) -> None:
+    run_dir = write_run(
+        tmp_path / "runs",
+        meta_extra={"schedule": {"policy": "spread", "step_prompts": 38}},
+    )
+    assert collect_dashboard([run_dir])["runs"][0]["pool_policy"] == "spread"
+
+
+def test_an_old_run_has_empty_pool_series_and_no_policy(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs", "code-score")
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["pool_policy"] is None
+    assert run["series"]["train_prompts"] == [None, None]
+    assert run["series"]["parked_prompts"] == [None, None]
+    assert run["series"]["advantage_share"] == [None, None]
+    assert run["latest"]["train_prompts"] is None
+    assert run["latest"]["advantage_share"] is None
+    assert "pool composition" in render_html(collect_dashboard([run_dir]))
+
+
 def test_started_is_shown_as_a_readable_utc_timestamp(tmp_path) -> None:
     run_dir = write_run(tmp_path / "runs", "code-score", timestamp="20261112T013045Z")
     data = collect_dashboard([run_dir])

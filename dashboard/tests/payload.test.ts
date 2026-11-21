@@ -49,6 +49,15 @@ test('accepts sparse GPU readings and newer fields', () => {
   assert.equal(isDashboard(data), true)
 })
 
+test('accepts pooled step series and a pool policy', () => {
+  const data: any = payload()
+  data.runs[0].pool_policy = 'sweep'
+  data.runs[0].series.train_prompts = [30, 34]
+  data.runs[0].series.parked_prompts = [8, 4]
+  data.runs[0].series.advantage_share = [0.25, 0.75]
+  assert.equal(isDashboard(data), true)
+})
+
 const corruptions: [string, (data: any) => void][] = [
   ['null GPU history sample', (data) => { data.gpu.history = [null] }],
   ['non-numeric GPU sample', (data) => { data.gpu.history = [{ utilization: {} }] }],
@@ -64,6 +73,9 @@ const corruptions: [string, (data: any) => void][] = [
   ['null question', (data) => { data.runs[0].questions = { rows: [null] } }],
   ['non-string prompt ID', (data) => { data.runs[0].questions = { rows: [{ prompt_id: 1 }] } }],
   ['non-string dropped ID', (data) => { data.runs[0].dropped = { ids: [{}] } }],
+  ['non-string pool policy', (data) => { data.runs[0].pool_policy = 3 }],
+  ['non-array train prompt series', (data) => { data.runs[0].series.train_prompts = {} }],
+  ['non-numeric advantage share', (data) => { data.runs[0].series.advantage_share = ['0.5'] }],
   ['object metric value', (data) => { data.runs[0].latest.mean_reward = {} }],
   ['non-array metric series', (data) => { data.runs[0].series.mean_reward = {} }],
   ['null run', (data) => { data.runs = [null] }],

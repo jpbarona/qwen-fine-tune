@@ -87,11 +87,11 @@ function linePath(points: [number, number | null][], sx: (x: number) => number, 
 
 export function LineChart({
   series,
-  height = 118,
+  height = 180,
   format = (value: number) => value.toFixed(2),
   yMin,
   yMax,
-  tickCount = 3,
+  tickCount = 6,
   empty = 'no data',
 }: {
   series: ChartSeries[]
@@ -133,11 +133,12 @@ export function LineChart({
   const plotWidth = Math.max(width - pad.left - pad.right, 8)
   const plotHeight = height - pad.top - pad.bottom
   const sx = (x: number) => (xHi === xLo ? pad.left + plotWidth / 2 : pad.left + ((x - xLo) / (xHi - xLo)) * plotWidth)
-  const sy = (y: number) => pad.top + (1 - (y - lo) / (hi - lo)) * plotHeight
+  const sy = (y: number) => pad.top + (1 - (Math.min(Math.max(y, lo), hi) - lo) / (hi - lo)) * plotHeight
 
   const ticks = Array.from({ length: tickCount }, (_, index) =>
     tickCount === 1 ? hi : hi - ((hi - lo) * index) / (tickCount - 1),
   )
+  const crossesZero = lo < 0 && hi > 0
 
   const lastPoints = series.map((entry) => {
     for (let index = entry.points.length - 1; index >= 0; index -= 1) {
@@ -153,12 +154,15 @@ export function LineChart({
         <svg width={width} height={height} role="img" aria-label={series.map((entry) => entry.label ?? 'series').join(', ')}>
           {ticks.map((tick, index) => (
             <g key={index}>
-              <line x1={pad.left} x2={width - pad.right} y1={sy(tick)} y2={sy(tick)} stroke={GRID} strokeWidth={1} />
+              <line x1={pad.left} x2={width - pad.right} y1={sy(tick)} y2={sy(tick)} stroke={GRID} strokeWidth={1} strokeDasharray="3 3" />
               <text x={pad.left - 6} y={sy(tick) + 3} textAnchor="end" fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS}>
                 {format(tick)}
               </text>
             </g>
           ))}
+          {crossesZero ? (
+            <line x1={pad.left} x2={width - pad.right} y1={sy(0)} y2={sy(0)} stroke="rgba(255,255,255,0.24)" strokeWidth={1.2} />
+          ) : null}
           <text x={pad.left} y={height - 3} fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS} textAnchor="start">
             {xLo}
           </text>
@@ -202,7 +206,7 @@ export function LineChart({
 export function BarChart({
   bins,
   counts,
-  height = 118,
+  height = 180,
   format = (value: number) => String(value),
   empty = 'no data',
 }: {
@@ -238,7 +242,7 @@ export function BarChart({
             const value = Math.round(hi * (1 - fraction))
             return (
               <g key={fraction}>
-                <line x1={pad.left} x2={width - pad.right} y1={pad.top + fraction * plotHeight} y2={pad.top + fraction * plotHeight} stroke={GRID} strokeWidth={1} />
+                <line x1={pad.left} x2={width - pad.right} y1={pad.top + fraction * plotHeight} y2={pad.top + fraction * plotHeight} stroke={GRID} strokeWidth={1} strokeDasharray="3 3" />
                 <text x={pad.left - 6} y={pad.top + fraction * plotHeight + 3} textAnchor="end" fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS}>
                   {value}
                 </text>

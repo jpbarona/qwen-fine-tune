@@ -405,6 +405,12 @@ length, truncation, and memory. Two things worth knowing:
   denominator is the band's starting pool from `meta.json`, so the line shows
   progress that does not move backwards.
 
+A pooled run names its re-screen policy in the run header and adds a pool
+composition panel. The upper chart plots the train prompts and the parked
+prompts per step. The lower chart plots the advantage share from 0 to 1. All
+three series come from the step rows, so an older run without them shows the
+panel empty rather than an error.
+
 The questions tab lists every prompt the run sampled, one row each: steps,
 rollouts, full-pass steps, per-rollout pass rate, best result, last error, last
 step, and solved. It streams `rollouts.jsonl` once and keeps counters per
