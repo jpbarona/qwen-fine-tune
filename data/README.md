@@ -58,3 +58,7 @@ reference solution against its own tests with plain Python, so the suite needs
 no Docker. The same 50 solutions were also checked once in `DockerTestRunner`
 against `python:3.12-slim`.
 
+
+`train_split.jsonl` holds the 711 training rows of the pinned split, in the same
+row schema. It is the question set a pooled run screens, so the screen covers
+every training prompt and none of the held-out 250.

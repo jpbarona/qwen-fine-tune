@@ -103,8 +103,8 @@ into its own output folder, not a run folder.
 
 ```bash
 .venv/bin/rlvr screen \
-    --questions data/mbpp_full.jsonl \
-    --output screening/20261114
+    --questions data/train_split.jsonl \
+    --output screens/mbpp-base
 ```
 
 `--questions` is a JSONL file in the MBPP row schema, so the synthetic easy set
