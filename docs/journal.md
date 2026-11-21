@@ -117,4 +117,8 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 100. 3e-4 probe held, so the full run starts there
 101. Run rate set to 1e-4 before the first evaluation
 102. Stop rule tripped: 0.47 at step 40, below 0.51
+103. LFM run ended at 0.53 against a base of 0.51
+104. All six evaluations sat inside the five-point noise band
+105. vLLM cut a step from 717 seconds to 236 at 608 sequences
+106. Sixty one percent of step 60 groups carried no advantage
 

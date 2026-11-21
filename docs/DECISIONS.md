@@ -582,3 +582,35 @@ rate is not separated by this run.
 What this rules out: a long run at 1e-4 on this curriculum reproducing the Qwen
 result. What it does not rule out: a gain at another rate or another placement.
 
+## D31. The LFM run ended flat at 138 steps
+
+The run was resumed after D30 and stopped at step 138 when the GPU box was
+released. Settings were all-linear LoRA at rank 16 and alpha 32, rate 1e-4, six
+dropped prompts, and no cap until step 80. From step 81 the engine was vLLM
+0.34.0 with a cap of 76 prompts, which took a step from about 717 seconds to
+236 seconds at 608 sequences.
+
+Evaluations on the pinned 100, base 0.51 first:
+
+| Step | 20 | 40 | 60 | 80 | 100 | 120 |
+| --- | --- | --- | --- | --- | --- | --- |
+| pass@1 | 0.55 | 0.47 | 0.48 | 0.52 | 0.52 | 0.53 |
+
+Every point sits inside the five-point noise of a 100-question cohort. The stop
+rule from D30 never fired, since it needs two consecutive evaluations below
+0.41. The engine change at step 81 sits between the 0.52 readings and did not
+move them.
+
+The run produced 57,320 rollouts over 138 steps. At step 60 about 61 percent of
+groups were all-fail, so most steps carried no advantage. That is the same pool
+problem as run 17, not a property of the model.
+
+Conclusions. On this curriculum, 2.6B parameters at 1e-4 show no gain and no
+loss in 138 steps, so the Qwen improvement does not transfer to this pairing as
+run. The run is not evidence of a rate or placement effect, only of a null
+result at this setting.
+
+Data: the folder `2026-11-20-lfm-run100` holds checkpoints 10 to 130, 138
+metric rows, and 57,320 rollout rows. Rows written after the last pull, possibly
+the step 140 evaluation, are lost with the box.
+
