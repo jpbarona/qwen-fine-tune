@@ -103,6 +103,41 @@ function ticksFor(hi: number, lo: number, tickCount: number): number[] {
   )
 }
 
+const MIN_TICK_SPAN = 6
+
+function labelsRepeat(values: number[], format: (value: number) => string): boolean {
+  const labels = values.map((value) => format(value))
+  return new Set(labels).size < labels.length
+}
+
+function tickBand(
+  values: number[],
+  yMin: number | undefined,
+  yMax: number | undefined,
+  tickCount: number,
+  format: (value: number) => string,
+): [number, number] {
+  let [lo, hi] = axisBand(values, yMin, yMax)
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (!labelsRepeat(ticksFor(hi, lo, tickCount), format)) break
+    if (yMin !== undefined && yMax !== undefined) break
+    const step = (hi - lo) / Math.max(tickCount - 1, 1)
+    // A step that rounds to zero produces duplicate labels, so widen the band
+    // to at least six units. Otherwise double it until the labels differ.
+    const span = Math.max(hi - lo, step < 1 ? MIN_TICK_SPAN : (hi - lo) * 2)
+    const grow = span - (hi - lo)
+    if (yMin !== undefined) {
+      hi += grow
+    } else if (yMax !== undefined) {
+      lo -= grow
+    } else {
+      lo -= grow / 2
+      hi += grow / 2
+    }
+  }
+  return [lo, hi]
+}
+
 function linePath(points: [number, number | null][], sx: (x: number) => number, sy: (y: number) => number): string {
   let path = ''
   let open = false
@@ -157,11 +192,12 @@ export function LineChart({
     )
   }
 
-  const [lo, hi] = axisBand(leftYs.length ? leftYs : rightYs, yMin, yMax)
-  const hasRight = rightYs.length > 0
-  const [rightLo, rightHi] = hasRight ? axisBand(rightYs) : [0, 1]
   const leftFormat = leftSeries.find((entry) => entry.format)?.format ?? format
   const rightFormat = rightSeries.find((entry) => entry.format)?.format ?? format
+  const leftValues = leftYs.length ? leftYs : rightYs
+  const [lo, hi] = tickBand(leftValues, yMin, yMax, tickCount, leftFormat)
+  const hasRight = rightYs.length > 0
+  const [rightLo, rightHi] = hasRight ? tickBand(rightYs, undefined, undefined, tickCount, rightFormat) : [0, 1]
   const rightTicks = hasRight ? ticksFor(rightHi, rightLo, tickCount) : []
   const rightPad = hasRight
     ? Math.max(10, Math.ceil(Math.max(...rightTicks.map((tick) => rightFormat(tick).length)) * 6.4) + 10)

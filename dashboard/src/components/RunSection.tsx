@@ -48,7 +48,7 @@ function percentTick(value: number): string {
   const percent = value * 100
   if (percent === 0) return '0%'
   const digits = Math.abs(percent) < 1 ? 2 : 1
-  return `${percent.toFixed(digits)}%`
+  return `${Number(percent.toFixed(digits))}%`
 }
 
 function shareTick(value: number): string {
@@ -381,7 +381,6 @@ export default function RunSection({ run }: { run: Run }) {
             ]}
             yMin={0}
             height={70}
-            tickCount={3}
             format={countTick}
             empty="no pool data"
           />
@@ -397,7 +396,6 @@ export default function RunSection({ run }: { run: Run }) {
               yMin={0}
               yMax={1}
               height={70}
-              tickCount={3}
               format={shareTick}
               empty="no pool data"
             />
