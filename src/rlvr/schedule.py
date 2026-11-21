@@ -23,8 +23,9 @@ the step.
 
 `Sweep` is the second policy. It covers the whole parked pool in `m` consecutive
 all-parked steps, then trains for `gap_ratio * m` steps with no parked prompts.
-Labels update when the last sweep step ends. The cycle position is saved beside
-the label state, so a resume continues the same sweep at the same index.
+A parked group is labelled in the step it runs, so a resume loses no sweep
+outcome. The cycle position is saved beside the label state, so a resume
+continues the same sweep at the same index.
 """
 
 from __future__ import annotations
@@ -388,12 +389,12 @@ class Spread:
 class Sweep:
     """A whole-pool sweep in `m` steps, then a gap of training steps.
 
-    `prompts_per_step` is the full step size. With `P` parked prompts, the
+    `prompts_per_step` is the target step size. With `P` parked prompts, the
     sweep length is `m = ceil(P / prompts_per_step)` and the gap is
     `gap_ratio * m` training steps. Every step in the sweep is parked only, so
-    no train prompt appears. The sweep slice keeps the full step size even when
-    the last slice or a small pool would be shorter, because a sweep step uses
-    the same rollout budget as a training step.
+    no train prompt appears. A final sweep step may hold fewer prompts when the
+    parked count does not divide evenly. A sweep step never repeats a prompt,
+    because the budget is a target and not a floor.
 
     The schedule keeps a cycle position. Position `0` to `m - 1` is a sweep
     step and the rest of the cycle is a training step. The position is saved
@@ -411,9 +412,6 @@ class Sweep:
         default_factory=dict, init=False, repr=False
     )
     _position: int = field(default=0, init=False, repr=False)
-    _pending: list[GroupOutcome] = field(default_factory=list, init=False, repr=False)
-    _last_was_sweep: bool = field(default=False, init=False, repr=False)
-    _last_closed_sweep: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         _positive_int("prompts_per_step", self.prompts_per_step)
@@ -483,9 +481,6 @@ class Sweep:
         sweep_steps = self.sweep_length(len(parked))
         if sweep_steps == 0:
             self._position = 0
-            self._pending.clear()
-            self._last_was_sweep = False
-            self._last_closed_sweep = False
             return StepPlan(train=self._train_block(step, train))
 
         cycle = sweep_steps + self.gap_ratio * sweep_steps
@@ -497,58 +492,26 @@ class Sweep:
             random.Random(self.seed).shuffle(order)
             by_id = {_prompt_id(prompt): prompt for prompt in parked}
             start = position * self.prompts_per_step
-            parked_slice = tuple(
-                by_id[order[(start + index) % len(order)]]
-                for index in range(self.prompts_per_step)
-            )
-            self._last_was_sweep = True
-            self._last_closed_sweep = position == sweep_steps - 1
+            size = min(self.prompts_per_step, len(order) - start)
+            parked_slice = tuple(by_id[order[start + index]] for index in range(size))
             self._position = (position + 1) % cycle
             return StepPlan(parked=parked_slice)
 
-        self._last_was_sweep = False
-        self._last_closed_sweep = False
         self._position = (position + 1) % cycle
         return StepPlan(train=self._train_block(step, train))
 
     def observe(
         self, step: int, outcomes: Sequence[GroupOutcome]
     ) -> tuple[LabelUpdate, ...]:
-        """Apply label changes. Promotions wait for the last sweep step.
+        """Apply the promotion and demotion rules to one step's groups.
 
-        Parked outcomes from every sweep step are held until the sweep ends,
-        then promoted at `promotion_bar`. A resume mid-sweep loses outcomes from
-        steps before the resume, because only the position is saved. Train
-        groups in a gap step follow the spread demotion rule.
+        A parked group is decided in the step it runs, so a sweep promotion does
+        not wait for the rest of the sweep and a resume loses nothing. A train
+        group in a gap step follows the spread demotion rule.
         """
         _positive_int("step", step)
+        updates: list[LabelUpdate] = []
 
-        if self._last_was_sweep:
-            self._pending.extend(
-                outcome for outcome in outcomes if outcome.parked
-            )
-            if not self._last_closed_sweep:
-                return ()
-            latest: dict[str, GroupOutcome] = {}
-            for outcome in self._pending:
-                current = latest.get(outcome.prompt_id)
-                if current is None or outcome.passed > current.passed:
-                    latest[outcome.prompt_id] = outcome
-            updates: list[LabelUpdate] = []
-            for outcome in latest.values():
-                update = _observe_outcome(
-                    step,
-                    outcome,
-                    promotion_bar=self.promotion_bar,
-                    demote_after=self.demote_after,
-                    failure_streak=self._failure_streak,
-                )
-                if update is not None:
-                    updates.append(update)
-            self._pending.clear()
-            return tuple(updates)
-
-        updates = []
         for outcome in outcomes:
             update = _observe_outcome(
                 step,
@@ -559,6 +522,7 @@ class Sweep:
             )
             if update is not None:
                 updates.append(update)
+
         return tuple(updates)
 
     def state_row(self, step: int) -> dict[str, Any]:
@@ -574,7 +538,6 @@ class Sweep:
         if isinstance(position, bool) or not isinstance(position, int) or position < 0:
             return
         self._position = position
-        self._pending.clear()
 
     def failure_streak(self, prompt_id: str) -> int:
         """The current full-failure streak for a train prompt."""

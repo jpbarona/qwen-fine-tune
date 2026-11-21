@@ -375,18 +375,33 @@ def test_a_cycle_covers_every_parked_prompt_once() -> None:
     assert sorted(seen) == [prompt.prompt_id for prompt in parked]
 
 
-def test_a_pool_smaller_than_one_step_still_uses_the_whole_step() -> None:
+def test_a_pool_smaller_than_one_step_does_not_repeat_a_prompt() -> None:
     policy = sweep(prompts_per_step=38, gap_ratio=3)
     parked = prompts("parked", 3)
 
     plan = policy.plan(1, prompts("train", 5), parked)
 
     assert plan.train == ()
-    assert len(plan.parked) == 38
+    assert len(plan.parked) == 3
     assert {prompt.prompt_id for prompt in plan.parked} == {
         prompt.prompt_id for prompt in parked
     }
     assert policy.cycle_length(3) == 4
+
+
+def test_a_short_final_sweep_step_holds_only_the_rest() -> None:
+    # Five parked prompts at two per step gives three sweep steps, the last one
+    # holding one prompt. No prompt is repeated in a step.
+    policy = sweep(prompts_per_step=2, gap_ratio=3)
+    parked = prompts("parked", 5)
+    train = prompts("train", 3)
+
+    plans = [policy.plan(step, train, parked) for step in (1, 2, 3)]
+    sizes = [len(plan.parked) for plan in plans]
+    seen = [prompt.prompt_id for plan in plans for prompt in plan.parked]
+
+    assert sizes == [2, 2, 1]
+    assert sorted(seen) == [prompt.prompt_id for prompt in parked]
 
 
 def test_an_empty_parked_pool_never_starts_a_sweep() -> None:
@@ -455,23 +470,17 @@ def test_a_bad_saved_position_is_ignored() -> None:
     assert policy.position == 1
 
 
-def test_promotions_wait_for_the_end_of_the_sweep() -> None:
-    # One parked prompt at one prompt per step is one sweep step.
+def test_a_sweep_step_promotes_in_the_same_step() -> None:
     policy = sweep(prompts_per_step=1, gap_ratio=3)
     parked = prompts("parked", 2)
     passed = GroupOutcome(prompt_id="parked-0000", passed=2, samples=16, parked=True)
 
     policy.plan(1, [], parked)
-    assert policy.observe(1, [passed]) == ()
+    updates = policy.observe(1, [passed])
 
-    policy.plan(2, [], parked)
-    updates = policy.observe(
-        2,
-        [GroupOutcome(prompt_id="parked-0001", passed=2, samples=16, parked=True)],
-    )
-
-    assert [update.prompt_id for update in updates] == ["parked-0000", "parked-0001"]
-    assert all(update.label == "train" for update in updates)
+    assert [update.prompt_id for update in updates] == ["parked-0000"]
+    assert updates[0].label == "train"
+    assert updates[0].reason == "promoted"
 
 
 def test_a_sweep_group_never_demotes() -> None:
