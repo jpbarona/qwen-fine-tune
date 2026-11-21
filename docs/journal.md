@@ -142,3 +142,5 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 124. The spread arm inflated to 1,300 tokens and broke syntax at step 33
 125. The cap drops to 1,024 so a runaway answer scores minus one
 126. Steps halve to nineteen prompts, about 240 seconds
+127. Meta keeps the first start values after a resume
+128. Step 21 after the cap, 486 tokens and five percent truncated

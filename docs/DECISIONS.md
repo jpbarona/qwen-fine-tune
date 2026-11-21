@@ -807,3 +807,13 @@ Four changes.
 
 The arm restarts from the step-20 checkpoint, the last one before the drift, so
 the bad steps are discarded.
+
+The arm restarted from the step-20 checkpoint, the last one before the drift, so
+the bad steps are discarded. Step 21 with the new settings measured 19 prompts,
+304 sequences, 486 mean tokens and 5.3 percent truncation, against 1,871 tokens
+and 88 percent truncation at the stop.
+
+One record-keeping gap: `meta.json` is written when a run folder is created and
+is not refreshed on resume, so it still reports the first start's values, such as
+`eval_every_steps = 20`. The schedule uses the loaded config, not the metadata,
+so behaviour is correct and the record is stale.

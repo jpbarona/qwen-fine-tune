@@ -234,3 +234,16 @@ Cost. The first two options need a change in the vLLM backend and a reward check
 About a day with tests.
 
 Where. `src/rlvr/vllm_backend.py` sampling parameters, and `configs/*.toml`.
+
+## Refresh meta.json on resume
+
+The problem. `meta.json` records the config at creation. A resumed run keeps the
+old values, so the folder can say `eval_every_steps = 20` while the run evaluates
+every ten.
+
+The idea. Rewrite the run's config block on every resume, or append a
+`resume_history` list with the config used at each start.
+
+Cost. A small change in the run store and one test.
+
+Where. `src/rlvr/runs.py` and the resume path in `src/rlvr/cli.py`.

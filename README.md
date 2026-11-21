@@ -150,27 +150,13 @@ and a recorded but unenforced thinking budget of 1,024.
 Install with the one vLLM environment in the Install section. The screen uses
 the same environment.
 
-First write the 711 training questions from the pinned split. The arm config
-reads `screens/mbpp-base/rows.jsonl`, so the output folder must be
-`screens/mbpp-base`.
+First the screen input. `data/train_split.jsonl` already holds the 711 training
+questions of the pinned split, in the MBPP row schema, so no generation step is
+needed. The arm config reads `screens/mbpp-base/rows.jsonl`, so the screen output
+folder must be `screens/mbpp-base`.
 
 ```bash
-.venv/bin/python - <<'PY'
-import json
-from pathlib import Path
-
-split = json.loads(Path("data/split_seed1234.json").read_text(encoding="utf-8"))
-rows = {}
-for line in Path("data/mbpp_full.jsonl").read_text(encoding="utf-8").splitlines():
-    if line.strip():
-        row = json.loads(line)
-        rows[f"mbpp-{row['task_id']}"] = line
-Path("screens").mkdir(exist_ok=True)
-Path("screens/mbpp-train.jsonl").write_text(
-    "\n".join(rows[prompt_id] for prompt_id in split["train"]) + "\n",
-    encoding="utf-8",
-)
-PY
+ls data/train_split.jsonl
 ```
 
 Then screen the base model. Leave out `--samples` so the default sixteen is
