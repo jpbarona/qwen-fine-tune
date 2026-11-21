@@ -81,6 +81,17 @@ eval_batch_size = 8
 # Score the next generated prompt group while the current group backpropagates.
 prefetch_scoring = true
 
+# Pool policy for the parked prompts. "spread" sends a fixed slice of parked
+# prompts with every step. Unset means no schedule: the run trains the train
+# pool and leaves parked prompts alone.
+# pool_policy = "spread"
+# The measured screen output, as a folder or its rows.jsonl file. Unset keeps
+# the unmeasured placeholder pool.
+# screen_rows = "screens/latest/rows.jsonl"
+# Sequence budget for one step. Prompts per step is this value divided by the
+# group size, and the parked cap is a quarter of it divided by the group size.
+rollouts_per_step = 608
+
 [budget]
 # Hard caps. Unset means the run trains every planned step. These stop the loop
 # cleanly and record the reason in eval.json.

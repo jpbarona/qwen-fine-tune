@@ -314,6 +314,7 @@ class RecordingStore:
     def __init__(self) -> None:
         self.rollouts: list[RolloutRecord] = []
         self.metrics: list[dict] = []
+        self.labels: list[dict] = []
         self.eval: dict | None = None
         self.meta: dict | None = None
         self.timestamp = "20261112T000000Z"
@@ -328,6 +329,12 @@ class RecordingStore:
 
     def append_metric(self, row: dict) -> None:
         self.metrics.append(row)
+
+    def append_label(self, row: dict) -> None:
+        self.labels.append(row)
+
+    def read_labels(self) -> list[dict]:
+        return list(self.labels)
 
     def write_eval(self, payload: dict) -> None:
         self.eval = payload
@@ -376,19 +383,25 @@ def build(
     batch_policy=None,
     pools=None,
     labels_path=None,
+    schedule=None,
 ):
     config = load_config(_write_config(tmp_path, config_text))
     training = prompts if prompts is not None else make_prompts()
+    active_store = store or RecordingStore()
+    if isinstance(active_store, RecordingStore):
+        active_store.run_dir = tmp_path / "run"
+        active_store.checkpoints_dir = active_store.run_dir / "checkpoints"
     return Experiment(
         arm=arm,
         config=config,
         generator=generator or StubGenerator(),
         judge=judge or ExplodingJudge(),
         test_runner=runner or StubTestRunner(),
-        store=store or RecordingStore(),
+        store=active_store,
         prompts=training,
         pools=pools,
         labels_path=labels_path,
+        schedule=schedule,
         # Unit tests default the eval pool to the training prompts. The
         # Experiment itself has no such fallback, and the CLI passes the real
         # held-out split.
@@ -1479,3 +1492,323 @@ def test_the_one_thinking_budget_reaches_every_step(tmp_path) -> None:
     ).run()
 
     assert {value for value in seen if value is not None} == {777}
+
+
+class MixedGenerator(StubGenerator):
+    """Gives each prompt group one passing and one failing rollout."""
+
+    def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
+        generations = super().generate(prompt, n=n, temperature=temperature)
+        return [
+            Generation(
+                reasoning=generation.reasoning,
+                code="FAIL" if index % 2 else generation.code,
+                prompt_tokens=generation.prompt_tokens,
+                completion_tokens=generation.completion_tokens,
+            )
+            for index, generation in enumerate(generations)
+        ]
+
+
+class TwoPassGenerator(StubGenerator):
+    """Gives one named prompt exactly two passing rollouts and fails the rest."""
+
+    def __init__(self, promoted: str, group_size: int) -> None:
+        super().__init__()
+        self.promoted = promoted
+        self.group_size = group_size
+
+    def generate(self, prompt: Prompt, *, n: int, temperature: float) -> list[Generation]:
+        passing = 2 if prompt.prompt_id == self.promoted else 0
+        return [
+            Generation(
+                reasoning="trace",
+                code="ok" if index < passing else "FAIL",
+                prompt_tokens=10,
+                completion_tokens=20,
+            )
+            for index in range(n)
+        ]
+
+
+ONE_STEP_CONFIG = """\
+[model]
+name = "Qwen/Qwen3-0.6B"
+revision = "r"
+
+[judge]
+model = "fake-judge-model"
+
+[data]
+split_seed = 1
+
+[fake]
+steps = 1
+
+[training]
+generations_per_prompt = 16
+"""
+
+TWO_STEP_CONFIG = ONE_STEP_CONFIG.replace("steps = 1", "steps = 2")
+
+TEN_STEP_CONFIG = ONE_STEP_CONFIG.replace("steps = 1", "steps = 10")
+
+
+def test_a_spread_step_puts_train_and_parked_groups_in_one_update(tmp_path) -> None:
+    from rlvr.pools import Pools
+    from rlvr.schedule import Spread
+
+    prompts = make_prompts(2)
+    pools = Pools(
+        train=("mbpp-0000",),
+        rehearsal=(),
+        parked=("mbpp-0001",),
+        samples=16,
+    )
+    schedule = Spread(prompts_per_step=2, cap=1, refresh_steps=1, seed=3)
+    generator = StubGenerator()
+    store = RecordingStore()
+
+    build(
+        "code-score",
+        tmp_path,
+        generator=generator,
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        schedule=schedule,
+        config_text=ONE_STEP_CONFIG,
+    ).run()
+
+    assert generator.batch_calls[0] == ("mbpp-0000", "mbpp-0001")
+    assert [prompt_id for prompt_id, _rewards in generator.update_calls] == [
+        "mbpp-0000",
+        "mbpp-0001",
+    ]
+    assert generator.updates == 1
+
+
+def test_a_step_row_records_the_counts_and_the_advantage_share(tmp_path) -> None:
+    from rlvr.pools import Pools
+    from rlvr.schedule import Spread
+
+    prompts = make_prompts(2)
+    pools = Pools(train=("mbpp-0000", "mbpp-0001"), rehearsal=(), parked=(), samples=16)
+    schedule = Spread(prompts_per_step=2, cap=0, refresh_steps=1, seed=0)
+    store = RecordingStore()
+
+    build(
+        "code-score",
+        tmp_path,
+        generator=MixedGenerator(),
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        schedule=schedule,
+        config_text=ONE_STEP_CONFIG,
+    ).run()
+
+    row = store.metrics[0]
+    assert row["pool_policy"] == "spread"
+    assert row["prompts"] == 2
+    assert row["train_prompts"] == 2
+    assert row["parked_prompts"] == 0
+    assert row["advantage_share"] == pytest.approx(1.0)
+
+
+def test_a_group_with_one_reward_counts_zero_advantage(tmp_path) -> None:
+    from rlvr.pools import Pools
+    from rlvr.schedule import Spread
+
+    prompts = make_prompts(1)
+    pools = Pools(train=("mbpp-0000",), rehearsal=(), parked=(), samples=16)
+    schedule = Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0)
+    store = RecordingStore()
+
+    build(
+        "code-score",
+        tmp_path,
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        schedule=schedule,
+        config_text=ONE_STEP_CONFIG,
+    ).run()
+
+    assert store.metrics[0]["advantage_share"] == 0.0
+
+
+def test_promotion_at_two_passes_writes_a_label_and_moves_the_prompt(tmp_path) -> None:
+    from rlvr.pools import Pools
+    from rlvr.schedule import Spread
+
+    prompts = make_prompts(2)
+    pools = Pools(
+        train=("mbpp-0000",),
+        rehearsal=(),
+        parked=("mbpp-0001",),
+        samples=16,
+    )
+    schedule = Spread(prompts_per_step=2, cap=1, refresh_steps=1, seed=0)
+    generator = TwoPassGenerator("mbpp-0001", group_size=16)
+    store = RecordingStore()
+
+    build(
+        "code-score",
+        tmp_path,
+        generator=generator,
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        schedule=schedule,
+        config_text=TWO_STEP_CONFIG,
+    ).run()
+
+    assert store.labels == [
+        {
+            "step": 1,
+            "prompt_id": "mbpp-0001",
+            "label": "train",
+            "reason": "promoted",
+            "passed": 2,
+            "samples": 16,
+        }
+    ]
+    # The promoted prompt is in the train pool for the next step.
+    assert "mbpp-0001" in generator.batch_calls[1]
+    assert generator.batch_calls[1] == ("mbpp-0000", "mbpp-0001")
+
+
+def test_demotion_after_ten_full_failure_groups(tmp_path) -> None:
+    from rlvr.pools import Pools
+    from rlvr.schedule import Spread
+
+    prompts = make_prompts(1)
+    pools = Pools(train=("mbpp-0000",), rehearsal=(), parked=(), samples=16)
+    schedule = Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0)
+    store = RecordingStore()
+
+    build(
+        "code-score",
+        tmp_path,
+        runner=StubTestRunner(total=1, passes=0),
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        schedule=schedule,
+        config_text=TEN_STEP_CONFIG,
+    ).run()
+
+    assert store.labels == [
+        {
+            "step": 10,
+            "prompt_id": "mbpp-0000",
+            "label": "parked",
+            "reason": "demoted",
+            "passed": 0,
+            "samples": 16,
+        }
+    ]
+
+
+def test_a_resume_replays_the_label_file(tmp_path) -> None:
+    from rlvr.pools import Pools
+    from rlvr.schedule import Spread
+
+    prompts = make_prompts(2)
+    pools = Pools(
+        train=("mbpp-0000",),
+        rehearsal=(),
+        parked=("mbpp-0001",),
+        samples=16,
+    )
+    schedule = Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0)
+    generator = StubGenerator()
+    store = RecordingStore()
+    store.labels = [
+        {
+            "step": 1,
+            "prompt_id": "mbpp-0001",
+            "label": "train",
+            "reason": "promoted",
+            "passed": 2,
+            "samples": 16,
+        }
+    ]
+
+    build(
+        "code-score",
+        tmp_path,
+        generator=generator,
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        schedule=schedule,
+        config_text=TWO_STEP_CONFIG,
+        resume_step=1,
+    ).run()
+
+    # Step 2 rotates to the second train prompt. Without the label replay the
+    # second prompt would still be parked and never drawn.
+    assert generator.batch_calls[0] == ("mbpp-0001",)
+    assert len(store.labels) == 1
+
+
+def test_the_config_builds_the_spread_schedule(tmp_path) -> None:
+    from rlvr.pools import Pools
+
+    prompts = make_prompts(2)
+    pools = Pools(
+        train=("mbpp-0000",),
+        rehearsal=(),
+        parked=("mbpp-0001",),
+        samples=16,
+    )
+    schedule_config = ONE_STEP_CONFIG.replace(
+        "generations_per_prompt = 16",
+        'generations_per_prompt = 16\npool_policy = "spread"\nrollouts_per_step = 16',
+    )
+    store = RecordingStore()
+
+    build(
+        "code-score",
+        tmp_path,
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        config_text=schedule_config,
+    ).run()
+
+    # 16 rollouts at group size 16 is one prompt, and the cap is zero, so the
+    # step is the train prompt alone.
+    assert store.metrics[0]["pool_policy"] == "spread"
+
+
+def test_a_schedule_run_writes_the_label_file_in_the_run_folder(tmp_path) -> None:
+    from rlvr.pools import Pools
+    from rlvr.runs import RunStore
+    from rlvr.schedule import Spread
+
+    prompts = make_prompts(2)
+    pools = Pools(
+        train=("mbpp-0000",),
+        rehearsal=(),
+        parked=("mbpp-0001",),
+        samples=16,
+    )
+    store = RunStore(tmp_path / "runs", "code-score")
+    build(
+        "code-score",
+        tmp_path,
+        generator=TwoPassGenerator("mbpp-0001", group_size=16),
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        schedule=Spread(prompts_per_step=2, cap=1, refresh_steps=1, seed=0),
+        config_text=TWO_STEP_CONFIG,
+    ).run()
+
+    rows = store.read_labels()
+    assert rows[0]["prompt_id"] == "mbpp-0001"
+    assert rows[0]["label"] == "train"
+    assert (store.run_dir / "labels.jsonl").is_file()

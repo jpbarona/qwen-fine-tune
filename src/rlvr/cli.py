@@ -72,6 +72,7 @@ from .fake import (
 )
 from .judge import JudgeClient, MissingAPIKeyError
 from .memory import configure_expandable_segments, read_torch_memory
+from .pools import DEFAULT_PROMOTION_BAR, Pools, PoolsError, from_rows
 from .publish import PublishError, publish_report
 from .reward import (
     ARMS,
@@ -88,7 +89,8 @@ from .resume import (
     validate_resume,
 )
 from .runs import RunStore
-from .screening import ScreenError, screen as run_screen
+from .screening import ROWS_NAME, ScreenError, ScreenStore
+from .screening import screen as run_screen
 from .stages import BANDS
 from .summary import SummaryError, format_summary, load_reports, write_report
 from .synthetic import SyntheticError, load_synthetic_questions
@@ -97,6 +99,7 @@ __all__ = [
     "build_generator",
     "build_judge",
     "build_parser",
+    "build_pools",
     "build_prompts",
     "build_screen_test_runner",
     "build_test_runner",
@@ -386,6 +389,60 @@ def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
     return train_prompts, eval_prompts
 
 
+def build_pools(config: Config, prompts: Sequence[Prompt]) -> Pools | None:
+    """Build the measured pools from the screen rows, or return None.
+
+    `[training] screen_rows` may name the screen output folder or its
+    `rows.jsonl` file. An absent key keeps the unmeasured placeholder path,
+    where the experiment trains every prompt and the run record says the pool
+    was not measured.
+
+    Every row must belong to the supplied training prompts. A row from another
+    split would send a prompt id the run cannot train, so it is a config error,
+    not a silently ignored row. Missing prompts are allowed, because a screen
+    in progress is a real state and the operator can see the pool count in the
+    run record.
+    """
+    if config.screen_rows is None:
+        return None
+
+    path = Path(config.screen_rows)
+    if not path.exists():
+        raise UsageError(f"screen_rows path not found: {path}")
+    if path.is_dir():
+        directory = path
+    elif path.name == ROWS_NAME:
+        directory = path.parent
+    else:
+        raise UsageError(
+            f"screen_rows must be a screen folder or a {ROWS_NAME} file, "
+            f"got {path}"
+        )
+
+    try:
+        rows = ScreenStore(directory).read_rows()
+    except ScreenError as error:
+        raise UsageError(f"cannot read screen rows: {error}") from error
+    if not rows:
+        raise UsageError(f"screen rows are empty: {path}")
+
+    samples = rows[0].samples
+    try:
+        pools = from_rows(rows, samples=samples, promotion_bar=DEFAULT_PROMOTION_BAR)
+    except PoolsError as error:
+        raise UsageError(f"cannot build the pools: {error}") from error
+
+    known = {prompt.prompt_id for prompt in prompts}
+    measured = set(pools.train) | set(pools.rehearsal) | set(pools.parked)
+    unknown = sorted(measured - known)
+    if unknown:
+        raise UsageError(
+            f"screen rows name {len(unknown)} prompt ids that are not in the "
+            f"training split, for example {unknown[0]!r}"
+        )
+    return pools
+
+
 def build_test_runner(config: Config, *, fake: bool):
     """The Docker runner over the full split and the synthetic rows, or the fake.
 
@@ -512,9 +569,10 @@ def run_command(args: argparse.Namespace) -> int:
     judge = build_judge(args.arm, config, fake=args.fake)
 
     train_prompts, eval_prompts = build_prompts(config)
-    # No screen rows are read yet, so the run has no measured pool. The
-    # experiment trains every prompt and records the pool as unmeasured.
-    # Task 4 replaces this with the pool built from screen rows.
+    # With screen rows the pool is measured and the schedule can draw parked
+    # prompts. Without them the run keeps the placeholder path: every prompt is
+    # train and the run record says the pool was not measured.
+    pools = build_pools(config, train_prompts)
     labels_path = None if args.fake else DEFAULT_LABELS_PATH
     if config.eval_final_questions is not None:
         eval_prompts = eval_prompts[: config.eval_final_questions]
@@ -584,6 +642,7 @@ def run_command(args: argparse.Namespace) -> int:
         test_runner=test_runner,
         store=store,
         prompts=train_prompts,
+        pools=pools,
         labels_path=labels_path,
         eval_prompts=eval_prompts,
         resume_step=resume_step,

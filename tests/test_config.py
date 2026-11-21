@@ -477,3 +477,55 @@ def test_throughput_settings_can_be_overridden(write_config) -> None:
         GOOD + "\n[training]\ntest_workers = 2\neval_batch_size = 3\nprefetch_scoring = false\n"
     ))
     assert (config.test_workers, config.eval_batch_size, config.prefetch_scoring) == (2, 3, False)
+
+
+def test_pool_settings_default(write_config) -> None:
+    config = load_config(write_config(GOOD))
+
+    assert config.pool_policy is None
+    assert config.screen_rows is None
+    assert config.rollouts_per_step == 608
+
+
+def test_pool_settings_are_read(tmp_path) -> None:
+    path = tmp_path / "pool.toml"
+    path.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "spread"\n'
+        'screen_rows = "screens/latest/rows.jsonl"\n'
+        "rollouts_per_step = 320\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+
+    assert config.pool_policy == "spread"
+    assert config.screen_rows == "screens/latest/rows.jsonl"
+    assert config.rollouts_per_step == 320
+
+
+def test_the_default_config_sets_the_rollout_budget() -> None:
+    config = load_config(default_config_path())
+
+    assert config.rollouts_per_step == 608
+    assert config.pool_policy is None
+
+
+@pytest.mark.parametrize(
+    "line, key",
+    [
+        ('pool_policy = "sweep"', "training.pool_policy"),
+        ('pool_policy = ""', "training.pool_policy"),
+        ("pool_policy = 3", "training.pool_policy"),
+        ("screen_rows = 3", "training.screen_rows"),
+        ('screen_rows = ""', "training.screen_rows"),
+        ("rollouts_per_step = 0", "training.rollouts_per_step"),
+        ("rollouts_per_step = 1.5", "training.rollouts_per_step"),
+    ],
+)
+def test_a_bad_pool_setting_is_named(tmp_path, line: str, key: str) -> None:
+    path = tmp_path / "bad-pool.toml"
+    path.write_text(GOOD + "\n[training]\n" + line + "\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match=key):
+        load_config(path)

@@ -42,6 +42,9 @@ Optional keys, with the defaults shown:
     [training] eval_batch_size = 8
     [training] prefetch_scoring = true
     [training] seed = 0
+    [training] pool_policy = (unset: no schedule, train the pool as it is)
+    [training] screen_rows = (unset: no measured pool)
+    [training] rollouts_per_step = 608
 
     [budget] max_steps = (unset: run all of fake.steps)
     [budget] max_judge_calls = (unset: no judge call cap)
@@ -72,6 +75,19 @@ old growth behaviour.
 `thinking_budget` is the token budget for the reasoning block. The same value
 is used on every step. It is recorded only, because vLLM 0.34 does not enforce
 a per-request budget.
+
+`pool_policy` names the parked prompt schedule. `"spread"` sends a slice of
+parked prompts with every step. An absent key means no schedule, so the run
+trains the measured train pool and leaves parked prompts alone.
+
+`screen_rows` is the screen output folder, or its `rows.jsonl` file. The pools
+are built from it before the run. An absent key means no measured pool, which
+is the placeholder used by unit tests and the fake path.
+
+`rollouts_per_step` is the sequence budget for one step. Prompts per step is
+this value divided by `generations_per_prompt`. The parked cap is a quarter of
+this value divided by the group size. The 608 default comes from the measured
+19 November run, where 608 sequences at group size 8 took 236 seconds.
 
 The removed curriculum keys are ignored when a config still sets them, because
 extra keys and tables are kept and ignored. The removed engine keys are the
@@ -133,6 +149,13 @@ DEFAULT_CLIP_EPSILON = 0.2
 DEFAULT_KL_BETA = 0.0
 DEFAULT_SEED = 0
 
+#: Default sequence budget for one step. It is a config default, not a schedule
+#: constant, and matches the measured 19 November run.
+DEFAULT_ROLLOUTS_PER_STEP = 608
+
+#: Pool policies the code implements. Task 5 adds "sweep".
+POOL_POLICIES: tuple[str, ...] = ("spread",)
+
 
 class ConfigError(ValueError):
     """The config file is missing, unreadable, or invalid."""
@@ -174,6 +197,9 @@ class Config:
     eval_batch_size: int = 8
     prefetch_scoring: bool = True
     seed: int = DEFAULT_SEED
+    pool_policy: str | None = None
+    screen_rows: str | None = None
+    rollouts_per_step: int = DEFAULT_ROLLOUTS_PER_STEP
     max_steps: int | None = None
     max_judge_calls: int | None = None
 
@@ -287,6 +313,35 @@ def _lora_targets(raw: dict[str, Any], dotted: str, default: str) -> str:
     if value not in LORA_TARGETS:
         raise ConfigError(
             f"config: '{dotted}' must be one of {', '.join(LORA_TARGETS)}, got {value!r}"
+        )
+    return value
+
+
+def _optional_string(raw: dict[str, Any], dotted: str, default: str | None) -> str | None:
+    """A non-empty string from `dotted`, or `default` when absent."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return default
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(
+            f"config: '{dotted}' must be a non-empty string, got {_shown(value)}"
+        )
+    return value
+
+
+def _pool_policy(raw: dict[str, Any], dotted: str) -> str | None:
+    """One of the implemented pool policies, or None when absent."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(
+            f"config: '{dotted}' must be a non-empty string, got {_shown(value)}"
+        )
+    if value not in POOL_POLICIES:
+        raise ConfigError(
+            f"config: '{dotted}' must be one of {', '.join(POOL_POLICIES)}, "
+            f"got {value!r}"
         )
     return value
 
@@ -427,6 +482,11 @@ def load_config(path: str | Path) -> Config:
         eval_batch_size=_optional_positive_int(raw, "training.eval_batch_size", 8),
         prefetch_scoring=_optional_bool(raw, "training.prefetch_scoring", True),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
+        pool_policy=_pool_policy(raw, "training.pool_policy"),
+        screen_rows=_optional_string(raw, "training.screen_rows", None),
+        rollouts_per_step=_optional_positive_int(
+            raw, "training.rollouts_per_step", DEFAULT_ROLLOUTS_PER_STEP
+        ),
         max_steps=_optional_int_none(raw, "budget.max_steps"),
         max_judge_calls=_optional_int_none(raw, "budget.max_judge_calls"),
     )

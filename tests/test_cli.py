@@ -853,3 +853,203 @@ def test_failed_checkpoint_load_preserves_existing_records(tmp_path, monkeypatch
     assert main(args + ["--resume"]) == 2
     assert "incomplete checkpoint" in capsys.readouterr().err
     assert before == {p.name: p.read_bytes() for p in run_dir.iterdir() if p.is_file()}
+
+
+def write_screen_config(tmp_path, screen_rows) -> Path:
+    path = tmp_path / "screen-config.toml"
+    path.write_text(
+        SPLIT_CONFIG
+        + f'\n[training]\nscreen_rows = "{screen_rows.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_build_pools_returns_none_without_screen_rows(tmp_path) -> None:
+    from rlvr.cli import build_pools
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+
+    assert build_pools(config, train) is None
+
+
+def test_build_pools_reads_the_screen_rows(tmp_path) -> None:
+    from rlvr.cli import build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    expected = {"train": 0, "rehearsal": 0, "parked": 0}
+    for index, prompt in enumerate(train):
+        passed = (0, 8, 16)[index % 3]
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=16,
+                passed=passed,
+                pass_rate=passed / 16,
+            )
+        )
+        expected[("parked", "train", "rehearsal")[index % 3]] += 1
+
+    pools = build_pools(
+        load_config(write_screen_config(tmp_path, directory)), train
+    )
+
+    assert pools is not None
+    assert pools.samples == 16
+    assert len(pools.train) == expected["train"]
+    assert len(pools.rehearsal) == expected["rehearsal"]
+    assert len(pools.parked) == expected["parked"]
+
+
+def test_build_pools_accepts_the_rows_file(tmp_path) -> None:
+    from rlvr.cli import build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    for prompt in train:
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=16,
+                passed=8,
+                pass_rate=0.5,
+            )
+        )
+
+    pools = build_pools(
+        load_config(write_screen_config(tmp_path, store.rows_path)), train
+    )
+
+    assert pools is not None
+    assert len(pools.train) == len(train)
+
+
+def test_an_empty_screen_fails_loudly(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    empty = tmp_path / "screen"
+    empty.mkdir()
+
+    with pytest.raises(UsageError, match="screen rows are empty"):
+        build_pools(load_config(write_screen_config(tmp_path, empty)), train)
+
+
+def test_a_screen_row_outside_the_training_split_fails_loudly(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    store.append_row(
+        ScreenRow(prompt_id="not-in-split", samples=16, passed=8, pass_rate=0.5)
+    )
+
+    with pytest.raises(UsageError, match="not in the training split"):
+        build_pools(load_config(write_screen_config(tmp_path, directory)), train)
+
+
+def test_two_sample_counts_in_one_screen_fail_loudly(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    store.append_row(
+        ScreenRow(
+            prompt_id=train[0].prompt_id, samples=16, passed=8, pass_rate=0.5
+        )
+    )
+    store.append_row(
+        ScreenRow(
+            prompt_id=train[1].prompt_id, samples=8, passed=4, pass_rate=0.5
+        )
+    )
+
+    with pytest.raises(UsageError, match="cannot build the pools"):
+        build_pools(load_config(write_screen_config(tmp_path, directory)), train)
+
+
+def test_a_screen_path_must_be_a_folder_or_rows_file(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    other = tmp_path / "scores.json"
+    other.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(UsageError, match="screen folder or a rows.jsonl file"):
+        build_pools(load_config(write_screen_config(tmp_path, other)), train)
+
+
+def test_a_fake_run_uses_the_measured_pool_and_the_spread_schedule(
+    tmp_path, capsys
+) -> None:
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    for index, prompt in enumerate(train):
+        passed = 0 if index < 10 else 8
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=16,
+                passed=passed,
+                pass_rate=passed / 16,
+            )
+        )
+
+    path = tmp_path / "measured.toml"
+    path.write_text(
+        SPLIT_CONFIG
+        + f'\n[training]\nscreen_rows = "{directory.as_posix()}"\n'
+        + 'pool_policy = "spread"\nrollouts_per_step = 64\n',
+        encoding="utf-8",
+    )
+    runs_root = tmp_path / "runs"
+
+    assert (
+        main(
+            [
+                "run",
+                "--arm",
+                "code-score",
+                "--fake",
+                "--config",
+                str(path),
+                "--runs-root",
+                str(runs_root),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    run_dir = next((runs_root / "code-score").iterdir())
+    meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
+    metric = json.loads((run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines()[0])
+
+    assert meta["pools"]["measured"] is True
+    assert meta["pools"]["samples"] == 16
+    assert meta["pools"]["parked"] == 10
+    assert meta["pool_policy"] == "spread"
+    assert meta["screen_rows"] == directory.as_posix()
+    assert metric["pool_policy"] == "spread"
+    assert metric["train_prompts"] == 7
+    assert metric["parked_prompts"] == 1
