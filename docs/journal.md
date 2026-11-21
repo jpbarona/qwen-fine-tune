@@ -121,4 +121,8 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 104. All six evaluations sat inside the five-point noise band
 105. vLLM cut a step from 717 seconds to 236 at 608 sequences
 106. Sixty one percent of step 60 groups carried no advantage
+107. Parked prompts are re-screened inside training steps, not evaluation
+108. Sixteen rollouts per prompt decide who trains and who parks
+109. Labels come only from screens, never from selected training rollouts
+110. Spread parked work beats dedicated batches full of all-fail groups
 

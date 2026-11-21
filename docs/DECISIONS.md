@@ -614,3 +614,29 @@ Data: the folder `2026-11-20-lfm-run100` holds checkpoints 10 to 130, 138
 metric rows, and 57,320 rollout rows. Rows written after the last pull, possibly
 the step 140 evaluation, are lost with the box.
 
+## D32. Parked prompts are re-screened inside training steps
+
+Status: chosen, not implemented.
+
+Prompts that the model fails 8 of 8 leave the training pool and are parked. Some
+become solvable as the policy moves, so the parked set is re-screened. The
+re-screen runs as part of a training step, not as a separate evaluation, so the
+rollouts produce gradients.
+
+A slice of parked prompts joins each step, each with 16 rollouts. The slice is
+sized so the parked pool cycles once every `N` steps, `k = min(19, ceil(P / N))`,
+where `P` is the parked count. The cap keeps parked work at half the batch.
+
+Group size for the re-screen is 16, and a prompt is promoted at 2 of 16 or more.
+
+Rejected: dedicated re-screen batches every `N` steps. They spend several
+consecutive steps on batches that are mostly all-fail groups, which carry no
+advantage, and they shift the batch distribution abruptly.
+
+Labels come from screens only. Training counts may demote a prompt after repeated
+failures, never promote one, because a prompt selected for a low pass count
+regresses upward on the next measurement regardless of the model.
+
+Formulas, cost, and the files to touch are in `IDEAS.md`, "Re-screening parked
+prompts inside training".
+
