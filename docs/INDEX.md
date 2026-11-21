@@ -10,6 +10,9 @@ Docs, all in this folder:
 - `DECISIONS.md` — decisions as they are made, newest last.
 - [superpowers/specs/2026-11-19-lfm-all-linear-lora-design.md](superpowers/specs/2026-11-19-lfm-all-linear-lora-design.md) — the approved design for all-linear LoRA on LFM.
 - [superpowers/plans/2026-11-19-lfm-all-linear-lora.md](superpowers/plans/2026-11-19-lfm-all-linear-lora.md) — the task breakdown for that change.
+- [../issues/19-parked-pools-spec.md](../issues/19-parked-pools-spec.md) — spec for measured pools and the two parked re-screen policies.
+- [superpowers/plans/2026-11-21-parked-pools.md](superpowers/plans/2026-11-21-parked-pools.md) — task breakdown with the binding values.
+- `../issues/20` to `../issues/26` — the seven tickets for that change.
 - [superpowers/plans/2026-11-21-parked-pools.md](superpowers/plans/2026-11-21-parked-pools.md): the task breakdown for measured pools and the two parked re-screen arms.
 - [IDEAS.md](IDEAS.md) — proposals that are not built, with their cost and the file they would touch.
 - `journal.md` — running problem and fix chunks, 10 to 12 words each.

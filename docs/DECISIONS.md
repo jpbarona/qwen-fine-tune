@@ -712,3 +712,21 @@ groups carried no advantage. That is a pool problem: the curriculum kept
 sampling prompts the model could not solve. This pair tests whether measured
 pools plus re-screening change that, and which schedule does it better.
 
+
+## D35. The screen covers exactly the 711 training prompts
+
+Status: implemented. First run started 21 November 2026.
+
+A pooled run needs a screen row for every training prompt, because a missing row
+stops the run before the model loads. So the screen input is the pinned training
+split, not the whole dataset.
+
+`data/train_split.jsonl` holds the 711 rows of the pinned split in the MBPP row
+schema. `data/mbpp_full.jsonl` still holds all 961 for the commands that need
+them. The arm configs read `screens/mbpp-base/rows.jsonl`.
+
+Synthetic rows are not added when `screen_rows` is set. They were scaffolding for
+the very easy stage, and the curriculum is gone.
+
+The first screen runs at sixteen samples over those 711 prompts, about 11,400
+rollouts, and its output is pulled before the box is destroyed.

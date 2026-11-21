@@ -135,3 +135,4 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 118. Sweep spends budget on parked steps, so fewer train passes
 119. Refresh steps is now an arm config key defaulting to forty
 
+120. The screen covers the 711 train rows, not all 961
