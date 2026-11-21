@@ -43,6 +43,7 @@ Optional keys, with the defaults shown:
     [training] prefetch_scoring = true
     [training] seed = 0
     [training] pool_policy = (unset: no schedule, train the pool as it is)
+    [training] refresh_steps = 40
     [training] sweep_gap_ratio = 3
     [training] screen_rows = (unset: no measured pool)
     [training] rollouts_per_step = 608
@@ -84,6 +85,11 @@ consecutive all-parked steps, then trains for a gap. An absent key means no
 schedule, so the run trains the measured train pool and leaves parked prompts
 alone. A set policy requires `screen_rows`, because the parked prompts come
 from the measured screen.
+
+`refresh_steps` is the number of steps the spread policy aims to take to visit
+the whole parked pool. The slice is `ceil(parked / refresh_steps)` prompts,
+capped by the quarter-budget cap. It is a positive integer and defaults to 40.
+Only the spread policy reads it.
 
 `sweep_gap_ratio` is the number of training steps after a sweep, as a multiple
 of the sweep length. It is an integer from 3 to 10 and defaults to 3. The value
@@ -127,6 +133,7 @@ from .reward import (
 from .budget import DEFAULT_THINKING_BUDGET
 from .model_profiles import LORA_TARGETS
 from .schedule import (
+    DEFAULT_REFRESH_STEPS,
     DEFAULT_SWEEP_GAP_RATIO,
     MAX_SWEEP_GAP_RATIO,
     MIN_SWEEP_GAP_RATIO,
@@ -212,6 +219,7 @@ class Config:
     prefetch_scoring: bool = True
     seed: int = DEFAULT_SEED
     pool_policy: str | None = None
+    refresh_steps: int = DEFAULT_REFRESH_STEPS
     sweep_gap_ratio: int = DEFAULT_SWEEP_GAP_RATIO
     screen_rows: str | None = None
     rollouts_per_step: int = DEFAULT_ROLLOUTS_PER_STEP
@@ -529,6 +537,9 @@ def load_config(path: str | Path) -> Config:
         prefetch_scoring=_optional_bool(raw, "training.prefetch_scoring", True),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
         pool_policy=pool_policy,
+        refresh_steps=_optional_positive_int(
+            raw, "training.refresh_steps", DEFAULT_REFRESH_STEPS
+        ),
         sweep_gap_ratio=_sweep_gap_ratio(
             raw, "training.sweep_gap_ratio", DEFAULT_SWEEP_GAP_RATIO
         ),

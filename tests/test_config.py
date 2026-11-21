@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
 
 from rlvr.config import Config, ConfigError, default_config_path, load_config
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 GOOD = """\
 [model]
@@ -594,3 +597,76 @@ def test_a_pool_policy_needs_screen_rows(tmp_path) -> None:
     message = str(error.value)
     assert "training.pool_policy" in message
     assert "training.screen_rows" in message
+
+
+def test_refresh_steps_is_read_and_defaults_to_forty(tmp_path) -> None:
+    configured = tmp_path / "configured.toml"
+    configured.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "spread"\n'
+        'screen_rows = "rows.jsonl"\n'
+        "refresh_steps = 25\n",
+        encoding="utf-8",
+    )
+    default = tmp_path / "default.toml"
+    default.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "spread"\n'
+        'screen_rows = "rows.jsonl"\n',
+        encoding="utf-8",
+    )
+
+    assert load_config(configured).refresh_steps == 25
+    assert load_config(default).refresh_steps == 40
+
+    bad = tmp_path / "bad.toml"
+    bad.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "spread"\n'
+        'screen_rows = "rows.jsonl"\n'
+        "refresh_steps = 0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="refresh_steps"):
+        load_config(bad)
+
+
+@pytest.mark.parametrize(
+    ("name", "policy"),
+    (("lfm-spread.toml", "spread"), ("lfm-sweep.toml", "sweep")),
+)
+def test_the_parked_pool_arm_configs_load(name: str, policy: str) -> None:
+    config = load_config(REPO_ROOT / "configs" / name)
+
+    assert config.model_name == "LiquidAI/LFM2.5-2.6B"
+    assert config.pool_policy == policy
+    assert config.generations_per_prompt == 16
+    assert config.rollouts_per_step == 608
+    assert config.learning_rate == 1e-4
+    assert config.lora_targets == "all-linear"
+    assert config.lora_rank == 16
+    assert config.lora_alpha == 32
+    assert config.thinking_budget == 1024
+    assert config.max_steps == 100
+    assert config.max_prompts is None
+    assert config.screen_rows == "screens/mbpp-base/rows.jsonl"
+
+
+def test_the_parked_pool_arm_configs_differ_only_in_policy_keys() -> None:
+    def read(name: str) -> dict:
+        path = REPO_ROOT / "configs" / name
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+
+    spread = read("lfm-spread.toml")
+    sweep = read("lfm-sweep.toml")
+    assert spread["training"].pop("pool_policy") == "spread"
+    assert sweep["training"].pop("pool_policy") == "sweep"
+    assert spread["training"].pop("refresh_steps") == 40
+    assert "refresh_steps" not in sweep["training"]
+    assert sweep["training"].pop("sweep_gap_ratio") == 3
+    assert "sweep_gap_ratio" not in spread["training"]
+
+    assert spread == sweep

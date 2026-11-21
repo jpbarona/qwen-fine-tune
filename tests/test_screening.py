@@ -197,6 +197,30 @@ def test_store_drops_and_removes_a_torn_last_line(tmp_path: Path) -> None:
     assert ScreenStore(directory).read_rows() == rows
 
 
+def test_store_rewrites_a_complete_final_row_without_a_newline(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "out"
+    directory.mkdir()
+    first = json.dumps(
+        {"prompt_id": "mbpp-0001", "samples": 2, "passed": 1, "pass_rate": 0.5}
+    )
+    second = json.dumps(
+        {"prompt_id": "mbpp-0002", "samples": 2, "passed": 2, "pass_rate": 1.0}
+    )
+    path = directory / ROWS_NAME
+    path.write_text(first + "\n" + second, encoding="utf-8")
+
+    rows = ScreenStore(directory).read_rows()
+
+    assert rows == [
+        ScreenRow("mbpp-0001", 2, 1, 0.5),
+        ScreenRow("mbpp-0002", 2, 2, 1.0),
+    ]
+    assert path.read_text(encoding="utf-8") == first + "\n" + second + "\n"
+    assert ScreenStore(directory).read_rows() == rows
+
+
 def test_store_rejects_a_bad_line_that_was_terminated(tmp_path: Path) -> None:
     directory = tmp_path / "out"
     directory.mkdir()

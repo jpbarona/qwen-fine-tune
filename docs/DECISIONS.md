@@ -192,6 +192,9 @@ mask back.
 
 ## D11. vLLM for rollouts
 
+Status: superseded by D33. The `[training] engine` key, the `hf` default and the
+`vllm-lfm` extra no longer exist. Read D33 for the current engine decision.
+
 The seam is built. `VLLMGenerator` implements the `Generator` protocol and
 samples token ids with a vLLM engine while the Hugging Face model keeps the LoRA
 adapter and does the update. The engine is optional: `[training] engine`
@@ -619,7 +622,11 @@ the step 140 evaluation, are lost with the box.
 
 ## D32. Parked prompts are re-screened inside training steps
 
-Status: chosen, not implemented.
+Status: superseded by D34. Both spread and sweep are implemented. The parked cap
+is a quarter of the rollout budget, not half, and the sweep is no longer
+rejected. Read D34 for the arm settings.
+
+The original choice follows.
 
 Prompts that the model fails 8 of 8 leave the training pool and are parked. Some
 become solvable as the policy moves, so the parked set is re-screened. The
@@ -642,4 +649,66 @@ regresses upward on the next measurement regardless of the model.
 
 Formulas, cost, and the files to touch are in `IDEAS.md`, "Re-screening parked
 prompts inside training".
+
+## D33. vLLM is the only sampling engine
+
+Status: implemented. This decision supersedes D11.
+
+Every rollout goes through vLLM, in training and in the screen. The Hugging Face
+generate path is deleted. The `[training] engine` and
+`[training] inference_engine` keys are rejected by name, because there is no
+engine choice to record. The `hf`, `lfm` and `vllm-lfm` extras are gone. One
+`vllm` extra pins
+vLLM 0.34.0, torch 2.14.0, transformers 5.22.2, peft 0.18.1 and accelerate
+1.8.1.
+
+The base model still loads in process for the optimizer and the update pass.
+The engine serves samples and receives the LoRA adapter after each update. The
+screen builds the same generator with `trainable=False`.
+
+Why. The repository carried two sampling engines, and the screen could only use
+the slow one. A sixteen sample screen over the 711 training prompts was hours of
+work on that path. One engine also removes the install and version drift between
+an LFM environment and a Qwen environment. The cost is the thinking budget,
+which vLLM 0.34 cannot enforce per request. D12 records that limit.
+
+## D34. Two parked-pool arms at 100 steps
+
+Status: ready to run, not run. These arms need a GPU.
+
+The study compares the two parked re-screen policies at equal compute. Both arms
+start from base weights and run 100 steps, so the difference is the schedule, not
+the step count or the model state.
+
+- Model LFM2.5-2.6B at revision `7141b56cd4650af95c7c7b86983443aed050c96a`.
+- Group size 16, rollout budget 608 sequences per step, which is 38 prompts.
+- Learning rate 1e-4, all-linear LoRA at rank 16 and alpha 32.
+- One fixed thinking budget of 1,024.
+- `configs/lfm-spread.toml`: `pool_policy = "spread"` and `refresh_steps = 40`.
+  The slice is `min(9, ceil(parked / 40))` prompts, so the parked cap is a
+  quarter of the step.
+- `configs/lfm-sweep.toml`: `pool_policy = "sweep"` and a gap ratio of 3. A
+  sweep is `ceil(parked / 38)` steps, and the gap is 3 times that length.
+- One pool from a sixteen sample screen over the 711 training questions. There
+  is no curriculum and no stage ladder.
+- `[budget] max_steps = 100`. The planned length is longer than the budget, so
+  both arms stop at the same step.
+
+Both configs are identical except the policy keys. The screen path is the same
+in both. `max_prompts` is not set, because a schedule takes its step size from
+the rollout budget and the two keys cannot be combined.
+
+The four measurements are the non-zero advantage share, the mean absolute
+advantage, promotions per thousand parked rollouts, and pass@1 on the pinned
+100. The runbook in README.md says how to take each one from the run files.
+
+A sweep spends part of its 100 step budget on parked steps. Its train passes are
+fewer than a spread run at the same step count. Both spend about a quarter of
+their rollouts on parked work, so the sequences are equal, not the number of
+train only steps.
+
+Why. The previous LFM run was flat at 138 steps, and 61 percent of step 60
+groups carried no advantage. That is a pool problem: the curriculum kept
+sampling prompts the model could not solve. This pair tests whether measured
+pools plus re-screening change that, and which schedule does it better.
 

@@ -75,7 +75,6 @@ from .evaluation import pass_at_1, select_eval_subset, subset_selector
 from .memory import MemoryReport
 from .pools import DEFAULT_PROMOTION_BAR, Pools
 from .schedule import (
-    DEFAULT_REFRESH_STEPS,
     GroupOutcome,
     LabelUpdate,
     Schedule,
@@ -691,7 +690,7 @@ class Experiment:
             return Spread(
                 prompts_per_step=prompts_per_step,
                 cap=cap,
-                refresh_steps=DEFAULT_REFRESH_STEPS,
+                refresh_steps=self.config.refresh_steps,
                 seed=self.config.seed,
                 promotion_bar=DEFAULT_PROMOTION_BAR,
             )

@@ -126,4 +126,12 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 109. Labels come only from screens, never from selected training rollouts
 110. Spread parked work beats dedicated batches full of all-fail groups
 111. Spread against sweep is a measurable arm at equal compute
+112. One vLLM environment now samples training and the screen alike
+113. Sixteen samples per prompt decide the train, rehearsal and parked pools
+114. Spread joins a small parked slice to every training step
+115. Sweep covers the parked pool, then trains for a gap
+116. Both arms differ only in the parked pool policy keys
+117. A final screen row without a newline is rewritten on read
+118. Sweep spends budget on parked steps, so fewer train passes
+119. Refresh steps is now an arm config key defaulting to forty
 

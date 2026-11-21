@@ -1,0 +1,85 @@
+# LFM2.5-2.6B sweep arm for the parked-pool study.
+# One environment: install .[vllm]. Its native template always thinks.
+#
+# This arm trains 100 steps from base weights. A sweep covers the parked pool
+# in consecutive all-parked steps, then the run trains for a gap. Setup, screen
+# and the measurements are in README.md.
+#
+# The planned length is longer than the budget by design. The 100 step budget
+# stops the run, so a measured train pool of any size still reaches the same
+# step count in both arms. A sweep run spends part of that budget on parked
+# steps, so it makes fewer train passes than the spread arm.
+
+[model]
+name = "LiquidAI/LFM2.5-2.6B"
+revision = "7141b56cd4650af95c7c7b86983443aed050c96a"
+
+[judge]
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash-1017"
+base_url = "https://openrouter.ai/api/v1/chat/completions"
+api_key_env = "OPENROUTER_API_KEY"
+temperature = 0.0
+concurrency = 32
+max_attempts = 4
+timeout_seconds = 60
+cache_dir = "judge-cache"
+
+[data]
+name = "mbpp"
+dataset = "data/mbpp_full.jsonl"
+split_seed = 1234
+train_size = 711
+test_size = 250
+
+[training]
+method = "grpo"
+generations_per_prompt = 16
+temperature = 0.9
+learning_rate = 1e-4
+epochs = 100
+lora_rank = 16
+lora_alpha = 32
+lora_targets = "all-linear"
+max_prompt_tokens = 512
+max_completion_tokens = 2048
+# One fixed thinking budget for the whole run. vLLM 0.34 does not enforce a
+# per-request budget, so the value is recorded but does not end a rollout.
+thinking_budget = 1024
+# Measure entropy every N training steps. Zero disables it.
+entropy_every_steps = 500
+clip_epsilon = 0.2
+kl_beta = 0.0
+# Length penalty over the whole output, thinking included. Every token above
+# the soft limit costs per_token, and the total is floored at penalty_floor.
+length_soft_limit = 900
+length_penalty_per_token = 0.001
+length_penalty_floor = 0.2
+# The schedule sets the step size, so this memory floor is recorded but the
+# growth path does not run. Never set max_prompts beside a pool policy.
+memory_floor_mib = 512
+# Bound concurrent sandboxed test containers. Each keeps its own limits.
+test_workers = 4
+# Greedy evaluation questions decoded together. OOM retries halve this size.
+eval_batch_size = 8
+# Score the next generated prompt group while the current group backpropagates.
+prefetch_scoring = true
+seed = 0
+# The measured screen. The folder holds rows.jsonl and summary.json.
+screen_rows = "screens/mbpp-base/rows.jsonl"
+# This arm sweeps the parked pool. A sweep length is ceil(parked / 38) steps,
+# and the gap after it is 3 times the sweep length. Both arms spend about a
+# quarter of their rollouts on parked work.
+pool_policy = "sweep"
+sweep_gap_ratio = 3
+# 608 sequences per step. At 16 rollouts per prompt this is 38 prompts.
+rollouts_per_step = 608
+
+[run]
+checkpoint_every_steps = 10
+eval_every_steps = 20
+eval_questions = 100
+eval_subset_seed = 2026
+
+[budget]
+max_steps = 100

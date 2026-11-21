@@ -11,12 +11,13 @@ The output is a caller-supplied directory with two files:
 
 Rows are appended and flushed as each question finishes, so a crash costs at
 most one question. A restart reads the rows already written and skips those
-question ids. A torn final line, left by a write that did not finish, is dropped
-and removed, so the restart appends on a clean line.
+question ids. A final line without a newline is rewritten with one, so the next
+append starts on a clean line. A torn final line, left by a write that did not
+finish, is dropped in that rewrite.
 
 The screen samples with thinking off, at the completion cap the trainer uses.
-The point is to measure the same regime the curriculum will train in. It takes
-sixteen samples per question unless the caller asks for another count.
+The point is to measure the same regime training will use. It takes sixteen
+samples per question unless the caller asks for another count.
 """
 
 from __future__ import annotations
@@ -55,8 +56,9 @@ SUMMARY_NAME = "summary.json"
 #: The screen measures the regime the trainer will use, so thinking is off.
 DEFAULT_SCREEN_THINKING = False
 
-#: Samples per question. Sixteen matches the training group size, so a screen
-#: and a training step see the same number of rollouts for one prompt.
+#: Samples per question. Sixteen is the group size of the two parked-pool arm
+#: configs, so a screen and a training step see the same number of rollouts for
+#: one prompt.
 DEFAULT_SCREEN_SAMPLES = 16
 
 #: Histogram bucket labels, lowest first. One bucket per tenth of pass rate.
@@ -246,8 +248,9 @@ class ScreenStore:
     def read_rows(self) -> list[ScreenRow]:
         """Rows already written, in file order.
 
-        A torn final line is dropped and the file is rewritten without it, so
-        the next append starts on a clean line. A bad line anywhere else, or a
+        A final line that is not terminated is always rewritten with a newline,
+        so the next append starts on a clean line. A final line that is not
+        valid JSON is dropped in that rewrite. A bad line anywhere else, or a
         bad final line that was terminated with a newline, raises `ScreenError`
         because that is corruption, not an interrupted write.
         """
@@ -264,7 +267,7 @@ class ScreenStore:
         terminated = text.endswith("\n")
         rows: list[ScreenRow] = []
         seen: set[str] = set()
-        torn = False
+        rewrite = not terminated
         for line_number, line in enumerate(lines, start=1):
             if not line.strip():
                 continue
@@ -273,7 +276,7 @@ class ScreenStore:
             except json.JSONDecodeError as error:
                 is_torn_tail = line_number == len(lines) and not terminated
                 if is_torn_tail:
-                    torn = True
+                    rewrite = True
                     break
                 raise ScreenError(
                     f"screen rows line {line_number}: not valid JSON: {error}"
@@ -288,7 +291,7 @@ class ScreenStore:
             seen.add(row.prompt_id)
             rows.append(row)
 
-        if torn:
+        if rewrite:
             self._rewrite_rows(rows)
         return rows
 

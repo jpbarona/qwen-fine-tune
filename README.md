@@ -20,7 +20,7 @@ torch wheel. Every rollout in training and in the screen samples with vLLM.
 
 ## LFM2.5-2.6B
 
-LFM uses the same environment, GRPO trainer, reward arms, curriculum,
+LFM uses the same environment, GRPO trainer, reward arms, measured pool,
 evaluation, controls, and checkpoint workflow. Its model profile selects the
 tokenizer behavior and attention projection names. vLLM must be 0.17 or newer
 for LoRA over the fused MLP and short convolution, and the extra pins 0.34.0.
@@ -104,15 +104,18 @@ into its own output folder, not a run folder.
 ```bash
 .venv/bin/rlvr screen \
     --questions data/mbpp_full.jsonl \
-    --samples 8 \
     --output screening/20261114
 ```
 
 `--questions` is a JSONL file in the MBPP row schema, so the synthetic easy set
 and the MBPP rows both work. `--samples` is the number of model samples per
-question. The screen samples with thinking off, at the completion cap from
-`[training] max_completion_tokens`, because that is the regime the curriculum
-trains in.
+question. It defaults to sixteen, which is the group size of the two parked-pool
+arms. The screen samples with thinking off, at the completion cap from
+`[training] max_completion_tokens`, because training uses that cap.
+
+A screen for a parked-pool arm must cover exactly the 711 training questions.
+The arm runbook below writes that question file. A screen over the full 961 row
+file also measures the held-out questions, which the pool builder rejects.
 
 The output folder holds two files:
 
@@ -124,12 +127,121 @@ summary.json    the pass rate histogram from 0.0 to 1.0, and the
 
 A sample counts as passed only when every task test passed. A rerun reads the
 rows already written and skips those question ids, so an interrupted screen
-continues where it stopped. A torn final line is dropped and removed before the
-restart appends. Rows must keep the same sample count and belong to the same
-question set, so two screens cannot be mixed by accident.
+continues where it stopped. A final row without a newline is rewritten with one,
+and a torn final line is dropped in that rewrite, before the restart appends.
+Rows must keep the same sample count and belong to the same question set, so two
+screens cannot be mixed by accident.
 
 `--fake` replaces the model and Docker with the deterministic fakes and needs no
 GPU, network, or Docker. It exercises the same writer, summary, and resume path.
+
+## The two parked-pool arms
+
+The study compares two ways to re-screen parked prompts at equal compute.
+`configs/lfm-spread.toml` joins a parked slice to every step.
+`configs/lfm-sweep.toml` covers the parked pool in consecutive steps, then
+trains for a gap. The two configs are identical except the policy keys. Both
+run 100 steps from base weights at group size 16, a 608 sequence rollout budget,
+rate 1e-4, all-linear LoRA rank 16 and alpha 32, and a fixed thinking budget of
+1,024.
+
+Install with the one vLLM environment in the Install section. The screen uses
+the same environment.
+
+First write the 711 training questions from the pinned split. The arm config
+reads `screens/mbpp-base/rows.jsonl`, so the output folder must be
+`screens/mbpp-base`.
+
+```bash
+.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+
+split = json.loads(Path("data/split_seed1234.json").read_text(encoding="utf-8"))
+rows = {}
+for line in Path("data/mbpp_full.jsonl").read_text(encoding="utf-8").splitlines():
+    if line.strip():
+        row = json.loads(line)
+        rows[f"mbpp-{row['task_id']}"] = line
+Path("screens").mkdir(exist_ok=True)
+Path("screens/mbpp-train.jsonl").write_text(
+    "\n".join(rows[prompt_id] for prompt_id in split["train"]) + "\n",
+    encoding="utf-8",
+)
+PY
+```
+
+Then screen the base model. Leave out `--samples` so the default sixteen is
+used. The command resumes if it is interrupted.
+
+```bash
+.venv/bin/rlvr screen \
+    --questions screens/mbpp-train.jsonl \
+    --output screens/mbpp-base \
+    --config configs/lfm-spread.toml
+```
+
+The summary must report 711 questions, and `zero_pass`, `partial_pass` and
+`full_pass` must add up to 711. The zero and full counts are the parked and
+rehearsal pools. The partial count is the train pool.
+
+Run the arms one at a time. Use a separate run root for each so `--resume`
+cannot pick the other arm's folder.
+
+```bash
+OPENROUTER_API_KEY=... ./run.sh code-score \
+    --config configs/lfm-spread.toml --runs-root runs-spread
+OPENROUTER_API_KEY=... ./run.sh code-score \
+    --config configs/lfm-sweep.toml --runs-root runs-sweep
+```
+
+After a crash, resume with the matching config and run root:
+
+```bash
+OPENROUTER_API_KEY=... ./run.sh code-score \
+    --config configs/lfm-sweep.toml --runs-root runs-sweep --resume
+```
+
+Pull these files back. Keep the screen folder, because the run metadata records
+its path.
+
+```
+screens/mbpp-base/rows.jsonl
+screens/mbpp-base/summary.json
+runs-spread/code-score/<timestamp>/meta.json
+runs-spread/code-score/<timestamp>/metrics.jsonl
+runs-spread/code-score/<timestamp>/rollouts.jsonl
+runs-spread/code-score/<timestamp>/labels.jsonl
+runs-spread/code-score/<timestamp>/eval.json
+runs-spread/code-score/<timestamp>/checkpoints/
+runs-sweep/code-score/<timestamp>/  the same files
+```
+
+To see both runs side by side, pass the two run folders to `summary`, or point
+the dashboard at the two arm folders:
+
+```bash
+.venv/bin/rlvr summary runs-spread/code-score/<timestamp> \
+    runs-sweep/code-score/<timestamp> --html report.html
+.venv/bin/rlvr dashboard runs-spread/code-score runs-sweep/code-score
+```
+
+The four measurements are read from those files:
+
+1. Non-zero advantage share. Average `advantage_share` over the `metrics.jsonl`
+   rows. A row counts groups whose rewards hold more than one distinct value.
+2. Mean absolute advantage. Group `rollouts.jsonl` by step and prompt id, apply
+   the training normalisation `(reward - group mean) / group std`, and average
+   the absolute values. A group with zero std contributes zero.
+3. Promotions per thousand parked rollouts. Count `labels.jsonl` rows with
+   `reason = "promoted"`. Divide by the parked rollouts, which is the sum of
+   `parked_prompts * 16` over `metrics.jsonl`, and multiply by 1,000.
+4. Pass@1 on the pinned 100. Read the checkpoint `pass_at_1` values from
+   `eval.json`. The base score on the same cohort is 0.51.
+
+A sweep run spends part of its 100 step budget on parked steps. Its train
+passes are therefore fewer than a spread run at the same step count, even though
+both spend the same share of rollouts on parked work.
 
 ## Real training
 
@@ -159,13 +271,16 @@ evaluation on 8 questions. Expected runtime is roughly 5 to 10 minutes,
 dominated by the Docker test runs. This estimate is unverified: there is no GPU
 in this environment.
 
-Each step takes a batch of prompts, one group of 8 samples per prompt, all
-sampled in one padded call. The batch starts at two prompts. After each step the
-free memory is read. While it stays at or above `[training] memory_floor_mib` the
+Without a pool policy, each step takes a batch of prompts, one group of the
+configured group size per prompt, all sampled in one padded call. The batch
+starts at two prompts. After each step the free memory is read. While it stays
+at or above `[training] memory_floor_mib` the
 next step takes one more prompt. The first step below the floor settles the size
 at the largest batch that fit, and the run keeps that size.
 `[training] max_prompts` caps the prompt count per step when memory would allow
-more. An absent key means no cap. The cap limits sequences per step. Step time
+more. An absent key means no cap. The cap limits sequences per step. A run with
+a pool policy does not use this growth path. Its step size is the rollout budget
+divided by the group size, which is 38 prompts in the two arm configs. Step time
 is unverified, because test containers and judge calls run outside the batch.
 Gradients accumulate
 across the prompt groups and the optimizer steps once at the end of the step, so
@@ -337,8 +452,8 @@ applies at the next step, no restart:
  "tests": {"mbpp-535": ["assert topbottom_surfacearea(10) == 314.15000000000003"]}}
 ```
 
-- `drop` removes a prompt from the current stage pool. Rollouts already recorded
-  stay in the history. If the pool empties, the stage advances.
+- `drop` removes a prompt from the train pool or the parked pool. Rollouts
+  already recorded stay in the history.
 - `tests` replaces the hidden tests for one prompt from the next step.
 - A bad key or a test that does not compile is rejected. The previous state
   stays in force, and the error lands in `control-events.jsonl`.
@@ -351,23 +466,28 @@ to a frozen adapter, which then builds an optimizer over no parameters and
 fails with `optimizer got an empty parameter list`. The loader passes
 `is_trainable=True`.
 
-## Curriculum
+## One measured pool
 
-Training runs band by band: very easy, medium, hard, very hard. Each band is
-split 80 percent train and 20 percent held out, and 20 percent of the previous
-band's training pool is carried to the front of the next one.
+Training runs from one pool built from a screen. Each training prompt is
+measured at sixteen rollouts. A prompt that passes some but not all of them goes
+to train. A prompt that passes all sixteen goes to rehearsal and is not trained.
+A prompt that passes none goes to parked. There are no curriculum stages.
 
-A prompt stays in its stage pool until every one of its 8 rollouts passes. One
-pass in eight does not retire it, because that is luck rather than skill, and
-retiring on a lucky pass shrinks the pool to whatever the model cannot do. A
-stage moves to the next band only when its pool is empty, which with this rule
-is rare. That is the accepted cost: the run would rather keep sampling the same
-band than train on five impossible prompts.
+The labels come from screens. Training rollouts may demote a train prompt after
+ten consecutive full-failure groups. They never promote a prompt, because a
+prompt selected for a low pass count regresses upward on the next measurement.
+A parked prompt is promoted at two passes of sixteen or more.
 
-Each curriculum stage also evaluates its own held-out slice. That entry has
-`kind` `"stage"` and carries the band name in `stage`, so `eval.json` holds the
-pass rate per band. The dashboard shows the band beside the evaluation. A run
-that stops inside a stage still evaluates that stage's held-out slice.
+Two schedules put parked prompts back into training. The spread policy joins a
+slice to every step. The sweep policy covers the whole parked pool in
+consecutive steps, then trains for a gap. Both use the same rollout budget per
+step and cap parked work at a quarter of it. The arm runbook above runs one arm
+per policy.
+
+There is one pool and no stage ladder. Every record keeps the `stage` field at
+`unstaged` so older readers still find it. Older runs also wrote a per-stage
+evaluation entry with `kind` `"stage"` and a band name. New runs have no stage,
+so `eval.json` holds only checkpoint and final entries.
 
 The final evaluation always covers the whole test pool, which is the 250
 held-out questions for a real run. pass@1 is the only metric: the fraction of
@@ -467,7 +587,7 @@ and types are a contract.
 | `judge_score` | float or null | null when the arm does not judge or tests failed |
 | `process_score` | float or null | null except in `gated-process` on a pass |
 | `reward` | float | the arm reward, clipped to [-1, 1] |
-| `stage` | str | curriculum band, or `unstaged` |
+| `stage` | str | `unstaged`, kept so older readers find the field |
 | `cache_hit` | bool | true when any judge call was served from cache |
 
 Timestamps and truncation flags are deliberately out of this record. Truncation
@@ -531,7 +651,8 @@ Store.arm, Store.timestamp, Store.run_dir, Store.checkpoints_dir
 ```
 
 `temperature` is `0.0` for greedy evaluation. `n` is the number of generations
-per prompt; training samples 8, evaluation samples 1. One training step samples
+per prompt, which is the configured group size in training and one in
+evaluation. One training step samples
 every prompt group in one `generate_batch` call, runs and judges each group,
 logs the records, accumulates the group rewards one group at a time, then calls
 `apply_update` once. That is the only weight update in the step. The judge sees
@@ -616,8 +737,9 @@ Fixed outcomes in `code-score`:
 | clean failure, not closed | `0.0` |
 | length above 900 tokens | `-0.001` per token, capped at `-0.2` |
 
-The sum is clipped to `-1` and `1`. The thinking budget starts at 768 tokens and
-doubles each curriculum stage, capped at `max_completion_tokens`.
+The sum is clipped to `-1` and `1`. The thinking budget is one fixed value per
+run, `[training] thinking_budget`, which is 1,024 in the arm configs. vLLM 0.34
+records it but does not enforce it.
 
 Any failed test closes the gate, so a gated arm makes no judge call. For the
 gated arms zero tests counts as a failure. For `code-score` zero tests is an
