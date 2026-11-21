@@ -84,6 +84,7 @@ from .schedule import (
     Sweep,
     label_from_row,
     streak_from_row,
+    sweep_order_from_row,
     sweep_position_from_row,
 )
 from .reward import (
@@ -728,6 +729,7 @@ class Experiment:
             )
         restore = getattr(self._schedule, "restore_streak", None)
         restore_position = getattr(self._schedule, "restore_position", None)
+        restore_order = getattr(self._schedule, "restore_order", None)
         for row in reader():
             parsed = label_from_row(row)
             if parsed is not None:
@@ -748,6 +750,9 @@ class Experiment:
             saved_position = sweep_position_from_row(row)
             if saved_position is not None and restore_position is not None:
                 restore_position(saved_position)
+            saved_order = sweep_order_from_row(row)
+            if saved_order is not None and restore_order is not None:
+                restore_order(saved_order)
 
     def _observe_step(self, step: int, result: StepResult) -> None:
         """Ask the schedule for label changes, then apply and record them.

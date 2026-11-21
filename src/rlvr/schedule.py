@@ -55,6 +55,7 @@ __all__ = [
     "Sweep",
     "label_from_row",
     "streak_from_row",
+    "sweep_order_from_row",
     "sweep_position_from_row",
 ]
 
@@ -394,7 +395,9 @@ class Sweep:
     `gap_ratio * m` training steps. Every step in the sweep is parked only, so
     no train prompt appears. A final sweep step may hold fewer prompts when the
     parked count does not divide evenly. A sweep step never repeats a prompt,
-    because the budget is a target and not a floor.
+    because the budget is a target and not a floor. The seeded order is fixed at
+    the start of the sweep and saved with the position. A prompt promoted in an
+    earlier step is skipped, so it cannot run twice and no prompt is skipped.
 
     The schedule keeps a cycle position. Position `0` to `m - 1` is a sweep
     step and the rest of the cycle is a training step. The position is saved
@@ -412,6 +415,8 @@ class Sweep:
         default_factory=dict, init=False, repr=False
     )
     _position: int = field(default=0, init=False, repr=False)
+    _order: tuple[str, ...] | None = field(default=None, init=False, repr=False)
+    _saved_order: tuple[str, ...] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         _positive_int("prompts_per_step", self.prompts_per_step)
@@ -481,6 +486,8 @@ class Sweep:
         sweep_steps = self.sweep_length(len(parked))
         if sweep_steps == 0:
             self._position = 0
+            self._order = None
+            self._saved_order = None
             return StepPlan(train=self._train_block(step, train))
 
         cycle = sweep_steps + self.gap_ratio * sweep_steps
@@ -488,15 +495,25 @@ class Sweep:
         position = self._position
 
         if position < sweep_steps:
-            order = [_prompt_id(prompt) for prompt in parked]
-            random.Random(self.seed).shuffle(order)
+            if position == 0 or self._order is None:
+                order = [_prompt_id(prompt) for prompt in parked]
+                random.Random(self.seed).shuffle(order)
+                self._order = tuple(order)
             by_id = {_prompt_id(prompt): prompt for prompt in parked}
             start = position * self.prompts_per_step
-            size = min(self.prompts_per_step, len(order) - start)
-            parked_slice = tuple(by_id[order[start + index]] for index in range(size))
-            self._position = (position + 1) % cycle
+            block = self._order[start : start + self.prompts_per_step]
+            parked_slice = tuple(
+                by_id[prompt_id] for prompt_id in block if prompt_id in by_id
+            )
+            next_position = (position + 1) % cycle
+            self._position = next_position
+            self._saved_order = (
+                self._order if next_position < sweep_steps else None
+            )
             return StepPlan(parked=parked_slice)
 
+        self._order = None
+        self._saved_order = None
         self._position = (position + 1) % cycle
         return StepPlan(train=self._train_block(step, train))
 
@@ -526,8 +543,27 @@ class Sweep:
         return tuple(updates)
 
     def state_row(self, step: int) -> dict[str, Any]:
-        """The saved cycle position after this step, for the label file."""
-        return {"step": step, "sweep_position": self._position}
+        """The saved cycle position after this step, for the label file.
+
+        A position inside a sweep also saves the shuffled order. A resume then
+        reuses the order from the sweep start, so a prompt promoted in an
+        earlier step cannot run twice and no prompt is skipped.
+        """
+        row: dict[str, Any] = {"step": step, "sweep_position": self._position}
+        if self._saved_order is not None:
+            row["sweep_order"] = list(self._saved_order)
+        return row
+
+    def restore_order(self, order: Sequence[str]) -> None:
+        """Set the sweep order from a saved label row. Bad values are ignored."""
+        if isinstance(order, str) or not isinstance(order, Sequence):
+            return
+        ids = tuple(order)
+        if not ids:
+            return
+        if any(not isinstance(value, str) or not value.strip() for value in ids):
+            return
+        self._order = ids
 
     def restore_position(self, position: int) -> None:
         """Set the cycle position from a saved label row.
@@ -580,3 +616,13 @@ def sweep_position_from_row(row: Mapping[str, Any]) -> int | None:
     if isinstance(position, bool) or not isinstance(position, int) or position < 0:
         return None
     return position
+
+
+def sweep_order_from_row(row: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """The saved sweep order, or None when the row has none or it is malformed."""
+    order = row.get("sweep_order")
+    if not isinstance(order, (list, tuple)) or not order:
+        return None
+    if any(not isinstance(value, str) or not value.strip() for value in order):
+        return None
+    return tuple(order)

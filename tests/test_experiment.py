@@ -1933,8 +1933,9 @@ def test_a_resume_mid_sweep_stays_in_the_sweep(tmp_path) -> None:
     schedule = Sweep(prompts_per_step=1, gap_ratio=3, seed=0)
     generator = StubGenerator()
     store = RecordingStore()
-    # Three sweep steps have run. The fourth step is the first gap step.
-    store.labels = [{"step": 3, "sweep_position": 3}]
+    # Two sweep steps have run. The saved position 1 is still inside the three
+    # step sweep, so the next step must run one parked prompt.
+    store.labels = [{"step": 2, "sweep_position": 1}]
 
     build(
         "code-score",
@@ -1945,8 +1946,10 @@ def test_a_resume_mid_sweep_stays_in_the_sweep(tmp_path) -> None:
         pools=pools,
         schedule=schedule,
         config_text=FOUR_STEP_CONFIG,
-        resume_step=3,
+        resume_step=2,
     ).run()
 
-    assert generator.batch_calls[0] == ("mbpp-0000",)
-    assert store.metrics[0]["parked_prompts"] == 0
+    assert len(generator.batch_calls[0]) == 1
+    assert generator.batch_calls[0][0] in pools.parked
+    assert store.metrics[0]["parked_prompts"] != 0
+    assert store.metrics[0]["train_prompts"] == 0

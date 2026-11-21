@@ -14,6 +14,7 @@ from rlvr.schedule import (
     LabelUpdate,
     Spread,
     Sweep,
+    sweep_order_from_row,
     sweep_position_from_row,
 )
 
@@ -404,6 +405,57 @@ def test_a_short_final_sweep_step_holds_only_the_rest() -> None:
     assert sorted(seen) == [prompt.prompt_id for prompt in parked]
 
 
+def test_a_promotion_mid_sweep_does_not_repeat_a_prompt() -> None:
+    # Four parked prompts at two per step with seed 1 starts with p3 and p0.
+    # When p0 promotes, the next step must run the next two prompts in the same
+    # order, p2 and p1, not a fresh shuffle that can pick p0 again.
+    policy = sweep(prompts_per_step=2, gap_ratio=3, seed=1)
+    parked = prompts("parked", 4)
+
+    first = policy.plan(1, [], parked)
+    assert [prompt.prompt_id for prompt in first.parked] == [
+        "parked-0003",
+        "parked-0000",
+    ]
+
+    policy.observe(
+        1,
+        [GroupOutcome(prompt_id="parked-0000", passed=2, samples=16, parked=True)],
+    )
+    remaining = [prompt for prompt in parked if prompt.prompt_id != "parked-0000"]
+    second = policy.plan(2, [], remaining)
+
+    assert [prompt.prompt_id for prompt in second.parked] == [
+        "parked-0002",
+        "parked-0001",
+    ]
+    assert not {"parked-0003", "parked-0000"} & {
+        prompt.prompt_id for prompt in second.parked
+    }
+
+
+def test_a_saved_sweep_order_keeps_the_sequence_across_a_resume() -> None:
+    parked = prompts("parked", 4)
+    original = sweep(prompts_per_step=2, gap_ratio=3, seed=1)
+
+    original.plan(1, [], parked)
+    original.observe(
+        1,
+        [GroupOutcome(prompt_id="parked-0000", passed=2, samples=16, parked=True)],
+    )
+    row = original.state_row(1)
+    remaining = [prompt for prompt in parked if prompt.prompt_id != "parked-0000"]
+    expected = original.plan(2, [], remaining)
+
+    resumed = sweep(prompts_per_step=2, gap_ratio=3, seed=1)
+    resumed.restore_position(row["sweep_position"])
+    order = sweep_order_from_row(row)
+    assert order is not None
+    resumed.restore_order(order)
+
+    assert resumed.plan(2, [], remaining) == expected
+
+
 def test_an_empty_parked_pool_never_starts_a_sweep() -> None:
     policy = sweep()
     train = prompts("train", 50)
@@ -454,8 +506,13 @@ def test_the_state_row_carries_the_next_position() -> None:
     parked = prompts("parked", 4)
 
     policy.plan(1, prompts("train", 4), parked)
+    row = policy.state_row(1)
 
-    assert policy.state_row(1) == {"step": 1, "sweep_position": 1}
+    assert row["step"] == 1
+    assert row["sweep_position"] == 1
+    order = sweep_order_from_row(row)
+    assert order is not None
+    assert sorted(order) == [prompt.prompt_id for prompt in parked]
     assert sweep_position_from_row({"step": 1, "sweep_position": 1}) == 1
     assert sweep_position_from_row({"step": 1, "prompt_id": "p"}) is None
     assert sweep_position_from_row({"step": 1, "sweep_position": -1}) is None
