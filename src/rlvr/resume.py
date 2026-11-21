@@ -86,6 +86,8 @@ def validate_resume(meta_path: Path, config: Config, *, arm: str, fake: bool) ->
         "model.name": model.get("name", trainer.get("model_name")),
         "model.revision": model.get("revision", meta.get("model_revision")),
         "data.split_seed": meta.get("split_seed"),
+        "pool_policy": meta.get("pool_policy"),
+        "screen_rows": meta.get("screen_rows"),
     }
     requested = {
         "arm": arm,
@@ -93,10 +95,12 @@ def validate_resume(meta_path: Path, config: Config, *, arm: str, fake: bool) ->
         "model.name": config.model_name,
         "model.revision": config.model_revision,
         "data.split_seed": config.split_seed,
+        "pool_policy": config.pool_policy,
+        "screen_rows": config.screen_rows,
     }
     for key, value in saved.items():
         if value is not None and value != requested[key]:
             raise ResumeError(
                 f"resume {key} mismatch: saved {value!r}, requested {requested[key]!r}. "
-                "Use the original config or a separate --runs-root for a new model."
+                "Use the original config or a separate --runs-root for a new run."
             )

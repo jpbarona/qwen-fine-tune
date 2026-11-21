@@ -109,6 +109,7 @@ __all__ = [
     "load_synthetic_rows",
     "main",
     "screen_command",
+    "spread_parked_warning",
     "training_steps",
 ]
 
@@ -465,6 +466,33 @@ def build_pools(config: Config, prompts: Sequence[Prompt]) -> Pools | None:
     return pools
 
 
+def spread_parked_warning(config: Config, pools: Pools | None) -> str | None:
+    """A warning when the spread slice is below the quarter-budget cap.
+
+    The two arms only have equal compute when the spread slice reaches the cap.
+    That needs 321 parked prompts at a refresh interval of 40 and a cap of 9.
+    Below that the spread arm spends less of its step on parked work than the
+    sweep arm does on average. This is a warning, not a failure.
+    """
+    if config.pool_policy != "spread" or pools is None:
+        return None
+    parked = len(pools.parked)
+    if parked == 0:
+        return None
+    group = config.generations_per_prompt
+    step_prompts = max(1, config.rollouts_per_step // group)
+    cap = config.rollouts_per_step // 4 // group
+    slice_size = min(cap, -(-parked // config.refresh_steps))
+    if slice_size >= cap:
+        return None
+    return (
+        f"rlvr: warning: {parked} parked prompts give a spread slice of "
+        f"{slice_size} prompts, below the cap of {cap}. The planned parked share "
+        f"is {slice_size}/{step_prompts}, so the two arms do not have equal "
+        "compute."
+    )
+
+
 def training_steps(
     config: Config, prompts: Sequence[Prompt], pools: Pools | None
 ) -> int:
@@ -614,6 +642,9 @@ def run_command(args: argparse.Namespace) -> int:
     # prompts. Without them the run keeps the placeholder path: every prompt is
     # train and the run record says the pool was not measured.
     pools = build_pools(config, train_prompts)
+    warning = spread_parked_warning(config, pools)
+    if warning is not None:
+        print(warning, file=sys.stderr)
     labels_path = None if args.fake else DEFAULT_LABELS_PATH
     if config.eval_final_questions is not None:
         eval_prompts = eval_prompts[: config.eval_final_questions]

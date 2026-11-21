@@ -302,6 +302,10 @@ class Spread:
             return 0
         return min(self.cap, math.ceil(parked / self.refresh_steps))
 
+    def planned_parked_share(self, parked: int) -> float:
+        """The share of one step's prompts that the parked slice takes."""
+        return self.parked_count(parked) / self.prompts_per_step
+
     def plan(
         self,
         step: int,
@@ -454,6 +458,17 @@ class Sweep:
     def cycle_length(self, parked: int) -> int:
         """The sweep length plus the gap for `parked` prompts."""
         return self.sweep_length(parked) + self.gap_length(parked)
+
+    def planned_parked_share(self, parked: int) -> float:
+        """The parked share of a step, averaged over one sweep cycle.
+
+        A cycle presents `parked` prompts across its sweep steps, so the average
+        parked prompts per step is the parked count divided by the cycle length.
+        """
+        cycle = self.cycle_length(parked)
+        if cycle == 0:
+            return 0.0
+        return parked / (cycle * self.prompts_per_step)
 
     def _train_block(
         self, step: int, train: Sequence["Prompt"]

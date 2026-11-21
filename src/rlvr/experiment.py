@@ -598,6 +598,7 @@ class Experiment:
             "config": config.raw,
             "pools": self._pools_meta(),
             "pool_policy": self._pool_policy_name(),
+            "schedule": self._schedule_meta(),
             "screen_rows": config.screen_rows,
             "labels_path": str(self.labels_path) if self.labels_path is not None else None,
             "trainer": {
@@ -872,6 +873,26 @@ class Experiment:
             "parked": len(pools.parked),
             "samples": pools.samples,
             "measured": True,
+        }
+
+    def _schedule_meta(self) -> dict[str, Any] | None:
+        """The scheduled step size, parked count and planned parked share.
+
+        Both policies record the same fields. The share is the planned value at
+        the start of the run. It can move when prompts promote or demote, so it
+        is a plan, not a measurement.
+        """
+        schedule = self._schedule
+        if schedule is None:
+            return None
+        parked = len(self._parked_prompts)
+        share_for = getattr(schedule, "planned_parked_share", None)
+        share = share_for(parked) if callable(share_for) else None
+        return {
+            "policy": self._pool_policy_name(),
+            "step_prompts": schedule.prompts_per_step,
+            "parked_prompts": parked,
+            "planned_parked_share": share,
         }
 
     def _prompts_for_step(self, count: int) -> list[Prompt]:

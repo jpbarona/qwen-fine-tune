@@ -453,6 +453,41 @@ def test_target_steps_capped_by_budget_max_steps(tmp_path) -> None:
     assert data["runs"][0]["target_steps"] == 100
 
 
+def test_a_pooled_run_uses_the_scheduled_step_size(tmp_path) -> None:
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        meta_extra={
+            "mode": "real",
+            "pool_policy": "spread",
+            "schedule": {
+                "policy": "spread",
+                "step_prompts": 38,
+                "parked_prompts": 300,
+                "planned_parked_share": 9 / 38,
+            },
+            "pools": {
+                "train": 411,
+                "rehearsal": 0,
+                "parked": 300,
+                "samples": 16,
+                "measured": True,
+            },
+            "trainer": {"epochs": 100, "batch_start_prompts": 2},
+            "config": {
+                "training": {"epochs": 100},
+                "data": {"train_size": 711},
+                "budget": {"max_steps": 100},
+            },
+        },
+    )
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["target_steps"] == 100
+    assert run["start_batch_prompts"] == 38
+    assert run["prompt_sample_target"] == 3800
+
+
 def test_target_steps_absent_when_unknown(tmp_path) -> None:
     run_dir = write_run(tmp_path / "runs", "code-score")
     data = collect_dashboard([run_dir])

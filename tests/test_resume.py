@@ -4,6 +4,7 @@ and not duplicating records. These use the fake generator and real files."""
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from rlvr.checkpoint import (
 from rlvr.config import load_config
 from rlvr.experiment import Experiment, Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner
+from rlvr.resume import ResumeError, validate_resume
 from rlvr.runs import RunStore
 from rlvr.schema import RolloutRecord
 
@@ -223,3 +225,55 @@ def test_an_old_checkpoint_with_stage_fields_still_resumes(tmp_path) -> None:
 
     assert result.steps == 3
     assert _rollout_steps(resumed.run_dir) == [1] * 8 + [2] * 8 + [3] * 8
+
+
+def _pooled_resume(tmp_path: Path):
+    text = (
+        CONFIG_TEXT
+        + "\n[training]\n"
+        + 'pool_policy = "spread"\n'
+        + 'screen_rows = "screens/a"\n'
+        + "generations_per_prompt = 16\n"
+    )
+    config_path = tmp_path / "pooled.toml"
+    config_path.write_text(text, encoding="utf-8")
+    config = load_config(config_path)
+    meta_path = tmp_path / "meta.json"
+    meta_path.write_text(
+        json.dumps(
+            {
+                "arm": "code-score",
+                "mode": "fake",
+                "split_seed": 1,
+                "config": tomllib.loads(text),
+                "pool_policy": "spread",
+                "screen_rows": "screens/a",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return config, text, meta_path
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "field"),
+    (
+        ('pool_policy = "spread"', 'pool_policy = "sweep"', "pool_policy"),
+        ('screen_rows = "screens/a"', 'screen_rows = "screens/b"', "screen_rows"),
+    ),
+)
+def test_resume_rejects_a_changed_pool_policy_or_screen(
+    tmp_path: Path, old: str, new: str, field: str
+) -> None:
+    config, text, meta_path = _pooled_resume(tmp_path)
+    validate_resume(meta_path, config, arm="code-score", fake=True)
+
+    changed = text.replace(old, new)
+    assert changed != text
+    changed_path = tmp_path / "changed.toml"
+    changed_path.write_text(changed, encoding="utf-8")
+
+    with pytest.raises(ResumeError, match=field):
+        validate_resume(
+            meta_path, load_config(changed_path), arm="code-score", fake=True
+        )

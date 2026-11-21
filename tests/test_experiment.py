@@ -1792,6 +1792,12 @@ def test_the_config_builds_the_spread_schedule(tmp_path) -> None:
     # 16 rollouts at group size 16 is one prompt, and the cap is zero, so the
     # step is the train prompt alone.
     assert store.metrics[0]["pool_policy"] == "spread"
+    assert store.meta["schedule"] == {
+        "policy": "spread",
+        "step_prompts": 1,
+        "parked_prompts": 1,
+        "planned_parked_share": 0.0,
+    }
 
 
 def test_a_schedule_run_writes_the_label_file_in_the_run_folder(tmp_path) -> None:
@@ -1917,6 +1923,12 @@ def test_the_config_builds_the_sweep_schedule(tmp_path) -> None:
     assert row["train_prompts"] == 0
     assert row["parked_prompts"] == 1
     assert {"step": 1, "sweep_position": 1} in store.labels
+    assert store.meta["schedule"] == {
+        "policy": "sweep",
+        "step_prompts": 1,
+        "parked_prompts": 1,
+        "planned_parked_share": 0.2,
+    }
 
 
 def test_a_resume_mid_sweep_stays_in_the_sweep(tmp_path) -> None:

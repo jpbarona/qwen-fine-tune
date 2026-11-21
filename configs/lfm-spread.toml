@@ -1,9 +1,10 @@
 # LFM2.5-2.6B spread arm for the parked-pool study.
 # One environment: install .[vllm]. Its native template always thinks.
 #
-# This arm trains 100 steps from base weights. Every step takes 38 train
-# prompts and joins a slice of parked prompts, so parked work shares every
-# optimizer update. Setup, screen and the measurements are in README.md.
+# This arm trains 100 steps from base weights. Every step takes 38 prompts,
+# split between train prompts and a parked slice, so parked work shares every
+# optimizer update. At the cap that is 29 train prompts and 9 parked. Setup,
+# screen and the measurements are in README.md.
 #
 # The planned length is longer than the budget by design. The 100 step budget
 # stops the run, so a measured train pool of any size still reaches the same

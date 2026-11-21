@@ -1085,6 +1085,41 @@ def test_a_fake_run_uses_the_measured_pool_and_the_spread_schedule(
     assert metric["parked_prompts"] == 1
 
 
+def test_a_small_parked_pool_warns_about_unequal_compute(tmp_path) -> None:
+    from dataclasses import replace
+
+    from rlvr.cli import spread_parked_warning
+    from rlvr.pools import Pools
+
+    config = replace(
+        load_config(write_split_config(tmp_path)),
+        pool_policy="spread",
+        screen_rows="screens/a",
+        generations_per_prompt=16,
+        rollouts_per_step=608,
+    )
+    small = Pools(
+        train=("t",),
+        rehearsal=(),
+        parked=tuple(f"p{index}" for index in range(10)),
+        samples=16,
+    )
+    message = spread_parked_warning(config, small)
+
+    assert message is not None
+    assert "10 parked prompts" in message
+    assert "slice of 1 prompts" in message
+    assert "cap of 9" in message
+
+    large = Pools(
+        train=("t",),
+        rehearsal=(),
+        parked=tuple(f"p{index}" for index in range(321)),
+        samples=16,
+    )
+    assert spread_parked_warning(config, large) is None
+
+
 def test_a_partial_screen_fails_loudly(tmp_path) -> None:
     from rlvr.cli import UsageError, build_pools
     from rlvr.screening import ScreenRow, ScreenStore

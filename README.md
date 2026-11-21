@@ -221,6 +221,15 @@ runs-spread/code-score/<timestamp>/checkpoints/
 runs-sweep/code-score/<timestamp>/  the same files
 ```
 
+Pull them back before you destroy the box. The run folders exist only on that
+machine until they are copied.
+
+```bash
+rsync -av <host>:<repo>/screens/mbpp-base screens/mbpp-base
+rsync -av <host>:<repo>/runs-spread/ runs-spread/
+rsync -av <host>:<repo>/runs-sweep/ runs-sweep/
+```
+
 To see both runs side by side, pass the two run folders to `summary`, or point
 the dashboard at the two arm folders:
 
@@ -485,8 +494,11 @@ A parked prompt is promoted at two passes of sixteen or more.
 Two schedules put parked prompts back into training. The spread policy joins a
 slice to every step. The sweep policy covers the whole parked pool in
 consecutive steps, then trains for a gap. Both use the same rollout budget per
-step and cap parked work at a quarter of it. The arm runbook above runs one arm
-per policy.
+step. The sweep spends about a quarter of its steps on parked work. The spread
+slice is capped at a quarter of the step, and it reaches that cap only when the
+parked pool holds 321 prompts or more. Below that the two arms are not equal
+compute, and the run prints a warning with the parked count. The arm runbook
+above runs one arm per policy.
 
 There is one pool and no stage ladder. Every record keeps the `stage` field at
 `unstaged` so older readers still find it. Older runs also wrote a per-stage
