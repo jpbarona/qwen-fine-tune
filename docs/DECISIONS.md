@@ -730,3 +730,21 @@ the very easy stage, and the curriculum is gone.
 
 The first screen runs at sixteen samples over those 711 prompts, about 11,400
 rollouts, and its output is pulled before the box is destroyed.
+
+## D36. The first screen splits 711 prompts into 270 train, 174 solved, 267 parked
+
+Status: measured 21 November 2026, first arm launched the same day.
+
+The screen ran at sixteen samples over the 711 training prompts on LFM2.5-2.6B
+base weights. Zero passes: 267. Partial: 270. Full: 174. The pass rate histogram
+has a large spike at zero and a second at one, which is the bimodal pool the
+curriculum hid.
+
+The spread slice is `min(9, ceil(P / refresh_steps))`. With 267 parked, forty
+refresh steps gives seven prompts, below the cap of nine, so the spread arm would
+spend 18.4 percent of its rollouts on parked work against the sweep's 25 percent.
+The arm config sets `refresh_steps = 30`, which gives nine prompts and 23.7
+percent. That keeps the two arms within one prompt of equal compute.
+
+The sweep arm covers 267 prompts in eight steps at 38 per step, with a gap of 24
+steps.

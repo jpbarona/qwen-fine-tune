@@ -71,7 +71,7 @@ screen_rows = "screens/mbpp-base/rows.jsonl"
 # min(9, ceil(parked / 40)) prompts, so the parked pool is meant to be visited
 # once every 40 steps. The 9 is a quarter of the 38 prompt budget.
 pool_policy = "spread"
-refresh_steps = 40
+refresh_steps = 30
 # 608 sequences per step. At 16 rollouts per prompt this is 38 prompts.
 rollouts_per_step = 608
 
