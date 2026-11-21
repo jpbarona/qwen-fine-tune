@@ -491,7 +491,8 @@ def _qwen_generator(config: Config, *, trainable: bool):
     except ImportError as error:
         raise UsageError(
             "the real generator needs torch, transformers, and peft. "
-            f"install the train extra or pass --fake. ({error})"
+            "install with pip install -e '.[vllm]' or pass --fake. "
+            f"({error})"
         ) from error
     except ValueError as error:
         raise UsageError(f"cannot configure the model: {error}") from error

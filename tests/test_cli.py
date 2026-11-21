@@ -276,7 +276,7 @@ def test_without_fake_the_command_asks_for_the_train_extra(
     )
     captured = capsys.readouterr()
     assert code != 0
-    assert "train extra" in captured.err
+    assert "pip install -e '.[vllm]'" in captured.err
     assert "--fake" in captured.err
     # The generator fails before the run folder is made, so nothing is left behind.
     assert not (runs_root / "code-score").exists()

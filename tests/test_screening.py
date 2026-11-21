@@ -589,7 +589,9 @@ def test_cli_screen_without_fake_asks_for_the_train_extra(
     )
 
     assert code == 2
-    assert "train extra" in capsys.readouterr().err
+    message = capsys.readouterr().err
+    assert "pip install -e '.[vllm]'" in message
+    assert "--fake" in message
     assert not output.exists()
 
 

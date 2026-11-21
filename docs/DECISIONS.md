@@ -221,10 +221,13 @@ per-step handoff from the trainer remains unproven.
 
 ## D12. Thinking budget schedule
 
-Status: implemented. `[training] thinking_budget_start` defaults to 768 and
-doubles at each curriculum stage, capped at `max_completion_tokens`, so the
-four bands get 768, 1536, 2048, 2048. A rollout that reaches the budget without
-closing is ended there and scores as truncated.
+Status: not enforced under vLLM, documented limitation.
+`[training] thinking_budget_start` defaults to 768 and doubles at each
+curriculum stage, capped at `max_completion_tokens`, so the four bands get 768,
+1536, 2048, 2048. The value is recorded but not enforced. vLLM 0.34 removed
+per-request logits processors, so a rollout that reaches the budget is not
+ended there. The schedule is kept for a later vLLM mechanism, or for a switch
+to a sampler that can enforce it.
 
 Closing the block pays up to 0.4 when no test passed, capped below one test so
 one pass always beats closing alone. With three tests it pays 0.3. It does not

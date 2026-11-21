@@ -39,9 +39,8 @@ lora_alpha = 32
 lora_targets = "all-linear"
 max_prompt_tokens = 512
 max_completion_tokens = 2048
-# Thinking is capped at this many tokens at the first stage, doubling each
-# stage up to max_completion_tokens. A rollout that hits the budget without
-# closing is ended and scored as truncated.
+# Thinking budget is not enforced under vLLM, which has no per-request
+# logits processors. The value is recorded but does not end a rollout.
 thinking_budget_start = 768
 # Measure entropy every N training steps. Zero disables it.
 entropy_every_steps = 500
