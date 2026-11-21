@@ -107,6 +107,7 @@ __all__ = [
     "load_synthetic_rows",
     "main",
     "screen_command",
+    "training_steps",
 ]
 
 USAGE_ERROR = 2
@@ -450,6 +451,25 @@ def build_pools(config: Config, prompts: Sequence[Prompt]) -> Pools | None:
     return pools
 
 
+def training_steps(
+    config: Config, prompts: Sequence[Prompt], pools: Pools | None
+) -> int:
+    """The step count for one run over `config.epochs` epochs.
+
+    With a pool policy the step size comes from the rollout budget, so an epoch
+    is one pass over the measured train pool at that size. Without one the old
+    path applies: an epoch is one pass at the starting batch size. Both round
+    up, so a short tail still gets a step.
+    """
+    if config.pool_policy is not None and pools is not None:
+        available = len(pools.train)
+        per_step = max(1, config.rollouts_per_step // config.generations_per_prompt)
+        batches = -(-available // per_step)
+    else:
+        batches = -(-len(prompts) // START_PROMPTS)
+    return config.epochs * batches
+
+
 def build_test_runner(config: Config, *, fake: bool):
     """The Docker runner over the full split and the synthetic rows, or the fake.
 
@@ -584,14 +604,16 @@ def run_command(args: argparse.Namespace) -> int:
     if config.eval_final_questions is not None:
         eval_prompts = eval_prompts[: config.eval_final_questions]
 
-    # Real runs sweep the train questions once per epoch. A step takes a batch
-    # of prompts, so the budget is epochs times the number of batches at the
-    # starting size. The fake path keeps the small `[fake] steps` count.
+    # Real runs sweep the train questions once per epoch. A schedule uses the
+    # rollout budget as the step size, so an epoch is one pass over the measured
+    # train pool. Without a schedule the step size is the starting batch. The
+    # fake path keeps the small `[fake] steps` count.
     if not args.fake:
         from dataclasses import replace
 
-        batches_per_epoch = -(-len(train_prompts) // START_PROMPTS)
-        config = replace(config, steps=config.epochs * batches_per_epoch)
+        config = replace(
+            config, steps=training_steps(config, train_prompts, pools)
+        )
 
     resume_step = 0
     resume_prompt_cursor = 0

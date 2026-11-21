@@ -1075,3 +1075,40 @@ def test_a_partial_screen_fails_loudly(tmp_path) -> None:
 
     with pytest.raises(UsageError, match="3 missing"):
         build_pools(load_config(write_screen_config(tmp_path, directory)), train)
+
+
+def test_training_steps_uses_the_schedule_prompt_count(tmp_path) -> None:
+    from rlvr.cli import training_steps
+    from rlvr.pools import Pools
+
+    path = tmp_path / "steps.toml"
+    path.write_text(
+        SPLIT_CONFIG
+        + '\n[training]\npool_policy = "spread"\n'
+        'screen_rows = "rows.jsonl"\ngenerations_per_prompt = 16\n'
+        "rollouts_per_step = 64\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    prompts = [object() for _ in range(200)]
+    pools = Pools(
+        train=tuple(f"p{index}" for index in range(100)),
+        rehearsal=(),
+        parked=("p100",),
+        samples=16,
+    )
+
+    # 64 rollouts at group size 16 is four prompts per step. Five epochs over
+    # 100 train prompts is 25 steps per epoch.
+    assert config.epochs == 5
+    assert training_steps(config, prompts, pools) == 125
+
+
+def test_training_steps_keeps_the_starting_batch_without_a_policy(tmp_path) -> None:
+    from rlvr.cli import training_steps
+
+    config = load_config(write_split_config(tmp_path))
+    prompts = [object() for _ in range(200)]
+
+    # The old path starts at two prompts per step.
+    assert training_steps(config, prompts, None) == config.epochs * 100

@@ -535,7 +535,8 @@ def test_a_pool_policy_cannot_be_combined_with_max_prompts(tmp_path) -> None:
     path = tmp_path / "conflict.toml"
     path.write_text(
         GOOD
-        + '\n[training]\npool_policy = "spread"\nmax_prompts = 10\n',
+        + '\n[training]\npool_policy = "spread"\n'
+        'screen_rows = "rows.jsonl"\nmax_prompts = 10\n',
         encoding="utf-8",
     )
 
@@ -545,3 +546,17 @@ def test_a_pool_policy_cannot_be_combined_with_max_prompts(tmp_path) -> None:
     message = str(error.value)
     assert "training.pool_policy" in message
     assert "training.max_prompts" in message
+
+
+def test_a_pool_policy_needs_screen_rows(tmp_path) -> None:
+    path = tmp_path / "no-screen.toml"
+    path.write_text(
+        GOOD + '\n[training]\npool_policy = "spread"\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigError) as error:
+        load_config(path)
+
+    message = str(error.value)
+    assert "training.pool_policy" in message
+    assert "training.screen_rows" in message

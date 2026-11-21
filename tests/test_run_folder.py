@@ -322,3 +322,22 @@ def test_a_bad_label_line_that_is_not_the_torn_tail_raises(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="label file line 2"):
         store.read_labels()
+
+
+def test_an_unterminated_complete_label_line_is_rewritten(tmp_path) -> None:
+    from rlvr.runs import RunStore
+
+    store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
+    first = '{"step": 1, "prompt_id": "a", "label": "train"}'
+    store.labels_path.write_text(first, encoding="utf-8")
+
+    assert store.read_labels() == [
+        {"step": 1, "prompt_id": "a", "label": "train"}
+    ]
+    assert store.labels_path.read_text(encoding="utf-8").endswith("\n")
+
+    store.append_label({"step": 2, "prompt_id": "b", "label": "parked"})
+    assert store.read_labels() == [
+        {"step": 1, "prompt_id": "a", "label": "train"},
+        {"step": 2, "prompt_id": "b", "label": "parked"},
+    ]

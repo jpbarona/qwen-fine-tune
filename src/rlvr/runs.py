@@ -259,11 +259,12 @@ class RunStore:
     def read_labels(self) -> list[dict[str, Any]]:
         """Every label change and saved streak in file order, for a resume.
 
-        A torn final line, left by a write that did not finish, is dropped and
-        the file is rewritten without it. That is the same rule the screen
-        store uses. A bad line anywhere else is an error, because the label
-        file decides pool membership and a silent skip would resume with the
-        wrong pools.
+        A final line that is not terminated is always rewritten with a newline,
+        so the next append starts on a clean line. A final line that is not
+        valid JSON is dropped in that rewrite, which is the same rule the
+        screen store uses. A bad line anywhere else is an error, because the
+        label file decides pool membership and a silent skip would resume with
+        the wrong pools.
         """
         if not self.labels_path.exists():
             return []
@@ -277,7 +278,7 @@ class RunStore:
         lines = text.splitlines()
         terminated = text.endswith("\n")
         rows: list[dict[str, Any]] = []
-        torn = False
+        rewrite = not terminated
         for line_number, line in enumerate(lines, start=1):
             if not line.strip():
                 continue
@@ -286,7 +287,7 @@ class RunStore:
             except json.JSONDecodeError as error:
                 is_torn_tail = line_number == len(lines) and not terminated
                 if is_torn_tail:
-                    torn = True
+                    rewrite = True
                     break
                 raise ValueError(
                     f"label file line {line_number}: not valid JSON: {error}"
@@ -297,7 +298,7 @@ class RunStore:
                 )
             rows.append(payload)
 
-        if torn:
+        if rewrite:
             self._write_atomic(
                 self.labels_path,
                 "".join(

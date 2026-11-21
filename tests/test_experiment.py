@@ -1775,7 +1775,8 @@ def test_the_config_builds_the_spread_schedule(tmp_path) -> None:
     )
     schedule_config = ONE_STEP_CONFIG.replace(
         "generations_per_prompt = 16",
-        'generations_per_prompt = 16\npool_policy = "spread"\nrollouts_per_step = 16',
+        'generations_per_prompt = 16\npool_policy = "spread"\n'
+        'screen_rows = "unused.jsonl"\nrollouts_per_step = 16',
     )
     store = RecordingStore()
 

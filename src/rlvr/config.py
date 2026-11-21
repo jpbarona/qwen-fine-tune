@@ -79,7 +79,9 @@ a per-request budget.
 
 `pool_policy` names the parked prompt schedule. `"spread"` sends a slice of
 parked prompts with every step. An absent key means no schedule, so the run
-trains the measured train pool and leaves parked prompts alone.
+trains the measured train pool and leaves parked prompts alone. A set policy
+requires `screen_rows`, because the parked prompts come from the measured
+screen.
 
 `screen_rows` is the screen output folder, or its `rows.jsonl` file. The pools
 are built from it before the run. An absent key means no measured pool, which
@@ -406,7 +408,14 @@ def load_config(path: str | Path) -> Config:
     _reject_engine_keys(raw)
 
     pool_policy = _pool_policy(raw, "training.pool_policy")
+    screen_rows = _optional_string(raw, "training.screen_rows", None)
     max_prompts = _optional_int_none(raw, "training.max_prompts")
+    if pool_policy is not None and screen_rows is None:
+        raise ConfigError(
+            "config: 'training.pool_policy' needs 'training.screen_rows'. A "
+            "policy schedules parked prompts, and those come from the measured "
+            "screen rows."
+        )
     if pool_policy is not None and max_prompts is not None:
         raise ConfigError(
             "config: 'training.pool_policy' and 'training.max_prompts' cannot "
@@ -493,7 +502,7 @@ def load_config(path: str | Path) -> Config:
         prefetch_scoring=_optional_bool(raw, "training.prefetch_scoring", True),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
         pool_policy=pool_policy,
-        screen_rows=_optional_string(raw, "training.screen_rows", None),
+        screen_rows=screen_rows,
         rollouts_per_step=_optional_positive_int(
             raw, "training.rollouts_per_step", DEFAULT_ROLLOUTS_PER_STEP
         ),
