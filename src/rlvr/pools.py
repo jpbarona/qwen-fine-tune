@@ -20,8 +20,9 @@ already imports the training path's prompt type.
 
 The promotion bar is the count a later re-screen uses to promote a parked
 prompt. It does not change the first build of the pools, because a prompt starts
-in `train` on any partial count. It is validated here so a bar that can never be
-reached fails at pool build rather than inside a training step.
+in `train` on any partial count. It is checked for a positive integer here. It is
+not compared to the sample count, because a screen count and a later rescreen
+count can differ.
 """
 
 from __future__ import annotations
@@ -85,10 +86,6 @@ def from_rows(
     ):
         raise PoolsError(
             f"promotion_bar must be an integer of at least 1, got {promotion_bar!r}"
-        )
-    if promotion_bar > samples:
-        raise PoolsError(
-            f"promotion_bar {promotion_bar} is above the {samples} samples measured"
         )
 
     train: list[str] = []

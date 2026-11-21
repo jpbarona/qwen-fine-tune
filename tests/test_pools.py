@@ -65,10 +65,14 @@ def test_a_row_with_another_sample_count_names_the_prompt() -> None:
     rows = [row("good", 8), row("short", 4, samples=8)]
     with pytest.raises(PoolsError) as caught:
         from_rows(rows, samples=16)
-    message = str(caught.value)
-    assert "short" in message
-    assert "8" in message
-    assert "16" in message
+    assert str(caught.value) == "prompt 'short' used 8 samples, not 16"
+
+
+def test_a_row_with_more_samples_than_configured_names_the_prompt() -> None:
+    rows = [row("good", 8), row("long", 8, samples=32)]
+    with pytest.raises(PoolsError) as caught:
+        from_rows(rows, samples=16)
+    assert str(caught.value) == "prompt 'long' used 32 samples, not 16"
 
 
 def test_empty_rows_give_three_empty_tuples() -> None:
@@ -134,9 +138,14 @@ def test_the_default_promotion_bar_is_two() -> None:
     assert DEFAULT_PROMOTION_BAR == 2
 
 
-def test_a_promotion_bar_above_the_samples_is_rejected() -> None:
-    with pytest.raises(PoolsError):
-        from_rows([], samples=1, promotion_bar=2)
+def test_a_promotion_bar_above_the_samples_is_allowed() -> None:
+    pools = from_rows([], samples=1, promotion_bar=2)
+    assert pools == Pools(train=(), rehearsal=(), parked=(), samples=1)
+
+
+def test_empty_rows_with_a_non_default_bar_give_three_empty_tuples() -> None:
+    pools = from_rows([], samples=16, promotion_bar=5)
+    assert pools == Pools(train=(), rehearsal=(), parked=(), samples=16)
 
 
 def test_a_promotion_bar_below_one_is_rejected() -> None:
