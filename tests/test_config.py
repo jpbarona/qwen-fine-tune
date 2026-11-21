@@ -700,7 +700,7 @@ def test_the_parked_pool_arm_configs_differ_only_in_policy_keys() -> None:
     sweep = read("lfm-sweep.toml")
     assert spread["training"].pop("pool_policy") == "spread"
     assert sweep["training"].pop("pool_policy") == "sweep"
-    assert spread["training"].pop("refresh_steps") == 40
+    assert spread["training"].pop("refresh_steps") == 30
     assert "refresh_steps" not in sweep["training"]
     assert sweep["training"].pop("sweep_gap_ratio") == 3
     assert "sweep_gap_ratio" not in spread["training"]
