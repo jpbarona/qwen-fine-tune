@@ -11,3 +11,4 @@ judge-cache/
 .pytest_cache/
 report.html
 JUDGE_MODEL.md
+screens/
