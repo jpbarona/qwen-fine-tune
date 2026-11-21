@@ -55,6 +55,10 @@ function shareTick(value: number): string {
   return `${Math.round(value * 100)}%`
 }
 
+function countTick(value: number): string {
+  return String(Math.round(value))
+}
+
 function StepProgress({ run }: { run: Run }) {
   // One step samples a growing batch of prompts, so the planned step count
   // depends on the batch size and is only correct at the starting size. The
@@ -354,11 +358,11 @@ export default function RunSection({ run }: { run: Run }) {
         >
           <LineChart
             series={[
-              { color: ACCENT, points: pairs(steps, run.series.prompts) },
-              { color: MUTED, points: pairs(steps, run.series.sequences) },
+              { color: ACCENT, points: pairs(steps, run.series.prompts), format: countTick },
+              { color: MUTED, points: pairs(steps, run.series.sequences), axis: 'right', format: countTick },
             ]}
             yMin={0}
-            format={(value) => String(Math.round(value))}
+            format={countTick}
           />
         </Panel>
         <Panel
@@ -372,13 +376,13 @@ export default function RunSection({ run }: { run: Run }) {
         >
           <LineChart
             series={[
-              { color: ACCENT, points: pairs(steps, run.series.train_prompts) },
-              { color: MUTED, points: pairs(steps, run.series.parked_prompts) },
+              { color: ACCENT, points: pairs(steps, run.series.train_prompts), format: countTick },
+              { color: MUTED, points: pairs(steps, run.series.parked_prompts), axis: 'right', format: countTick },
             ]}
             yMin={0}
             height={70}
             tickCount={3}
-            format={(value) => String(Math.round(value))}
+            format={countTick}
             empty="no pool data"
           />
           <div className="mt-1 border-t border-white/[0.06] pt-1">

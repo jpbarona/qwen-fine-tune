@@ -14,6 +14,8 @@ export interface ChartSeries {
   points: [number, number | null][]
   dash?: boolean
   dots?: boolean
+  axis?: 'left' | 'right'
+  format?: (value: number) => string
 }
 
 function useWidth() {
@@ -71,6 +73,36 @@ function extent(values: number[]): [number, number] {
   return [lo, hi]
 }
 
+function axisBand(values: number[], yMin?: number, yMax?: number): [number, number] {
+  const [rawLo, rawHi] = extent(values)
+  let lo = yMin ?? rawLo
+  let hi = yMax ?? rawHi
+  if (lo === hi) {
+    // A flat series needs a visible band. Respect a pinned lower bound so a
+    // zero series draws 0 to 1 instead of -0.5 to 0.5.
+    if (yMin !== undefined) {
+      hi = lo + 1
+    } else if (yMax !== undefined) {
+      lo = hi - 1
+    } else {
+      lo -= 0.5
+      hi += 0.5
+    }
+  }
+  if (yMin === undefined && yMax === undefined) {
+    const span = hi - lo
+    lo -= span * 0.06
+    hi += span * 0.06
+  }
+  return [lo, hi]
+}
+
+function ticksFor(hi: number, lo: number, tickCount: number): number[] {
+  return Array.from({ length: tickCount }, (_, index) =>
+    tickCount === 1 ? hi : hi - ((hi - lo) * index) / (tickCount - 1),
+  )
+}
+
 function linePath(points: [number, number | null][], sx: (x: number) => number, sy: (y: number) => number): string {
   let path = ''
   let open = false
@@ -103,10 +135,19 @@ export function LineChart({
   empty?: string
 }) {
   const [ref, width] = useWidth()
-  const pad = { left: 42, right: 10, top: 6, bottom: 16 }
-  const flat = series.flatMap((entry) => entry.points)
-  const ys = flat.map(([, y]) => y).filter((y): y is number => y !== null && Number.isFinite(y))
-  const xs = flat.map(([x]) => x).filter((x) => Number.isFinite(x))
+  const leftSeries = series.filter((entry) => entry.axis !== 'right')
+  const rightSeries = series.filter((entry) => entry.axis === 'right')
+  const pointsOf = (entries: ChartSeries[]) => entries.flatMap((entry) => entry.points)
+  const ysOf = (entries: ChartSeries[]) =>
+    pointsOf(entries)
+      .map(([, y]) => y)
+      .filter((y): y is number => y !== null && Number.isFinite(y))
+  const leftYs = ysOf(leftSeries)
+  const rightYs = ysOf(rightSeries)
+  const ys = [...leftYs, ...rightYs]
+  const xs = pointsOf(series)
+    .map(([x]) => x)
+    .filter((x) => Number.isFinite(x))
 
   if (!ys.length || !xs.length) {
     return (
@@ -116,42 +157,33 @@ export function LineChart({
     )
   }
 
-  const [rawLo, rawHi] = extent(ys)
-  let lo = yMin ?? rawLo
-  let hi = yMax ?? rawHi
-  if (lo === hi) {
-    // A flat series needs a visible band. Respect a pinned lower bound so a
-    // zero series draws 0 to 1 instead of -0.5 to 0.5.
-    if (yMin !== undefined) {
-      hi = lo + 1
-    } else if (yMax !== undefined) {
-      lo = hi - 1
-    } else {
-      lo -= 0.5
-      hi += 0.5
-    }
-  }
-  if (yMin === undefined && yMax === undefined) {
-    const span = hi - lo
-    lo -= span * 0.06
-    hi += span * 0.06
-  }
+  const [lo, hi] = axisBand(leftYs.length ? leftYs : rightYs, yMin, yMax)
+  const hasRight = rightYs.length > 0
+  const [rightLo, rightHi] = hasRight ? axisBand(rightYs) : [0, 1]
+  const leftFormat = leftSeries.find((entry) => entry.format)?.format ?? format
+  const rightFormat = rightSeries.find((entry) => entry.format)?.format ?? format
+  const rightTicks = hasRight ? ticksFor(rightHi, rightLo, tickCount) : []
+  const rightPad = hasRight
+    ? Math.max(10, Math.ceil(Math.max(...rightTicks.map((tick) => rightFormat(tick).length)) * 6.4) + 10)
+    : 10
+  const pad = { left: 42, right: rightPad, top: 6, bottom: 16 }
   const xLo = Math.min(...xs)
   const xHi = Math.max(...xs)
   const plotWidth = Math.max(width - pad.left - pad.right, 8)
   const plotHeight = height - pad.top - pad.bottom
   const sx = (x: number) => (xHi === xLo ? pad.left + plotWidth / 2 : pad.left + ((x - xLo) / (xHi - xLo)) * plotWidth)
-  const sy = (y: number) => pad.top + (1 - (Math.min(Math.max(y, lo), hi) - lo) / (hi - lo)) * plotHeight
+  const syLeft = (y: number) => pad.top + (1 - (Math.min(Math.max(y, lo), hi) - lo) / (hi - lo)) * plotHeight
+  const syRight = (y: number) =>
+    pad.top + (1 - (Math.min(Math.max(y, rightLo), rightHi) - rightLo) / (rightHi - rightLo)) * plotHeight
+  const syOf = (entry: ChartSeries) => (entry.axis === 'right' ? syRight : syLeft)
 
-  const ticks = Array.from({ length: tickCount }, (_, index) =>
-    tickCount === 1 ? hi : hi - ((hi - lo) * index) / (tickCount - 1),
-  )
+  const ticks = ticksFor(hi, lo, tickCount)
   const crossesZero = lo < 0 && hi > 0
 
   const lastPoints = series.map((entry) => {
     for (let index = entry.points.length - 1; index >= 0; index -= 1) {
       const [x, y] = entry.points[index]
-      if (y !== null && Number.isFinite(y)) return { x, y, color: entry.color }
+      if (y !== null && Number.isFinite(y)) return { x, y, color: entry.color, right: entry.axis === 'right' }
     }
     return null
   })
@@ -162,14 +194,29 @@ export function LineChart({
         <svg width={width} height={height} role="img" aria-label={series.map((entry) => entry.label ?? 'series').join(', ')}>
           {ticks.map((tick, index) => (
             <g key={index}>
-              <line x1={pad.left} x2={width - pad.right} y1={sy(tick)} y2={sy(tick)} stroke={GRID} strokeWidth={1} strokeDasharray="3 3" />
-              <text x={pad.left - 6} y={sy(tick) + 3} textAnchor="end" fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS}>
-                {format(tick)}
+              <line x1={pad.left} x2={width - pad.right} y1={syLeft(tick)} y2={syLeft(tick)} stroke={GRID} strokeWidth={1} strokeDasharray="3 3" />
+              <text x={pad.left - 6} y={syLeft(tick) + 3} textAnchor="end" fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS}>
+                {leftFormat(tick)}
               </text>
             </g>
           ))}
+          {hasRight
+            ? rightTicks.map((tick, index) => (
+                <text
+                  key={`right-${index}`}
+                  x={width - pad.right + 6}
+                  y={syRight(tick) + 3}
+                  textAnchor="start"
+                  fontSize={10.5}
+                  fontFamily="ui-monospace, monospace"
+                  fill={AXIS}
+                >
+                  {rightFormat(tick)}
+                </text>
+              ))
+            : null}
           {crossesZero ? (
-            <line x1={pad.left} x2={width - pad.right} y1={sy(0)} y2={sy(0)} stroke="rgba(255,255,255,0.24)" strokeWidth={1.2} />
+            <line x1={pad.left} x2={width - pad.right} y1={syLeft(0)} y2={syLeft(0)} stroke="rgba(255,255,255,0.24)" strokeWidth={1.2} />
           ) : null}
           <text x={pad.left} y={height - 3} fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS} textAnchor="start">
             {xLo}
@@ -182,7 +229,7 @@ export function LineChart({
           {series.map((entry, index) => (
             <path
               key={index}
-              d={linePath(entry.points, sx, sy)}
+              d={linePath(entry.points, sx, syOf(entry))}
               fill="none"
               stroke={entry.color}
               strokeWidth={1.4}
@@ -195,13 +242,21 @@ export function LineChart({
             entry.dots
               ? entry.points.map(([x, y], pointIndex) =>
                   y === null || !Number.isFinite(y) ? null : (
-                    <circle key={`${index}-${pointIndex}`} cx={sx(x)} cy={sy(y)} r={1.8} fill={entry.color} />
+                    <circle key={`${index}-${pointIndex}`} cx={sx(x)} cy={syOf(entry)(y)} r={1.8} fill={entry.color} />
                   ),
                 )
               : null,
           )}
           {lastPoints.map((point, index) =>
-            point ? <circle key={`last-${index}`} cx={sx(point.x)} cy={sy(point.y)} r={2.1} fill={point.color} /> : null,
+            point ? (
+              <circle
+                key={`last-${index}`}
+                cx={sx(point.x)}
+                cy={(point.right ? syRight : syLeft)(point.y)}
+                r={2.1}
+                fill={point.color}
+              />
+            ) : null,
           )}
         </svg>
       ) : (
