@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Sequence
 
 import pytest
 
 from rlvr.cli import build_generator, main
 from rlvr.config import load_config
-from rlvr.experiment import Generation, Prompt
+from rlvr.experiment import Generation, Outcome, Prompt
 from rlvr.fake import FakeGenerator, FakeTestRunner
 from rlvr.screening import (
     DEFAULT_SCREEN_SAMPLES,
@@ -481,6 +482,118 @@ def test_screen_rejects_a_generator_that_returns_the_wrong_count(
             test_runner=FakeTestRunner(),
             temperature=0.9,
         )
+
+
+class NumberedGenerator:
+    """Returns one distinct code per sample, numbered from zero."""
+
+    def generate(
+        self,
+        prompt: Prompt,
+        *,
+        n: int,
+        temperature: float,
+        thinking: bool = True,
+    ) -> list[Generation]:
+        return [
+            Generation(
+                reasoning="",
+                code=f"def solution():\n    return {index}\n",
+                prompt_tokens=1,
+                completion_tokens=1,
+            )
+            for index in range(n)
+        ]
+
+
+def numbered_outcome(code: str) -> Outcome:
+    """A deterministic outcome: even sample numbers pass, odd ones fail."""
+    value = int(code.rsplit("return ", 1)[1])
+    passed = 1 if value % 2 == 0 else 0
+    return Outcome(
+        tests_passed=passed,
+        tests_total=1,
+        error_class="pass" if passed else "wrong_answer",
+    )
+
+
+class SerialRecordingRunner:
+    """Scores one candidate at a time and records every call."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def run(self, prompt: Prompt, code: str) -> Outcome:
+        self.calls.append((prompt.prompt_id, code))
+        return numbered_outcome(code)
+
+
+class BatchRecordingRunner:
+    """Scores whole questions in one call and records every batch."""
+
+    def __init__(self) -> None:
+        self.batches: list[list[tuple[str, str]]] = []
+        self.single_calls = 0
+
+    def run(self, prompt: Prompt, code: str) -> Outcome:
+        self.single_calls += 1
+        return numbered_outcome(code)
+
+    def run_batch(self, items: Sequence[tuple[Prompt, str]]) -> list[Outcome]:
+        self.batches.append([(prompt.prompt_id, code) for prompt, code in items])
+        return [numbered_outcome(code) for _, code in items]
+
+
+def test_screen_scores_each_question_in_one_batch(tmp_path: Path) -> None:
+    runner = BatchRecordingRunner()
+
+    result = screen(
+        QUESTIONS,
+        samples=4,
+        directory=tmp_path / "out",
+        generator=NumberedGenerator(),
+        test_runner=runner,
+        temperature=0.9,
+    )
+
+    assert [len(batch) for batch in runner.batches] == [4, 4, 4]
+    assert [batch[0][0] for batch in runner.batches] == [
+        prompt.prompt_id for prompt in QUESTIONS
+    ]
+    assert all(
+        {prompt_id for prompt_id, _ in batch} == {batch[0][0]}
+        for batch in runner.batches
+    )
+    assert runner.single_calls == 0
+    assert [row.passed for row in result.rows] == [2, 2, 2]
+
+
+def test_a_batched_screen_matches_the_serial_rows(tmp_path: Path) -> None:
+    serial = screen(
+        QUESTIONS,
+        samples=4,
+        directory=tmp_path / "serial",
+        generator=NumberedGenerator(),
+        test_runner=SerialRecordingRunner(),
+        temperature=0.9,
+    )
+    batched = screen(
+        QUESTIONS,
+        samples=4,
+        directory=tmp_path / "batched",
+        generator=NumberedGenerator(),
+        test_runner=BatchRecordingRunner(),
+        temperature=0.9,
+    )
+
+    assert batched.rows == serial.rows
+    assert dict(batched.summary) == dict(serial.summary)
+    assert (batched.directory / ROWS_NAME).read_bytes() == (
+        serial.directory / ROWS_NAME
+    ).read_bytes()
+    assert (batched.directory / SUMMARY_NAME).read_bytes() == (
+        serial.directory / SUMMARY_NAME
+    ).read_bytes()
 
 
 def test_two_fake_screens_produce_the_same_bytes(tmp_path: Path) -> None:

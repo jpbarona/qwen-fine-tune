@@ -358,6 +358,33 @@ def _checked_prompts(prompts: Sequence[Prompt]) -> list[Prompt]:
     return checked
 
 
+def _score_generations(
+    test_runner: Any,
+    prompt: Prompt,
+    generations: Sequence[Any],
+) -> list[Any]:
+    """Score every sample for one question, in one batch when possible.
+
+    A runner with a `run_batch` seam gets all of the question's candidates in
+    one call so its worker pool can overlap container starts. A runner without
+    that seam is asked one candidate at a time, which is the older behaviour.
+    The outcomes keep the candidate order.
+    """
+    items = [(prompt, generation.code) for generation in generations]
+    run_batch = getattr(test_runner, "run_batch", None)
+    outcomes = (
+        list(run_batch(items))
+        if run_batch is not None
+        else [test_runner.run(item_prompt, code) for item_prompt, code in items]
+    )
+    if len(outcomes) != len(items):
+        raise ScreenError(
+            f"test runner returned {len(outcomes)} outcomes for "
+            f"{prompt.prompt_id!r}, expected {len(items)}"
+        )
+    return outcomes
+
+
 def screen(
     prompts: Sequence[Prompt],
     *,
@@ -425,8 +452,7 @@ def screen(
                 f"{prompt.prompt_id!r}, expected {samples}"
             )
         passed = 0
-        for generation in generations:
-            outcome = test_runner.run(prompt, generation.code)
+        for outcome in _score_generations(test_runner, prompt, generations):
             if all_tests_passed(outcome.tests_passed, outcome.tests_total):
                 passed += 1
         row = ScreenRow(
