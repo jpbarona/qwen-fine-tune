@@ -15,7 +15,8 @@ question ids. A torn final line, left by a write that did not finish, is dropped
 and removed, so the restart appends on a clean line.
 
 The screen samples with thinking off, at the completion cap the trainer uses.
-The point is to measure the same regime the curriculum will train in.
+The point is to measure the same regime the curriculum will train in. It takes
+sixteen samples per question unless the caller asks for another count.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from .experiment import Prompt
 from .reward import all_tests_passed
 
 __all__ = [
+    "DEFAULT_SCREEN_SAMPLES",
     "DEFAULT_SCREEN_THINKING",
     "HISTOGRAM_LABELS",
     "ROWS_NAME",
@@ -52,6 +54,10 @@ SUMMARY_NAME = "summary.json"
 
 #: The screen measures the regime the trainer will use, so thinking is off.
 DEFAULT_SCREEN_THINKING = False
+
+#: Samples per question. Sixteen matches the training group size, so a screen
+#: and a training step see the same number of rollouts for one prompt.
+DEFAULT_SCREEN_SAMPLES = 16
 
 #: Histogram bucket labels, lowest first. One bucket per tenth of pass rate.
 HISTOGRAM_LABELS: tuple[str, ...] = tuple(
@@ -348,7 +354,7 @@ def _checked_prompts(prompts: Sequence[Prompt]) -> list[Prompt]:
 def screen(
     prompts: Sequence[Prompt],
     *,
-    samples: int,
+    samples: int = DEFAULT_SCREEN_SAMPLES,
     directory: str | Path,
     generator: ScreenGenerator,
     test_runner: Any,
@@ -356,6 +362,9 @@ def screen(
     thinking: bool = DEFAULT_SCREEN_THINKING,
 ) -> ScreenResult:
     """Sample every question and write the row table and summary.
+
+    Every question gets `samples` generations, sixteen unless the caller asks
+    for another count.
 
     Questions already present in `rows.jsonl` are skipped, so an interrupted
     screen continues where it stopped. Existing rows must use the same sample

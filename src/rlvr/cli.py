@@ -1,7 +1,7 @@
 """Command line interface.
 
     rlvr run --arm <code-score|hybrid|gated-judge|gated-process> --fake
-    rlvr screen --questions <path> --samples <n> --output <dir> [--fake]
+    rlvr screen --questions <path> [--samples <n>] --output <dir> [--fake]
     rlvr eval-band --band <band> [--count 100] [--seed 2026] [--checkpoint <dir>] [--out <path>]
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
     rlvr dashboard [<run-dir> ...] [--runs-root <runs-root>] [--port 8081]
@@ -14,8 +14,10 @@ fails at startup. `--resume` continues the latest run folder from its last
 checkpoint.
 
 `screen` samples the base model with thinking off and writes a difficulty table.
-It never trains, builds no optimizer, and writes into its own output folder, not
-a run folder. A restart skips the question ids already in the table.
+It takes sixteen samples per question by default and `--samples` overrides
+that. It never trains, builds no optimizer, and writes into its own output
+folder, not a run folder. A restart skips the question ids already in the
+table.
 
 `eval-band` scores one labelled difficulty band from the training split. It
 prints one JSON line with pass@1 for that band, and writes the same line to
@@ -89,7 +91,7 @@ from .resume import (
     validate_resume,
 )
 from .runs import RunStore
-from .screening import ROWS_NAME, ScreenError, ScreenStore
+from .screening import DEFAULT_SCREEN_SAMPLES, ROWS_NAME, ScreenError, ScreenStore
 from .screening import screen as run_screen
 from .stages import BANDS
 from .summary import SummaryError, format_summary, load_reports, write_report
@@ -201,9 +203,9 @@ def build_parser() -> argparse.ArgumentParser:
     screen_parser.add_argument(
         "--samples",
         type=int,
-        required=True,
+        default=DEFAULT_SCREEN_SAMPLES,
         metavar="N",
-        help="samples per question",
+        help=f"samples per question (default: {DEFAULT_SCREEN_SAMPLES})",
     )
     screen_parser.add_argument(
         "--output",
@@ -694,7 +696,10 @@ def run_command(args: argparse.Namespace) -> int:
 
 
 def screen_command(args: argparse.Namespace) -> int:
-    """Sample the base model and write the difficulty table."""
+    """Sample the base model and write the difficulty table.
+
+    The sample count defaults to sixteen and `--samples` overrides it.
+    """
     if args.samples < 1:
         raise UsageError(f"--samples must be at least 1, got {args.samples}")
 

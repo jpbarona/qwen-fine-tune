@@ -17,6 +17,7 @@ from rlvr.config import load_config
 from rlvr.experiment import Generation, Prompt
 from rlvr.fake import FakeGenerator, FakeTestRunner
 from rlvr.screening import (
+    DEFAULT_SCREEN_SAMPLES,
     HISTOGRAM_LABELS,
     ROWS_NAME,
     SUMMARY_NAME,
@@ -114,6 +115,38 @@ def test_summary_puts_rates_in_tenth_buckets_and_counts_the_bands() -> None:
     }
     assert sum(summary["pass_rate_histogram"].values()) == 5
     assert list(summary["pass_rate_histogram"]) == list(HISTOGRAM_LABELS)
+
+
+def test_summary_at_sixteen_samples_counts_zero_partial_and_full() -> None:
+    rows = [
+        ScreenRow("a", 16, 0, 0.0),
+        ScreenRow("b", 16, 1, 0.0625),
+        ScreenRow("c", 16, 8, 0.5),
+        ScreenRow("d", 16, 15, 0.9375),
+        ScreenRow("e", 16, 16, 1.0),
+    ]
+
+    summary = summarize(rows, samples_per_question=DEFAULT_SCREEN_SAMPLES)
+
+    assert summary["questions"] == 5
+    assert summary["samples_per_question"] == 16
+    assert summary["zero_pass"] == 1
+    assert summary["partial_pass"] == 3
+    assert summary["full_pass"] == 1
+    assert summary["pass_rate_histogram"] == {
+        "0.0": 2,
+        "0.1": 0,
+        "0.2": 0,
+        "0.3": 0,
+        "0.4": 0,
+        "0.5": 1,
+        "0.6": 0,
+        "0.7": 0,
+        "0.8": 0,
+        "0.9": 1,
+        "1.0": 1,
+    }
+    assert sum(summary["pass_rate_histogram"].values()) == 5
 
 
 def test_summary_rejects_a_bad_sample_count() -> None:
@@ -244,6 +277,53 @@ def test_screen_samples_with_thinking_off_at_the_requested_count(tmp_path: Path)
         ("mbpp-0002", 4, 0.9, False),
         ("mbpp-0003", 4, 0.9, False),
     ]
+
+
+def test_the_screen_defaults_to_sixteen_samples(tmp_path: Path) -> None:
+    generator = CountingGenerator()
+
+    result = screen(
+        QUESTIONS,
+        directory=tmp_path / "out",
+        generator=generator,
+        test_runner=FakeTestRunner(),
+        temperature=0.9,
+    )
+
+    assert DEFAULT_SCREEN_SAMPLES == 16
+    assert generator.calls == [
+        ("mbpp-0001", 16, 0.9, False),
+        ("mbpp-0002", 16, 0.9, False),
+        ("mbpp-0003", 16, 0.9, False),
+    ]
+    assert [row.samples for row in result.rows] == [16, 16, 16]
+    assert result.summary["samples_per_question"] == 16
+
+
+def test_written_rows_keep_the_four_pool_fields(tmp_path: Path) -> None:
+    from rlvr.pools import from_rows
+
+    result = screen(
+        QUESTIONS,
+        directory=tmp_path / "out",
+        generator=FakeGenerator(),
+        test_runner=FakeTestRunner(),
+        temperature=0.9,
+    )
+
+    rows = read_lines(result.directory / ROWS_NAME)
+    assert len(rows) == 3
+    for row in rows:
+        assert list(row) == ["prompt_id", "samples", "passed", "pass_rate"]
+        assert isinstance(row["prompt_id"], str) and row["prompt_id"]
+        assert row["samples"] == 16
+        assert isinstance(row["passed"], int)
+        assert 0 <= row["passed"] <= 16
+        assert row["pass_rate"] == row["passed"] / row["samples"]
+
+    pools = from_rows(rows, samples=16)
+    assert pools.samples == 16
+    assert len(pools.train) + len(pools.rehearsal) + len(pools.parked) == 3
 
 
 def test_screen_resumes_from_the_rows_already_written(tmp_path: Path) -> None:
@@ -432,6 +512,36 @@ def test_cli_screen_fake_writes_the_table_and_needs_no_gpu(
     assert (output / SUMMARY_NAME).is_file()
     assert not (output / "checkpoints").exists()
     assert not (output / "meta.json").exists()
+
+
+def test_cli_screen_uses_sixteen_samples_when_the_flag_is_absent(
+    tmp_path: Path, capsys
+) -> None:
+    questions = write_questions(tmp_path / "questions.jsonl")
+    output = tmp_path / "screen"
+
+    code = main(
+        [
+            "screen",
+            "--questions",
+            str(questions),
+            "--output",
+            str(output),
+            "--fake",
+        ]
+    )
+
+    assert code == 0
+    printed = capsys.readouterr().out
+    assert "samples=16" in printed
+    rows = read_lines(output / ROWS_NAME)
+    assert [row["samples"] for row in rows] == [16, 16, 16]
+    summary = json.loads((output / SUMMARY_NAME).read_text(encoding="utf-8"))
+    assert summary["samples_per_question"] == 16
+    assert (
+        summary["zero_pass"] + summary["partial_pass"] + summary["full_pass"] == 3
+    )
+    assert sum(summary["pass_rate_histogram"].values()) == 3
 
 
 def test_cli_screen_rerun_skips_done_questions(tmp_path: Path, capsys) -> None:
