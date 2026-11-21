@@ -15,6 +15,8 @@ export interface SeriesMap {
   train_prompts: Nullable[]
   parked_prompts: Nullable[]
   advantage_share: Nullable[]
+  group_spread: Nullable[]
+  group_sd: Nullable[]
   gpu_live_mib: Nullable[]
   gpu_cached_mib: Nullable[]
   gpu_fragmented_mib: Nullable[]

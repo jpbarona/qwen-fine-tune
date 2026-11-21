@@ -1614,6 +1614,28 @@ def test_a_step_row_records_the_counts_and_the_advantage_share(tmp_path) -> None
     assert row["train_prompts"] == 2
     assert row["parked_prompts"] == 0
     assert row["advantage_share"] == pytest.approx(1.0)
+    assert isinstance(row["group_spread"], float)
+    assert isinstance(row["group_sd"], float)
+    assert math.isfinite(row["group_spread"])
+    assert math.isfinite(row["group_sd"])
+
+
+def test_the_group_signal_matches_the_binding_values() -> None:
+    from rlvr.experiment import _mean_group_signal
+
+    assert _mean_group_signal([[0.5, 0.5]]) == pytest.approx((0.0, 0.0))
+    assert _mean_group_signal([[0.0, 1.0]]) == pytest.approx((0.5, 0.5))
+    assert _mean_group_signal([[0.5, 0.5], [0.0, 1.0]]) == pytest.approx((0.25, 0.25))
+
+
+def test_the_group_signal_treats_one_reward_as_zero_and_skips_a_missing_one() -> None:
+    from rlvr.experiment import _mean_group_signal
+
+    assert _mean_group_signal([[0.7]]) == pytest.approx((0.0, 0.0))
+    assert _mean_group_signal([]) == (0.0, 0.0)
+    # A group with a missing reward is skipped, not counted as zero.
+    assert _mean_group_signal([[None, 0.5], [0.0, 1.0]]) == pytest.approx((0.5, 0.5))
+    assert _mean_group_signal([[None], [0.7]]) == pytest.approx((0.0, 0.0))
 
 
 def test_a_group_with_one_reward_counts_zero_advantage(tmp_path) -> None:

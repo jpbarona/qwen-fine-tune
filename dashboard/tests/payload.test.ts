@@ -55,6 +55,8 @@ test('accepts pooled step series and a pool policy', () => {
   data.runs[0].series.train_prompts = [30, 34]
   data.runs[0].series.parked_prompts = [8, 4]
   data.runs[0].series.advantage_share = [0.25, 0.75]
+  data.runs[0].series.group_spread = [0.1, 0.3]
+  data.runs[0].series.group_sd = [0.2, 0.4]
   assert.equal(isDashboard(data), true)
 })
 

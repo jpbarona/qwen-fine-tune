@@ -127,6 +127,8 @@ SERIES_FIELDS: tuple[str, ...] = (
     "train_prompts",
     "parked_prompts",
     "advantage_share",
+    "group_spread",
+    "group_sd",
 )
 
 #: Fields that are whole counts and are read as integers, not floats.

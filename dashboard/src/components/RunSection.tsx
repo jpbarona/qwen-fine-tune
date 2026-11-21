@@ -55,6 +55,11 @@ function shareTick(value: number): string {
   return `${Math.round(value * 100)}%`
 }
 
+function decimalTick(value: number): string {
+  if (value === 0) return '0'
+  return Number(value.toFixed(2)).toString()
+}
+
 function countTick(value: number): string {
   return String(Math.round(value))
 }
@@ -384,6 +389,28 @@ export default function RunSection({ run }: { run: Run }) {
             format={countTick}
             empty="no pool data"
           />
+        </Panel>
+        <Panel
+          title="Group signal"
+          legend={
+            <>
+              <Swatch color={ACCENT} label="group spread" />
+              <Swatch color={MUTED} label="group sd" />
+            </>
+          }
+        >
+          <LineChart
+            series={[
+              { color: ACCENT, points: pairs(steps, run.series.group_spread) },
+              { color: MUTED, points: pairs(steps, run.series.group_sd) },
+            ]}
+            yMin={0}
+            yMax={1}
+            height={70}
+            tickCount={6}
+            format={decimalTick}
+            empty="no group signal"
+          />
           <div className="mt-1 border-t border-white/[0.06] pt-1">
             <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] text-[#6b6b73]">
               <span className="whitespace-nowrap">
@@ -396,8 +423,9 @@ export default function RunSection({ run }: { run: Run }) {
               yMin={0}
               yMax={1}
               height={70}
+              tickCount={6}
               format={shareTick}
-              empty="no pool data"
+              empty="no group signal"
             />
           </div>
         </Panel>

@@ -126,6 +126,55 @@ def _finite_or_none(value: float | None) -> float | None:
     return value if math.isfinite(value) else None
 
 
+def _group_spread_and_sd(
+    rewards: Sequence[float | None],
+) -> tuple[float, float] | None:
+    """The mean absolute deviation and population SD of one prompt group.
+
+    A group of one reward gives zero for both. A group with a missing or
+    non-finite reward is skipped by returning None, so the step mean is taken
+    over the groups that hold a real reward only.
+    """
+    values: list[float] = []
+    for reward in rewards:
+        if reward is None:
+            return None
+        value = float(reward)
+        if not math.isfinite(value):
+            return None
+        values.append(value)
+    if not values:
+        return None
+    mean = sum(values) / len(values)
+    spread = sum(abs(value - mean) for value in values) / len(values)
+    sd = math.sqrt(sum((value - mean) ** 2 for value in values) / len(values))
+    if not math.isfinite(spread) or not math.isfinite(sd):
+        return None
+    return spread, sd
+
+
+def _mean_group_signal(
+    groups: Sequence[Sequence[float | None]],
+) -> tuple[float, float]:
+    """The step mean of the per-group spread and SD.
+
+    Groups that cannot produce a signal are skipped, not counted as zero. A
+    step with no usable group reports zero for both fields.
+    """
+    spreads: list[float] = []
+    sds: list[float] = []
+    for rewards in groups:
+        signal = _group_spread_and_sd(rewards)
+        if signal is None:
+            continue
+        spreads.append(signal[0])
+        sds.append(signal[1])
+    return (
+        sum(spreads) / len(spreads) if spreads else 0.0,
+        sum(sds) / len(sds) if sds else 0.0,
+    )
+
+
 def _empty_cuda_cache() -> None:
     """Release cached allocator blocks after an out-of-memory error.
 
@@ -308,8 +357,11 @@ class StepResult:
     `prompts` is the number of prompt groups. `train_prompts` and
     `parked_prompts` split that count by the plan. `advantage_share` is the
     number of groups whose rewards hold more than one distinct value, divided
-    by the group count. `mastered` lists the prompts that had at least one full
-    test pass. The sequence count is the length of `records`.
+    by the group count. `group_spread` is the mean absolute deviation of each
+    group's rewards from its mean, then averaged over the groups.
+    `group_sd` is the population standard deviation, then averaged the same
+    way. `mastered` lists the prompts that had at least one full test pass. The
+    sequence count is the length of `records`.
     """
 
     records: tuple[RolloutRecord, ...]
@@ -324,6 +376,8 @@ class StepResult:
     train_prompts: int = 0
     parked_prompts: int = 0
     advantage_share: float = 0.0
+    group_spread: float = 0.0
+    group_sd: float = 0.0
     outcomes: tuple[GroupOutcome, ...] = ()
 
 
@@ -527,6 +581,8 @@ class Experiment:
                     train_prompts=result.train_prompts,
                     parked_prompts=result.parked_prompts,
                     advantage_share=result.advantage_share,
+                    group_spread=result.group_spread,
+                    group_sd=result.group_sd,
                 )
             )
             policy.observe(memory, prompts=result.prompts)
@@ -983,7 +1039,9 @@ class Experiment:
 
         The entropy flag is the same for every group in a step. The step value
         is the mean over the groups that returned one. The advantage share
-        counts groups whose rewards hold more than one distinct value.
+        counts groups whose rewards hold more than one distinct value. The
+        group spread and group SD average the per-group values, and a group
+        with a missing reward is skipped.
         """
         prompts = list(plan.prompts)
         parked_ids = {prompt.prompt_id for prompt in plan.parked}
@@ -999,6 +1057,7 @@ class Experiment:
         self._check_batch_shape(prompts, batches)
 
         records: list[RolloutRecord] = []
+        group_rewards: list[tuple[float | None, ...]] = []
         entropies: list[float] = []
         mastered: list[Prompt] = []
         outcomes: list[GroupOutcome] = []
@@ -1061,6 +1120,9 @@ class Experiment:
                 )
                 if len({record.reward for record in scored.records}) > 1:
                     advantage_groups += 1
+                group_rewards.append(
+                    tuple(record.reward for record in scored.records)
+                )
                 truncated += sum(generation.truncated for generation in generations)
                 prompt_truncated += sum(
                     generation.prompt_truncated for generation in generations
@@ -1096,6 +1158,7 @@ class Experiment:
         }
         if self.fake:
             timings = {name: 0.0 for name in timings}
+        group_spread, group_sd = _mean_group_signal(group_rewards)
         return StepResult(
             records=tuple(records),
             prompts=len(prompts),
@@ -1109,6 +1172,8 @@ class Experiment:
             train_prompts=len(plan.train),
             parked_prompts=len(plan.parked),
             advantage_share=advantage_groups / len(prompts) if prompts else 0.0,
+            group_spread=group_spread,
+            group_sd=group_sd,
             outcomes=tuple(outcomes),
         )
 
@@ -1384,6 +1449,8 @@ class Experiment:
         train_prompts: int = 0,
         parked_prompts: int = 0,
         advantage_share: float = 0.0,
+        group_spread: float = 0.0,
+        group_sd: float = 0.0,
     ) -> dict[str, Any]:
         """One metrics row. Entropy is present only on a measurement step.
 
@@ -1392,7 +1459,9 @@ class Experiment:
         sequence count, so an older reader keeps working. `train_prompts` and
         `parked_prompts` split the group count by the plan. `advantage_share`
         is the share of groups with more than one distinct reward, so a step
-        that teaches nothing is visible in the row. `grad_norm` and
+        that teaches nothing is visible in the row. `group_spread` and
+        `group_sd` average the per-group reward spread and population SD, so
+        the row shows how much there is to learn from. `grad_norm` and
         `update_norm` are null when the generator has no gradients, as the fake
         does, or when a diverged step produced a non-finite value.
         """
@@ -1416,6 +1485,8 @@ class Experiment:
             "mean_reward": sum(record.reward for record in records) / count,
             "pass_rate": passed / count,
             "advantage_share": advantage_share,
+            "group_spread": group_spread,
+            "group_sd": group_sd,
             "mean_completion_tokens": sum(record.completion_tokens for record in records) / count,
             "cache_hits": sum(1 for record in records if record.cache_hit),
             "truncation_rate": truncated / count,

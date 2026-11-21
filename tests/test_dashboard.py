@@ -502,6 +502,8 @@ def test_a_pooled_run_reports_the_policy_and_the_step_series(tmp_path) -> None:
             "train_prompts": 30,
             "parked_prompts": 8,
             "advantage_share": 0.25,
+            "group_spread": 0.1,
+            "group_sd": 0.2,
             "pool_policy": "sweep",
             "mean_reward": 0.5,
         },
@@ -511,6 +513,8 @@ def test_a_pooled_run_reports_the_policy_and_the_step_series(tmp_path) -> None:
             "train_prompts": 34,
             "parked_prompts": 4,
             "advantage_share": 0.75,
+            "group_spread": 0.3,
+            "group_sd": 0.4,
             "pool_policy": "sweep",
             "mean_reward": 0.6,
         },
@@ -532,6 +536,10 @@ def test_a_pooled_run_reports_the_policy_and_the_step_series(tmp_path) -> None:
     assert run["latest"]["train_prompts"] == 34
     assert run["latest"]["parked_prompts"] == 4
     assert run["latest"]["advantage_share"] == pytest.approx(0.75)
+    assert run["series"]["group_spread"] == [pytest.approx(0.1), pytest.approx(0.3)]
+    assert run["series"]["group_sd"] == [pytest.approx(0.2), pytest.approx(0.4)]
+    assert run["latest"]["group_spread"] == pytest.approx(0.3)
+    assert run["latest"]["group_sd"] == pytest.approx(0.4)
 
 
 def test_the_policy_falls_back_to_the_schedule_record(tmp_path) -> None:
@@ -550,9 +558,14 @@ def test_an_old_run_has_empty_pool_series_and_no_policy(tmp_path) -> None:
     assert run["series"]["train_prompts"] == [None, None]
     assert run["series"]["parked_prompts"] == [None, None]
     assert run["series"]["advantage_share"] == [None, None]
+    assert run["series"]["group_spread"] == [None, None]
+    assert run["series"]["group_sd"] == [None, None]
     assert run["latest"]["train_prompts"] is None
     assert run["latest"]["advantage_share"] is None
+    assert run["latest"]["group_spread"] is None
+    assert run["latest"]["group_sd"] is None
     assert "pool composition" in render_html(collect_dashboard([run_dir]))
+    assert "group signal" in render_html(collect_dashboard([run_dir])).lower()
 
 
 def test_started_is_shown_as_a_readable_utc_timestamp(tmp_path) -> None:
