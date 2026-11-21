@@ -485,6 +485,7 @@ def test_pool_settings_default(write_config) -> None:
     assert config.pool_policy is None
     assert config.screen_rows is None
     assert config.rollouts_per_step == 608
+    assert config.sweep_gap_ratio == 3
 
 
 def test_pool_settings_are_read(tmp_path) -> None:
@@ -514,13 +515,17 @@ def test_the_default_config_sets_the_rollout_budget() -> None:
 @pytest.mark.parametrize(
     "line, key",
     [
-        ('pool_policy = "sweep"', "training.pool_policy"),
+        ('pool_policy = "random"', "training.pool_policy"),
         ('pool_policy = ""', "training.pool_policy"),
         ("pool_policy = 3", "training.pool_policy"),
         ("screen_rows = 3", "training.screen_rows"),
         ('screen_rows = ""', "training.screen_rows"),
         ("rollouts_per_step = 0", "training.rollouts_per_step"),
         ("rollouts_per_step = 1.5", "training.rollouts_per_step"),
+        ("sweep_gap_ratio = 2", "training.sweep_gap_ratio"),
+        ("sweep_gap_ratio = 11", "training.sweep_gap_ratio"),
+        ("sweep_gap_ratio = 3.5", "training.sweep_gap_ratio"),
+        ("sweep_gap_ratio = true", "training.sweep_gap_ratio"),
     ],
 )
 def test_a_bad_pool_setting_is_named(tmp_path, line: str, key: str) -> None:
@@ -529,6 +534,35 @@ def test_a_bad_pool_setting_is_named(tmp_path, line: str, key: str) -> None:
 
     with pytest.raises(ConfigError, match=key):
         load_config(path)
+
+
+def test_the_sweep_policy_and_gap_ratio_are_read(tmp_path) -> None:
+    path = tmp_path / "sweep.toml"
+    path.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "sweep"\n'
+        'screen_rows = "screens/latest/rows.jsonl"\n'
+        "sweep_gap_ratio = 5\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+
+    assert config.pool_policy == "sweep"
+    assert config.sweep_gap_ratio == 5
+
+
+def test_the_sweep_gap_ratio_defaults_to_three(tmp_path) -> None:
+    path = tmp_path / "sweep-default.toml"
+    path.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "sweep"\n'
+        'screen_rows = "screens/latest/rows.jsonl"\n',
+        encoding="utf-8",
+    )
+
+    assert load_config(path).sweep_gap_ratio == 3
 
 
 def test_a_pool_policy_cannot_be_combined_with_max_prompts(tmp_path) -> None:

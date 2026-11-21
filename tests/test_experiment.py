@@ -1880,3 +1880,73 @@ def test_a_saved_streak_below_the_bar_does_not_demote(tmp_path) -> None:
     ).run()
 
     assert not any(row.get("reason") == "demoted" for row in store.labels)
+
+
+FOUR_STEP_CONFIG = ONE_STEP_CONFIG.replace("steps = 1", "steps = 4")
+
+
+def test_the_config_builds_the_sweep_schedule(tmp_path) -> None:
+    from rlvr.pools import Pools
+
+    prompts = make_prompts(2)
+    pools = Pools(
+        train=("mbpp-0000",),
+        rehearsal=(),
+        parked=("mbpp-0001",),
+        samples=16,
+    )
+    schedule_config = ONE_STEP_CONFIG.replace(
+        "generations_per_prompt = 16",
+        'generations_per_prompt = 16\npool_policy = "sweep"\n'
+        'screen_rows = "unused.jsonl"\nrollouts_per_step = 16\n'
+        "sweep_gap_ratio = 4",
+    )
+    store = RecordingStore()
+
+    build(
+        "code-score",
+        tmp_path,
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        config_text=schedule_config,
+    ).run()
+
+    row = store.metrics[0]
+    assert row["pool_policy"] == "sweep"
+    assert row["train_prompts"] == 0
+    assert row["parked_prompts"] == 1
+    assert {"step": 1, "sweep_position": 1} in store.labels
+
+
+def test_a_resume_mid_sweep_stays_in_the_sweep(tmp_path) -> None:
+    from rlvr.pools import Pools
+    from rlvr.schedule import Sweep
+
+    prompts = make_prompts(4)
+    pools = Pools(
+        train=("mbpp-0000",),
+        rehearsal=(),
+        parked=("mbpp-0001", "mbpp-0002", "mbpp-0003"),
+        samples=16,
+    )
+    schedule = Sweep(prompts_per_step=1, gap_ratio=3, seed=0)
+    generator = StubGenerator()
+    store = RecordingStore()
+    # Three sweep steps have run. The fourth step is the first gap step.
+    store.labels = [{"step": 3, "sweep_position": 3}]
+
+    build(
+        "code-score",
+        tmp_path,
+        generator=generator,
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        schedule=schedule,
+        config_text=FOUR_STEP_CONFIG,
+        resume_step=3,
+    ).run()
+
+    assert generator.batch_calls[0] == ("mbpp-0000",)
+    assert store.metrics[0]["parked_prompts"] == 0

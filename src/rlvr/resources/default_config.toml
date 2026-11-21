@@ -82,9 +82,13 @@ eval_batch_size = 8
 prefetch_scoring = true
 
 # Pool policy for the parked prompts. "spread" sends a fixed slice of parked
-# prompts with every step. Unset means no schedule: the run trains the train
-# pool and leaves parked prompts alone.
+# prompts with every step. "sweep" covers the whole parked pool in consecutive
+# all-parked steps, then trains for a gap. Unset means no schedule: the run
+# trains the train pool and leaves parked prompts alone.
 # pool_policy = "spread"
+# Training steps after a sweep, as a multiple of the sweep length. An integer
+# from 3 to 10. Only the sweep policy reads it.
+# sweep_gap_ratio = 3
 # The measured screen output, as a folder or its rows.jsonl file. Unset keeps
 # the unmeasured placeholder pool.
 # screen_rows = "screens/latest/rows.jsonl"

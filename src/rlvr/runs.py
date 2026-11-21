@@ -149,7 +149,7 @@ class RunStore:
         )
 
     def _truncate_labels(self, step: int) -> None:
-        """Drop label and streak rows past `step` so a replay cannot duplicate them."""
+        """Drop label, streak and schedule rows past `step` so a replay is clean."""
         if not self.labels_path.exists():
             return
         kept: list[str] = []
@@ -250,7 +250,7 @@ class RunStore:
         )
 
     def append_label(self, row: Mapping[str, Any]) -> None:
-        """Append one pool label change or saved failure streak."""
+        """Append one pool label change, saved failure streak, or schedule state."""
         self._append_line(
             self.labels_path,
             json.dumps(dict(row), ensure_ascii=False, allow_nan=False),

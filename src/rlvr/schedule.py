@@ -20,6 +20,11 @@ an input.
 step. The slice is the smaller of the cap and the count that visits the whole
 parked pool once every `refresh_steps` steps. Train prompts fill the rest of
 the step.
+
+`Sweep` is the second policy. It covers the whole parked pool in `m` consecutive
+all-parked steps, then trains for `gap_ratio * m` steps with no parked prompts.
+Labels update when the last sweep step ends. The cycle position is saved beside
+the label state, so a resume continues the same sweep at the same index.
 """
 
 from __future__ import annotations
@@ -38,13 +43,18 @@ __all__ = [
     "DEFAULT_DEMOTE_AFTER",
     "DEFAULT_PROMOTION_BAR",
     "DEFAULT_REFRESH_STEPS",
+    "DEFAULT_SWEEP_GAP_RATIO",
+    "MAX_SWEEP_GAP_RATIO",
+    "MIN_SWEEP_GAP_RATIO",
     "GroupOutcome",
     "LabelUpdate",
     "Schedule",
     "Spread",
     "StepPlan",
+    "Sweep",
     "label_from_row",
     "streak_from_row",
+    "sweep_position_from_row",
 ]
 
 #: A parked prompt is promoted at two passing rollouts or more. The value is
@@ -57,6 +67,14 @@ DEFAULT_DEMOTE_AFTER = 10
 
 #: The parked pool is meant to be visited once per this many steps.
 DEFAULT_REFRESH_STEPS = 40
+
+#: The gap between sweeps is this many times the sweep length. Three is the
+#: default, so a cycle spends about a quarter of its steps on parked work.
+DEFAULT_SWEEP_GAP_RATIO = 3
+
+#: The allowed range for the sweep gap ratio.
+MIN_SWEEP_GAP_RATIO = 3
+MAX_SWEEP_GAP_RATIO = 10
 
 #: The two labels a prompt can hold in the training schedule.
 TRAIN_LABEL = "train"
@@ -171,6 +189,73 @@ def _positive_int(name: str, value: object) -> int:
     return value
 
 
+def _observe_outcome(
+    step: int,
+    outcome: GroupOutcome,
+    *,
+    promotion_bar: int,
+    demote_after: int,
+    failure_streak: dict[str, int],
+) -> LabelUpdate | None:
+    """Apply the pool rules to one group and return its update, if any.
+
+    A parked group promotes at `promotion_bar` passing rollouts. A train group
+    with no passing rollout extends its full-failure streak, and `demote_after`
+    consecutive groups demote it. A train group with any passing rollout clears
+    the streak. A parked group never changes a train streak.
+    """
+    if outcome.parked:
+        if outcome.passed >= promotion_bar:
+            failure_streak.pop(outcome.prompt_id, None)
+            return LabelUpdate(
+                step=step,
+                prompt_id=outcome.prompt_id,
+                label=TRAIN_LABEL,
+                reason="promoted",
+                passed=outcome.passed,
+                samples=outcome.samples,
+            )
+        return None
+
+    if outcome.passed == 0:
+        streak = failure_streak.get(outcome.prompt_id, 0) + 1
+    else:
+        streak = 0
+
+    update: LabelUpdate | None = None
+    if streak >= demote_after:
+        update = LabelUpdate(
+            step=step,
+            prompt_id=outcome.prompt_id,
+            label=PARKED_LABEL,
+            reason="demoted",
+            passed=outcome.passed,
+            samples=outcome.samples,
+        )
+        streak = 0
+    failure_streak[outcome.prompt_id] = streak
+    return update
+
+
+def _saved_streak(failure_streak: dict[str, int], prompt_id: str) -> int:
+    """The current full-failure streak for one prompt."""
+    return failure_streak.get(prompt_id, 0)
+
+
+def _restore_saved_streak(
+    failure_streak: dict[str, int], prompt_id: str, streak: int
+) -> None:
+    """Set one prompt's saved streak. Bad rows are ignored."""
+    if not isinstance(prompt_id, str) or not prompt_id.strip():
+        return
+    if isinstance(streak, bool) or not isinstance(streak, int) or streak < 0:
+        return
+    if streak == 0:
+        failure_streak.pop(prompt_id, None)
+    else:
+        failure_streak[prompt_id] = streak
+
+
 @dataclass
 class Spread:
     """A fixed parked slice every step, in a seeded rotation.
@@ -273,45 +358,21 @@ class Spread:
         updates: list[LabelUpdate] = []
 
         for outcome in outcomes:
-            if outcome.parked:
-                if outcome.passed >= self.promotion_bar:
-                    updates.append(
-                        LabelUpdate(
-                            step=step,
-                            prompt_id=outcome.prompt_id,
-                            label=TRAIN_LABEL,
-                            reason="promoted",
-                            passed=outcome.passed,
-                            samples=outcome.samples,
-                        )
-                    )
-                    self._failure_streak.pop(outcome.prompt_id, None)
-                continue
-
-            if outcome.passed == 0:
-                streak = self._failure_streak.get(outcome.prompt_id, 0) + 1
-            else:
-                streak = 0
-
-            if streak >= self.demote_after:
-                updates.append(
-                    LabelUpdate(
-                        step=step,
-                        prompt_id=outcome.prompt_id,
-                        label=PARKED_LABEL,
-                        reason="demoted",
-                        passed=outcome.passed,
-                        samples=outcome.samples,
-                    )
-                )
-                streak = 0
-            self._failure_streak[outcome.prompt_id] = streak
+            update = _observe_outcome(
+                step,
+                outcome,
+                promotion_bar=self.promotion_bar,
+                demote_after=self.demote_after,
+                failure_streak=self._failure_streak,
+            )
+            if update is not None:
+                updates.append(update)
 
         return tuple(updates)
 
     def failure_streak(self, prompt_id: str) -> int:
         """The current full-failure streak for a train prompt."""
-        return self._failure_streak.get(prompt_id, 0)
+        return _saved_streak(self._failure_streak, prompt_id)
 
     def restore_streak(self, prompt_id: str, streak: int) -> None:
         """Set a prompt's failure streak from a saved label row.
@@ -320,14 +381,208 @@ class Spread:
         streak clears an earlier nonzero one. A negative or non-integer count
         is ignored, because a hand-edited row must not break the run.
         """
-        if not isinstance(prompt_id, str) or not prompt_id.strip():
+        _restore_saved_streak(self._failure_streak, prompt_id, streak)
+
+
+@dataclass
+class Sweep:
+    """A whole-pool sweep in `m` steps, then a gap of training steps.
+
+    `prompts_per_step` is the full step size. With `P` parked prompts, the
+    sweep length is `m = ceil(P / prompts_per_step)` and the gap is
+    `gap_ratio * m` training steps. Every step in the sweep is parked only, so
+    no train prompt appears. The sweep slice keeps the full step size even when
+    the last slice or a small pool would be shorter, because a sweep step uses
+    the same rollout budget as a training step.
+
+    The schedule keeps a cycle position. Position `0` to `m - 1` is a sweep
+    step and the rest of the cycle is a training step. The position is saved
+    beside the label state after every step, so a resume continues the same
+    sweep at the same index even when the parked count changed.
+    """
+
+    prompts_per_step: int
+    gap_ratio: int = DEFAULT_SWEEP_GAP_RATIO
+    seed: int = 0
+    promotion_bar: int = DEFAULT_PROMOTION_BAR
+    demote_after: int = DEFAULT_DEMOTE_AFTER
+    name: str = field(default="sweep", init=False)
+    _failure_streak: dict[str, int] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _position: int = field(default=0, init=False, repr=False)
+    _pending: list[GroupOutcome] = field(default_factory=list, init=False, repr=False)
+    _last_was_sweep: bool = field(default=False, init=False, repr=False)
+    _last_closed_sweep: bool = field(default=False, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        _positive_int("prompts_per_step", self.prompts_per_step)
+        _positive_int("promotion_bar", self.promotion_bar)
+        _positive_int("demote_after", self.demote_after)
+        if (
+            isinstance(self.gap_ratio, bool)
+            or not isinstance(self.gap_ratio, int)
+            or not MIN_SWEEP_GAP_RATIO <= self.gap_ratio <= MAX_SWEEP_GAP_RATIO
+        ):
+            raise ValueError(
+                f"gap_ratio must be an integer from {MIN_SWEEP_GAP_RATIO} to "
+                f"{MAX_SWEEP_GAP_RATIO}, got {self.gap_ratio!r}"
+            )
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
+            raise ValueError(f"seed must be an integer, got {self.seed!r}")
+
+    @property
+    def position(self) -> int:
+        """The cycle position the next step will use."""
+        return self._position
+
+    def sweep_length(self, parked: int) -> int:
+        """The number of consecutive steps that cover `parked` prompts."""
+        if parked < 0:
+            raise ValueError(f"parked count must not be negative, got {parked}")
+        if parked == 0:
+            return 0
+        return math.ceil(parked / self.prompts_per_step)
+
+    def gap_length(self, parked: int) -> int:
+        """The number of training steps after a sweep of `parked` prompts."""
+        return self.gap_ratio * self.sweep_length(parked)
+
+    def cycle_length(self, parked: int) -> int:
+        """The sweep length plus the gap for `parked` prompts."""
+        return self.sweep_length(parked) + self.gap_length(parked)
+
+    def _train_block(
+        self, step: int, train: Sequence["Prompt"]
+    ) -> tuple["Prompt", ...]:
+        """A full training step from the train pool, cycling when it is short."""
+        if not train:
+            return ()
+        start = ((step - 1) * self.prompts_per_step) % len(train)
+        return tuple(
+            train[(start + index) % len(train)]
+            for index in range(self.prompts_per_step)
+        )
+
+    def plan(
+        self,
+        step: int,
+        train_pool: Sequence["Prompt"],
+        parked_pool: Sequence["Prompt"],
+    ) -> StepPlan:
+        """The prompts one step runs, from the saved cycle position.
+
+        With no parked prompts the sweep never starts, the position stays at
+        zero, and every step trains normally. A sweep step plans parked prompts
+        only. A gap step plans train prompts only.
+        """
+        _positive_int("step", step)
+        parked = sorted(parked_pool, key=_prompt_id)
+        train = sorted(train_pool, key=_prompt_id)
+
+        sweep_steps = self.sweep_length(len(parked))
+        if sweep_steps == 0:
+            self._position = 0
+            self._pending.clear()
+            self._last_was_sweep = False
+            self._last_closed_sweep = False
+            return StepPlan(train=self._train_block(step, train))
+
+        cycle = sweep_steps + self.gap_ratio * sweep_steps
+        self._position %= cycle
+        position = self._position
+
+        if position < sweep_steps:
+            order = [_prompt_id(prompt) for prompt in parked]
+            random.Random(self.seed).shuffle(order)
+            by_id = {_prompt_id(prompt): prompt for prompt in parked}
+            start = position * self.prompts_per_step
+            parked_slice = tuple(
+                by_id[order[(start + index) % len(order)]]
+                for index in range(self.prompts_per_step)
+            )
+            self._last_was_sweep = True
+            self._last_closed_sweep = position == sweep_steps - 1
+            self._position = (position + 1) % cycle
+            return StepPlan(parked=parked_slice)
+
+        self._last_was_sweep = False
+        self._last_closed_sweep = False
+        self._position = (position + 1) % cycle
+        return StepPlan(train=self._train_block(step, train))
+
+    def observe(
+        self, step: int, outcomes: Sequence[GroupOutcome]
+    ) -> tuple[LabelUpdate, ...]:
+        """Apply label changes. Promotions wait for the last sweep step.
+
+        Parked outcomes from every sweep step are held until the sweep ends,
+        then promoted at `promotion_bar`. A resume mid-sweep loses outcomes from
+        steps before the resume, because only the position is saved. Train
+        groups in a gap step follow the spread demotion rule.
+        """
+        _positive_int("step", step)
+
+        if self._last_was_sweep:
+            self._pending.extend(
+                outcome for outcome in outcomes if outcome.parked
+            )
+            if not self._last_closed_sweep:
+                return ()
+            latest: dict[str, GroupOutcome] = {}
+            for outcome in self._pending:
+                current = latest.get(outcome.prompt_id)
+                if current is None or outcome.passed > current.passed:
+                    latest[outcome.prompt_id] = outcome
+            updates: list[LabelUpdate] = []
+            for outcome in latest.values():
+                update = _observe_outcome(
+                    step,
+                    outcome,
+                    promotion_bar=self.promotion_bar,
+                    demote_after=self.demote_after,
+                    failure_streak=self._failure_streak,
+                )
+                if update is not None:
+                    updates.append(update)
+            self._pending.clear()
+            return tuple(updates)
+
+        updates = []
+        for outcome in outcomes:
+            update = _observe_outcome(
+                step,
+                outcome,
+                promotion_bar=self.promotion_bar,
+                demote_after=self.demote_after,
+                failure_streak=self._failure_streak,
+            )
+            if update is not None:
+                updates.append(update)
+        return tuple(updates)
+
+    def state_row(self, step: int) -> dict[str, Any]:
+        """The saved cycle position after this step, for the label file."""
+        return {"step": step, "sweep_position": self._position}
+
+    def restore_position(self, position: int) -> None:
+        """Set the cycle position from a saved label row.
+
+        A negative or non-integer value is ignored, because a hand-edited row
+        must not break the run.
+        """
+        if isinstance(position, bool) or not isinstance(position, int) or position < 0:
             return
-        if isinstance(streak, bool) or not isinstance(streak, int) or streak < 0:
-            return
-        if streak == 0:
-            self._failure_streak.pop(prompt_id, None)
-        else:
-            self._failure_streak[prompt_id] = streak
+        self._position = position
+        self._pending.clear()
+
+    def failure_streak(self, prompt_id: str) -> int:
+        """The current full-failure streak for a train prompt."""
+        return _saved_streak(self._failure_streak, prompt_id)
+
+    def restore_streak(self, prompt_id: str, streak: int) -> None:
+        """Set a prompt's failure streak from a saved label row."""
+        _restore_saved_streak(self._failure_streak, prompt_id, streak)
 
 
 def label_from_row(row: Mapping[str, Any]) -> tuple[str, str] | None:
@@ -354,3 +609,11 @@ def streak_from_row(row: Mapping[str, Any]) -> tuple[str, int] | None:
     if isinstance(streak, bool) or not isinstance(streak, int) or streak < 0:
         return None
     return prompt_id, streak
+
+
+def sweep_position_from_row(row: Mapping[str, Any]) -> int | None:
+    """The saved sweep cycle position, or None when the row has none."""
+    position = row.get("sweep_position")
+    if isinstance(position, bool) or not isinstance(position, int) or position < 0:
+        return None
+    return position

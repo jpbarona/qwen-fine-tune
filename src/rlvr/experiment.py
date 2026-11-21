@@ -81,8 +81,10 @@ from .schedule import (
     Schedule,
     Spread,
     StepPlan,
+    Sweep,
     label_from_row,
     streak_from_row,
+    sweep_position_from_row,
 )
 from .reward import (
     SYNTAX_ERROR_CLASS,
@@ -531,6 +533,7 @@ class Experiment:
             # Label changes land before the checkpoint, so a resume from this
             # step sees the same pools as the run did.
             self._observe_step(step, result)
+            self._record_schedule_state(step)
 
             if step % self.config.eval_every_steps == 0:
                 evaluations.append(
@@ -674,8 +677,8 @@ class Experiment:
 
         A schedule needs a measured pool, because parked prompts come from the
         screen. The prompt count is the rollout budget divided by the group
-        size. The parked cap is a quarter of that budget, divided by the group
-        size.
+        size. The spread parked cap is a quarter of that budget, divided by the
+        group size. The sweep gap is the configured multiple of its own length.
         """
         policy = self.config.pool_policy
         if policy is None or self.pools is None:
@@ -688,6 +691,13 @@ class Experiment:
                 prompts_per_step=prompts_per_step,
                 cap=cap,
                 refresh_steps=DEFAULT_REFRESH_STEPS,
+                seed=self.config.seed,
+                promotion_bar=DEFAULT_PROMOTION_BAR,
+            )
+        if policy == "sweep":
+            return Sweep(
+                prompts_per_step=prompts_per_step,
+                gap_ratio=self.config.sweep_gap_ratio,
                 seed=self.config.seed,
                 promotion_bar=DEFAULT_PROMOTION_BAR,
             )
@@ -707,7 +717,8 @@ class Experiment:
         The file holds one row per change and one row per saved train streak,
         in step order. The last row for a prompt wins. A row with an unknown
         label or streak is ignored, so a future row name cannot move a prompt
-        by accident.
+        by accident. A sweep position row is replayed last, so a resume mid
+        sweep continues at the saved cycle index.
         """
         reader = getattr(self.store, "read_labels", None)
         if reader is None:
@@ -716,6 +727,7 @@ class Experiment:
                 "keeps the pool labels"
             )
         restore = getattr(self._schedule, "restore_streak", None)
+        restore_position = getattr(self._schedule, "restore_position", None)
         for row in reader():
             parsed = label_from_row(row)
             if parsed is not None:
@@ -732,6 +744,10 @@ class Experiment:
                 prompt_id, streak = saved_streak
                 restore(prompt_id, streak)
                 self._saved_streaks[prompt_id] = streak
+                continue
+            saved_position = sweep_position_from_row(row)
+            if saved_position is not None and restore_position is not None:
+                restore_position(saved_position)
 
     def _observe_step(self, step: int, result: StepResult) -> None:
         """Ask the schedule for label changes, then apply and record them.
@@ -744,6 +760,26 @@ class Experiment:
         updates = self._schedule.observe(step, result.outcomes)
         self._apply_label_updates(updates)
         self._record_streaks(step, result.outcomes)
+
+    def _record_schedule_state(self, step: int) -> None:
+        """Save a schedule's cycle position beside the label state.
+
+        Only a schedule with a moving cycle has state to save. The row goes to
+        the label file after the step, so a resume at this step's checkpoint
+        replays the position that the next step should use.
+        """
+        if self._schedule is None:
+            return
+        row_for = getattr(self._schedule, "state_row", None)
+        if row_for is None:
+            return
+        writer = getattr(self.store, "append_label", None)
+        if writer is None:
+            raise TypeError(
+                "a scheduled run needs a store with append_label, so a resume "
+                "keeps the schedule position"
+            )
+        writer(row_for(step))
 
     def _record_streaks(
         self, step: int, outcomes: Sequence[GroupOutcome]

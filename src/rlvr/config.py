@@ -43,6 +43,7 @@ Optional keys, with the defaults shown:
     [training] prefetch_scoring = true
     [training] seed = 0
     [training] pool_policy = (unset: no schedule, train the pool as it is)
+    [training] sweep_gap_ratio = 3
     [training] screen_rows = (unset: no measured pool)
     [training] rollouts_per_step = 608
 
@@ -78,10 +79,16 @@ is used on every step. It is recorded only, because vLLM 0.34 does not enforce
 a per-request budget.
 
 `pool_policy` names the parked prompt schedule. `"spread"` sends a slice of
-parked prompts with every step. An absent key means no schedule, so the run
-trains the measured train pool and leaves parked prompts alone. A set policy
-requires `screen_rows`, because the parked prompts come from the measured
-screen.
+parked prompts with every step. `"sweep"` covers the whole parked pool in
+consecutive all-parked steps, then trains for a gap. An absent key means no
+schedule, so the run trains the measured train pool and leaves parked prompts
+alone. A set policy requires `screen_rows`, because the parked prompts come
+from the measured screen.
+
+`sweep_gap_ratio` is the number of training steps after a sweep, as a multiple
+of the sweep length. It is an integer from 3 to 10 and defaults to 3. The value
+is validated whether or not the sweep policy is selected, so a bad arm config
+fails at load.
 
 `screen_rows` is the screen output folder, or its `rows.jsonl` file. The pools
 are built from it before the run. An absent key means no measured pool, which
@@ -119,6 +126,11 @@ from .reward import (
 )
 from .budget import DEFAULT_THINKING_BUDGET
 from .model_profiles import LORA_TARGETS
+from .schedule import (
+    DEFAULT_SWEEP_GAP_RATIO,
+    MAX_SWEEP_GAP_RATIO,
+    MIN_SWEEP_GAP_RATIO,
+)
 
 __all__ = ["Config", "ConfigError", "default_config_path", "load_config"]
 
@@ -152,12 +164,11 @@ DEFAULT_CLIP_EPSILON = 0.2
 DEFAULT_KL_BETA = 0.0
 DEFAULT_SEED = 0
 
-#: Default sequence budget for one step. It is a config default, not a schedule
-#: constant, and matches the measured 19 November run.
+#: Sequence budget for one step, used when a pool schedule is active.
 DEFAULT_ROLLOUTS_PER_STEP = 608
 
-#: Pool policies the code implements. Task 5 adds "sweep".
-POOL_POLICIES: tuple[str, ...] = ("spread",)
+#: Pool policies the code implements.
+POOL_POLICIES: tuple[str, ...] = ("spread", "sweep")
 
 
 class ConfigError(ValueError):
@@ -201,6 +212,7 @@ class Config:
     prefetch_scoring: bool = True
     seed: int = DEFAULT_SEED
     pool_policy: str | None = None
+    sweep_gap_ratio: int = DEFAULT_SWEEP_GAP_RATIO
     screen_rows: str | None = None
     rollouts_per_step: int = DEFAULT_ROLLOUTS_PER_STEP
     max_steps: int | None = None
@@ -345,6 +357,21 @@ def _pool_policy(raw: dict[str, Any], dotted: str) -> str | None:
         raise ConfigError(
             f"config: '{dotted}' must be one of {', '.join(POOL_POLICIES)}, "
             f"got {value!r}"
+        )
+    return value
+
+
+def _sweep_gap_ratio(raw: dict[str, Any], dotted: str, default: int) -> int:
+    """An integer from 3 to 10, or `default` when the key is absent."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"config: '{dotted}' must be an integer, got {_shown(value)}")
+    if not MIN_SWEEP_GAP_RATIO <= value <= MAX_SWEEP_GAP_RATIO:
+        raise ConfigError(
+            f"config: '{dotted}' must be from {MIN_SWEEP_GAP_RATIO} to "
+            f"{MAX_SWEEP_GAP_RATIO}, got {value}"
         )
     return value
 
@@ -502,6 +529,9 @@ def load_config(path: str | Path) -> Config:
         prefetch_scoring=_optional_bool(raw, "training.prefetch_scoring", True),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
         pool_policy=pool_policy,
+        sweep_gap_ratio=_sweep_gap_ratio(
+            raw, "training.sweep_gap_ratio", DEFAULT_SWEEP_GAP_RATIO
+        ),
         screen_rows=screen_rows,
         rollouts_per_step=_optional_positive_int(
             raw, "training.rollouts_per_step", DEFAULT_ROLLOUTS_PER_STEP
