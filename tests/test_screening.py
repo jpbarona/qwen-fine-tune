@@ -21,6 +21,7 @@ from rlvr.screening import (
     DEFAULT_SCREEN_SAMPLES,
     HISTOGRAM_LABELS,
     ROWS_NAME,
+    SCREEN_CHUNK_PROMPTS,
     SUMMARY_NAME,
     ScreenError,
     ScreenRow,
@@ -586,6 +587,180 @@ def test_a_batched_screen_matches_the_serial_rows(tmp_path: Path) -> None:
         temperature=0.9,
     )
 
+    assert batched.rows == serial.rows
+    assert dict(batched.summary) == dict(serial.summary)
+    assert (batched.directory / ROWS_NAME).read_bytes() == (
+        serial.directory / ROWS_NAME
+    ).read_bytes()
+    assert (batched.directory / SUMMARY_NAME).read_bytes() == (
+        serial.directory / SUMMARY_NAME
+    ).read_bytes()
+
+
+class ChunkRecordingGenerator:
+    """Returns one group per prompt and records every batch call."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], int, float, bool]] = []
+
+    def generate_batch(
+        self,
+        prompts: Sequence[Prompt],
+        *,
+        n: int,
+        temperature: float,
+        thinking: bool = True,
+    ) -> list[list[Generation]]:
+        prompt_list = list(prompts)
+        self.calls.append(
+            (
+                [prompt.prompt_id for prompt in prompt_list],
+                n,
+                temperature,
+                thinking,
+            )
+        )
+        return [
+            [
+                Generation(
+                    reasoning="",
+                    code="def solution():\n    return 0\n",
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                )
+            ]
+            * n
+            for _ in prompt_list
+        ]
+
+
+class AlwaysPassRunner:
+    """Scores every candidate as passing without running anything."""
+
+    def run(self, prompt: Prompt, code: str) -> Outcome:
+        return Outcome(tests_passed=1, tests_total=1, error_class="pass")
+
+    def run_batch(self, items: Sequence[tuple[Prompt, str]]) -> list[Outcome]:
+        return [
+            Outcome(tests_passed=1, tests_total=1, error_class="pass")
+            for _ in items
+        ]
+
+
+def test_screen_generates_a_whole_chunk_in_one_call(tmp_path: Path) -> None:
+    generator = ChunkRecordingGenerator()
+
+    result = screen(
+        QUESTIONS,
+        samples=4,
+        directory=tmp_path / "out",
+        generator=generator,
+        test_runner=AlwaysPassRunner(),
+        temperature=0.9,
+    )
+
+    assert SCREEN_CHUNK_PROMPTS == 32
+    assert generator.calls == [
+        ([prompt.prompt_id for prompt in QUESTIONS], 4, 0.9, False)
+    ]
+    assert [row.passed for row in result.rows] == [4, 4, 4]
+
+
+def test_screen_splits_711_questions_into_23_generate_calls(
+    tmp_path: Path,
+) -> None:
+    prompts = [
+        Prompt(f"mbpp-{index:04d}", f"problem {index}") for index in range(711)
+    ]
+    generator = ChunkRecordingGenerator()
+
+    screen(
+        prompts,
+        directory=tmp_path / "out",
+        generator=generator,
+        test_runner=AlwaysPassRunner(),
+        temperature=0.9,
+    )
+
+    assert len(generator.calls) == 23
+    assert [len(call[0]) for call in generator.calls] == [32] * 22 + [7]
+    assert [
+        prompt_id
+        for call in generator.calls
+        for prompt_id in call[0]
+    ] == [prompt.prompt_id for prompt in prompts]
+    assert all(call[1] == DEFAULT_SCREEN_SAMPLES for call in generator.calls)
+
+
+class OffsetNumberedGenerator:
+    """Distinct codes per prompt and sample. No batch method, so it falls back."""
+
+    def generate(
+        self,
+        prompt: Prompt,
+        *,
+        n: int,
+        temperature: float,
+        thinking: bool = True,
+    ) -> list[Generation]:
+        offset = int(prompt.prompt_id.rsplit("-", 1)[1])
+        return [
+            Generation(
+                reasoning="",
+                code=f"def solution():\n    return {(offset + index) % 5}\n",
+                prompt_tokens=1,
+                completion_tokens=1,
+            )
+            for index in range(n)
+        ]
+
+
+class BatchedOffsetNumberedGenerator(OffsetNumberedGenerator):
+    """The same codes, produced through one call per chunk."""
+
+    def __init__(self) -> None:
+        self.batch_calls = 0
+
+    def generate_batch(
+        self,
+        prompts: Sequence[Prompt],
+        *,
+        n: int,
+        temperature: float,
+        thinking: bool = True,
+    ) -> list[list[Generation]]:
+        self.batch_calls += 1
+        return [
+            self.generate(prompt, n=n, temperature=temperature, thinking=thinking)
+            for prompt in prompts
+        ]
+
+
+def test_chunked_generation_writes_the_same_rows_as_the_per_prompt_path(
+    tmp_path: Path,
+) -> None:
+    prompts = [
+        Prompt(f"mbpp-{index:04d}", f"problem {index}") for index in range(9)
+    ]
+    serial = screen(
+        prompts,
+        samples=4,
+        directory=tmp_path / "serial",
+        generator=OffsetNumberedGenerator(),
+        test_runner=SerialRecordingRunner(),
+        temperature=0.9,
+    )
+    generator = BatchedOffsetNumberedGenerator()
+    batched = screen(
+        prompts,
+        samples=4,
+        directory=tmp_path / "batched",
+        generator=generator,
+        test_runner=SerialRecordingRunner(),
+        temperature=0.9,
+    )
+
+    assert generator.batch_calls == 1
     assert batched.rows == serial.rows
     assert dict(batched.summary) == dict(serial.summary)
     assert (batched.directory / ROWS_NAME).read_bytes() == (
