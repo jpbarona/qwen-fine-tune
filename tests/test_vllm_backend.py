@@ -138,6 +138,112 @@ class FakeTrainer:
         self.checkpoint_calls.append(("load", directory))
 
 
+class CapEngine:
+    """An engine that returns a completion of exactly the token cap."""
+
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
+    def generate(self, prompt_token_ids, *, n, temperature, max_tokens):
+        self.calls.append(max_tokens)
+        return [
+            [[7] * max_tokens for _ in range(n)] for _ in prompt_token_ids
+        ]
+
+
+class RealDecodeTrainer:
+    """The trainer surface with the production completion decode.
+
+    The real decode runs without torch, because only the caching path needs the
+    model. That keeps the cap, the truncated flag, and the reward on one path
+    without a model or a GPU.
+    """
+
+    trainable = False
+
+    def __init__(self, max_completion_tokens: int) -> None:
+        from types import SimpleNamespace
+
+        from rlvr.qwen import QwenGenerator
+
+        self.max_completion_tokens = max_completion_tokens
+        self.decoder = object.__new__(QwenGenerator)
+        self.decoder._torch = None
+        self.decoder._device = None
+        self.decoder.think_end_token_id = 99
+        self.decoder.profile = SimpleNamespace(model_type="qwen3")
+        self.decoder.tokenizer = SimpleNamespace(
+            eos_token_id=1,
+            decode=lambda ids, skip_special_tokens=True: "def f():\n    return 1",
+        )
+
+    def encode_prompt(self, prompt, *, thinking=True):
+        return [100, 101], False
+
+    def build_generation_batch(
+        self, prompts, prompt_ids, prompt_truncated, completion_token_ids, *, cache
+    ):
+        groups = []
+        for index, prompt in enumerate(prompts):
+            ids = list(prompt_ids[index])
+            group, _ = self.decoder._decode_group(
+                prompt,
+                ids,
+                [1] * len(ids),
+                len(ids),
+                prompt_truncated=prompt_truncated[index],
+                completion_rows=completion_token_ids[index],
+                caching=False,
+            )
+            groups.append(group)
+        return groups
+
+
+def test_a_completion_that_reaches_the_cap_is_truncated_and_scores_minus_one(
+    tmp_path,
+) -> None:
+    from types import SimpleNamespace
+
+    from rlvr.config import load_config
+    from rlvr.experiment import Experiment, Outcome
+
+    config = load_config(
+        Path(__file__).resolve().parents[1] / "configs" / "lfm-spread.toml"
+    )
+    engine = CapEngine()
+    generator = VLLMGenerator(
+        trainer=RealDecodeTrainer(config.max_completion_tokens),
+        engine=engine,
+        adapter_dir=tmp_path,
+    )
+
+    [group] = generator.generate_batch([prompt(0)], n=1, temperature=0.9)
+    generation = group[0]
+
+    assert engine.calls == [1024]
+    assert generation.completion_tokens == 1024
+    assert generation.truncated is True
+
+    experiment = object.__new__(Experiment)
+    experiment.arm = "code-score"
+    experiment.config = SimpleNamespace(
+        length_soft_limit=config.length_soft_limit,
+        length_penalty_per_token=config.length_penalty_per_token,
+        length_penalty_floor=config.length_penalty_floor,
+    )
+    record = experiment._build_record(
+        prompt(0),
+        generation,
+        Outcome(tests_passed=4, tests_total=4, error_class="pass"),
+        1,
+        judge_score=None,
+        process_score=None,
+        cache_hit=False,
+    )
+
+    assert record.reward == -1.0
+
+
 def test_n_answers_per_prompt_stay_grouped_in_prompt_order(tmp_path) -> None:
     engine, trainer = FakeEngine(), FakeTrainer()
     generator = VLLMGenerator(trainer=trainer, engine=engine, adapter_dir=tmp_path)

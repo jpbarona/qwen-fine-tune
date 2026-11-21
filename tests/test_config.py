@@ -644,7 +644,8 @@ def test_the_parked_pool_arm_configs_load(name: str, policy: str) -> None:
     assert config.model_name == "LiquidAI/LFM2.5-2.6B"
     assert config.pool_policy == policy
     assert config.generations_per_prompt == 16
-    assert config.rollouts_per_step == 608
+    assert config.rollouts_per_step == 304
+    assert config.max_completion_tokens == 1024
     assert config.learning_rate == 1e-4
     assert config.lora_targets == "all-linear"
     assert config.lora_rank == 16
@@ -653,6 +654,36 @@ def test_the_parked_pool_arm_configs_load(name: str, policy: str) -> None:
     assert config.max_steps == 100
     assert config.max_prompts is None
     assert config.screen_rows == "screens/mbpp-base/rows.jsonl"
+
+
+@pytest.mark.parametrize("name", ("lfm-spread.toml", "lfm-sweep.toml"))
+def test_the_parked_pool_arm_configs_checkpoint_every_ten_steps(name: str) -> None:
+    config = load_config(REPO_ROOT / "configs" / name)
+
+    assert config.checkpoint_every_steps == 10
+
+
+def test_the_half_size_step_keeps_the_planned_parked_arithmetic() -> None:
+    from rlvr.schedule import Spread, Sweep
+
+    spread = load_config(REPO_ROOT / "configs" / "lfm-spread.toml")
+    sweep = load_config(REPO_ROOT / "configs" / "lfm-sweep.toml")
+    group = spread.generations_per_prompt
+    prompts_per_step = spread.rollouts_per_step // group
+
+    assert prompts_per_step == 19
+    assert spread.rollouts_per_step // 4 // group == 4
+    assert (
+        Spread(
+            prompts_per_step=prompts_per_step,
+            cap=4,
+            refresh_steps=spread.refresh_steps,
+        ).parked_count(267)
+        == 4
+    )
+    sweep_schedule = Sweep(prompts_per_step=sweep.rollouts_per_step // group)
+    assert sweep_schedule.sweep_length(267) == 15
+    assert sweep_schedule.gap_length(267) == 45
 
 
 def test_the_arm_config_accepts_a_screen_for_every_trained_prompt(

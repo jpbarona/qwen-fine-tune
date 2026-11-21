@@ -809,6 +809,37 @@ def test_the_data_route_samples_the_gpu(monkeypatch) -> None:
     assert sent and sent[0][0] == 200
 
 
+def test_the_page_and_data_routes_forbid_caching(monkeypatch) -> None:
+    from io import BytesIO
+
+    from rlvr import dashboard as dashboard_module
+
+    monkeypatch.setattr(dashboard_module, "sample_gpu", lambda: None)
+
+    for path in ("/", "/data.json"):
+        handler = dashboard_module._DashboardHandler.__new__(
+            dashboard_module._DashboardHandler
+        )
+        handler.path = path
+        handler.paths = []
+        handler.wfile = BytesIO()
+        sent: list[tuple] = []
+        monkeypatch.setattr(
+            handler, "send_response", lambda code: sent.append(("status", code))
+        )
+        monkeypatch.setattr(
+            handler,
+            "send_header",
+            lambda key, value: sent.append((key.lower(), value)),
+        )
+        monkeypatch.setattr(handler, "end_headers", lambda: sent.append(("end", None)))
+
+        handler._route()
+
+        assert ("cache-control", "no-store, max-age=0") in sent, path
+        assert ("pragma", "no-cache") in sent, path
+
+
 def test_render_html_escapes_an_arm_name_with_a_script_tag() -> None:
     data = {
         "generated_at": "2026-11-13T00:00:00Z",

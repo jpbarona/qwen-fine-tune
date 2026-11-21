@@ -1,9 +1,9 @@
 # LFM2.5-2.6B spread arm for the parked-pool study.
 # One environment: install .[vllm]. Its native template always thinks.
 #
-# This arm trains 100 steps from base weights. Every step takes 38 prompts,
+# This arm trains 100 steps from base weights. Every step takes 19 prompts,
 # split between train prompts and a parked slice, so parked work shares every
-# optimizer update. At the cap that is 29 train prompts and 9 parked. Setup,
+# optimizer update. At the cap that is 15 train prompts and 4 parked. Setup,
 # screen and the measurements are in README.md.
 #
 # The planned length is longer than the budget by design. The 100 step budget
@@ -42,9 +42,10 @@ lora_rank = 16
 lora_alpha = 32
 lora_targets = "all-linear"
 max_prompt_tokens = 512
-max_completion_tokens = 2048
-# One fixed thinking budget for the whole run. vLLM 0.34 does not enforce a
-# per-request budget, so the value is recorded but does not end a rollout.
+max_completion_tokens = 1024
+# One fixed thinking budget for the whole run. This value is unenforced: vLLM
+# 0.34 has no per-request budget, so the value is recorded but does not end a
+# rollout. The completion cap above is the hard limit.
 thinking_budget = 1024
 # Measure entropy every N training steps. Zero disables it.
 entropy_every_steps = 500
@@ -68,12 +69,13 @@ seed = 0
 # The measured screen. The folder holds rows.jsonl and summary.json.
 screen_rows = "screens/mbpp-base/rows.jsonl"
 # This arm joins a parked slice to every step. The slice is
-# min(9, ceil(parked / 40)) prompts, so the parked pool is meant to be visited
-# once every 40 steps. The 9 is a quarter of the 38 prompt budget.
+# min(4, ceil(parked / 30)) prompts, so the parked pool is meant to be visited
+# once every 30 steps. The 4 is a quarter of the 19 prompt budget.
 pool_policy = "spread"
 refresh_steps = 30
-# 608 sequences per step. At 16 rollouts per prompt this is 38 prompts.
-rollouts_per_step = 608
+# 304 sequences per step. At 16 rollouts per prompt this is 19 prompts. A step
+# is expected to take about 240 seconds.
+rollouts_per_step = 304
 
 [run]
 checkpoint_every_steps = 10

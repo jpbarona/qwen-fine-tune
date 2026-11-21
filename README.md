@@ -113,7 +113,7 @@ question. It defaults to sixteen, which is the group size of the two parked-pool
 arms. The screen asks for thinking off, at the completion cap from
 `[training] max_completion_tokens`, because training uses that cap. Qwen honors
 the toggle. The LFM template always opens a reasoning block, so the toggle is
-ignored for LFM and the screen samples thinking at the 2,048 token cap.
+ignored for LFM and the screen samples thinking at the same completion cap.
 
 A screen for a parked-pool arm must cover exactly the 711 training questions.
 The arm runbook below writes that question file. A screen over the full 961 row
@@ -143,9 +143,9 @@ The study compares two ways to re-screen parked prompts at equal compute.
 `configs/lfm-spread.toml` joins a parked slice to every step.
 `configs/lfm-sweep.toml` covers the parked pool in consecutive steps, then
 trains for a gap. The two configs are identical except the policy keys. Both
-run 100 steps from base weights at group size 16, a 608 sequence rollout budget,
-rate 1e-4, all-linear LoRA rank 16 and alpha 32, and a fixed thinking budget of
-1,024.
+run 100 steps from base weights at group size 16, a 304 sequence rollout budget,
+rate 1e-4, all-linear LoRA rank 16 and alpha 32, a 1,024 token completion cap,
+and a recorded but unenforced thinking budget of 1,024.
 
 Install with the one vLLM environment in the Install section. The screen uses
 the same environment.
@@ -293,7 +293,7 @@ at the largest batch that fit, and the run keeps that size.
 `[training] max_prompts` caps the prompt count per step when memory would allow
 more. An absent key means no cap. The cap limits sequences per step. A run with
 a pool policy does not use this growth path. Its step size is the rollout budget
-divided by the group size, which is 38 prompts in the two arm configs. Step time
+divided by the group size, which is 19 prompts in the two arm configs. Step time
 is unverified, because test containers and judge calls run outside the batch.
 Gradients accumulate
 across the prompt groups and the optimizer steps once at the end of the step, so
