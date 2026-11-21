@@ -125,4 +125,5 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 108. Sixteen rollouts per prompt decide who trains and who parks
 109. Labels come only from screens, never from selected training rollouts
 110. Spread parked work beats dedicated batches full of all-fail groups
+111. Spread against sweep is a measurable arm at equal compute
 

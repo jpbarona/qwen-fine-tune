@@ -176,3 +176,43 @@ Where. The prompt draw in `src/rlvr/experiment.py`, a new `src/rlvr/screening.py
 and `data/` for the label file.
 
 Status. Option 1 chosen on 21 November 2026. Not built.
+
+## Arm: spread against sweep for parked re-screening
+
+The question. At equal compute, does spreading parked re-screens across training
+steps produce more gradient than sweeping them in dedicated batches?
+
+Why it might be worth doing. D32 chose spreading on the argument that dedicated
+sweeps spend several consecutive steps on mostly all-fail groups. That argument is
+reasoning, not a measurement. The two policies differ only in scheduling, so they
+make a clean pair with one variable.
+
+Design.
+
+- Both arms start from the same checkpoint, same seed, same pool, same group size
+  16, and the same screen labels.
+- Arm A, spread. Every step, `k = min(19, ceil(P / N))` parked prompts join the
+  training pool.
+- Arm B, sweep. Every `N` steps, `m = ceil(P / 38)` consecutive steps cover the
+  whole parked pool at 608 rollouts each.
+- Match total sequences and step count between arms. If they differ, the
+  comparison is unreadable.
+
+Measurements, in order of usefulness.
+
+1. Share of groups with a nonzero advantage.
+2. Mean absolute advantage across groups.
+3. Promotions per thousand parked sequences.
+4. Pass@1 on the pinned 100, as a secondary. It will sit inside five points over
+   60 steps, so it cannot decide the question alone.
+
+Decision rule, written before the runs. For example, A wins if the
+nonzero-advantage share is higher by at least five points on both cohorts.
+
+Cost. Two boxes, 60 steps each, about four hours and five dollars. Needs the
+screen and the pool code first, so it runs after the first screened run.
+
+Risk. The difference may be smaller than the measurement noise. A null result is
+still worth writing down, since it settles the scheduling argument.
+
+Where. Same files as the entry above, plus a config key for the policy choice.
