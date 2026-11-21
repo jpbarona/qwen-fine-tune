@@ -655,6 +655,42 @@ def test_the_parked_pool_arm_configs_load(name: str, policy: str) -> None:
     assert config.screen_rows == "screens/mbpp-base/rows.jsonl"
 
 
+def test_the_arm_config_accepts_a_screen_for_every_trained_prompt(
+    tmp_path,
+) -> None:
+    from dataclasses import replace
+
+    from rlvr.cli import build_pools, build_prompts
+    from rlvr.data import load_split, prompt_id_for
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(REPO_ROOT / "configs" / "lfm-spread.toml")
+    split = load_split(seed=config.split_seed)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    for question in split.train:
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt_id_for(question),
+                samples=16,
+                passed=8,
+                pass_rate=0.5,
+            )
+        )
+    measured = replace(config, screen_rows=str(directory))
+
+    train, _ = build_prompts(measured)
+    pools = build_pools(measured, train)
+
+    assert [prompt.prompt_id for prompt in train] == [
+        prompt_id_for(question) for question in split.train
+    ]
+    assert len(train) == 711
+    assert pools is not None
+    assert pools.samples == 16
+    assert len(pools.train) == 711
+
+
 def test_the_parked_pool_arm_configs_differ_only_in_policy_keys() -> None:
     def read(name: str) -> dict:
         path = REPO_ROOT / "configs" / name

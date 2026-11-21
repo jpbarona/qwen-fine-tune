@@ -360,12 +360,15 @@ def load_synthetic_rows() -> tuple[MBPPQuestion, ...]:
 def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
     """Load the fixed split and return the train and test prompts.
 
-    Training uses the 714 MBPP train questions plus the 50 synthetic very easy
-    questions. Evaluation uses the 250 test questions. The split and the prompt
+    With no measured screen, training uses the 711 MBPP train questions plus the
+    50 synthetic very easy questions. With `screen_rows` set, training uses only
+    the 711 MBPP train questions, because the screen must cover every trained
+    prompt. The synthetic rows were scaffolding for the deleted curriculum
+    stage. Evaluation uses the 250 test questions. The split and the prompt
     format come from `data.py`, so every arm and the fake path see the same
     questions. The two lists never share a question, and a synthetic id can
-    never collide with an MBPP id. A wrong or empty split stops the run before
-    a folder is made.
+    never collide with an MBPP id. A wrong or empty split stops the run before a
+    folder is made.
     """
     try:
         split = load_split(seed=config.split_seed)
@@ -384,7 +387,9 @@ def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
             f"the train and test split overlap on {len(train_ids & test_ids)} task ids"
         )
 
-    train_questions = list(split.train) + list(load_synthetic_rows())
+    train_questions = list(split.train)
+    if config.screen_rows is None:
+        train_questions += list(load_synthetic_rows())
     train_prompts = prompts_for_questions(train_questions)
     eval_prompts = prompts_for_questions(split.test)
     if not train_prompts or not eval_prompts:
@@ -430,6 +435,13 @@ def build_pools(config: Config, prompts: Sequence[Prompt]) -> Pools | None:
         raise UsageError(f"screen rows are empty: {path}")
 
     samples = rows[0].samples
+    if samples != config.generations_per_prompt:
+        raise UsageError(
+            f"config: screen rows used {samples} samples per prompt, but "
+            f"'training.generations_per_prompt' is "
+            f"{config.generations_per_prompt}. A screen must use the training "
+            "group size, or the pool labels describe a different rollout count."
+        )
     try:
         pools = from_rows(rows, samples=samples, promotion_bar=DEFAULT_PROMOTION_BAR)
     except PoolsError as error:

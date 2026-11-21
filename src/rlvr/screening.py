@@ -15,9 +15,11 @@ question ids. A final line without a newline is rewritten with one, so the next
 append starts on a clean line. A torn final line, left by a write that did not
 finish, is dropped in that rewrite.
 
-The screen samples with thinking off, at the completion cap the trainer uses.
-The point is to measure the same regime training will use. It takes sixteen
-samples per question unless the caller asks for another count.
+The screen asks for thinking off, at the completion cap the trainer uses. Qwen
+honors that toggle. The LFM template always opens a reasoning block, so the
+toggle is ignored for LFM and it samples thinking at the completion cap. The
+point is to measure the same regime training will use. It takes sixteen samples
+per question unless the caller asks for another count.
 """
 
 from __future__ import annotations
@@ -53,7 +55,8 @@ ROWS_NAME = "rows.jsonl"
 #: Name of the summary file inside the output directory.
 SUMMARY_NAME = "summary.json"
 
-#: The screen measures the regime the trainer will use, so thinking is off.
+#: The screen asks for thinking off. Qwen honors the toggle. LFM ignores it,
+#: because its template always opens a reasoning block.
 DEFAULT_SCREEN_THINKING = False
 
 #: Samples per question. Sixteen is the group size of the two parked-pool arm
@@ -74,8 +77,9 @@ class ScreenError(ValueError):
 class ScreenGenerator(Protocol):
     """The part of the generator seam the screen uses.
 
-    `thinking` is explicit because the screen runs with it off while training
-    runs with it on. The fake and vLLM generators both accept the flag.
+    `thinking` is explicit because the screen asks for it off. Qwen honors the
+    flag and LFM ignores it, because its template always opens a reasoning
+    block. The fake and vLLM generators both accept the flag.
     """
 
     def generate(

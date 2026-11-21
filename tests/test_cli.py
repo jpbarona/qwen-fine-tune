@@ -859,7 +859,9 @@ def write_screen_config(tmp_path, screen_rows) -> Path:
     path = tmp_path / "screen-config.toml"
     path.write_text(
         SPLIT_CONFIG
-        + f'\n[training]\nscreen_rows = "{screen_rows.as_posix()}"\n',
+        + "\n[training]\n"
+        + "generations_per_prompt = 16\n"
+        + f'screen_rows = "{screen_rows.as_posix()}"\n',
         encoding="utf-8",
     )
     return path
@@ -904,6 +906,33 @@ def test_build_pools_reads_the_screen_rows(tmp_path) -> None:
     assert len(pools.train) == expected["train"]
     assert len(pools.rehearsal) == expected["rehearsal"]
     assert len(pools.parked) == expected["parked"]
+
+
+def test_build_pools_rejects_a_screen_at_another_group_size(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    config = load_config(write_screen_config(tmp_path, directory))
+    train, _ = build_prompts(config)
+    for prompt in train:
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=8,
+                passed=4,
+                pass_rate=0.5,
+            )
+        )
+
+    with pytest.raises(UsageError) as error:
+        build_pools(config, train)
+
+    message = str(error.value)
+    assert "8 samples per prompt" in message
+    assert "training.generations_per_prompt" in message
+    assert "16" in message
 
 
 def test_build_pools_accepts_the_rows_file(tmp_path) -> None:
@@ -1000,9 +1029,17 @@ def test_a_fake_run_uses_the_measured_pool_and_the_spread_schedule(
 ) -> None:
     from rlvr.screening import ScreenRow, ScreenStore
 
-    config = load_config(write_split_config(tmp_path))
-    train, _ = build_prompts(config)
     directory = tmp_path / "screen"
+    path = tmp_path / "measured.toml"
+    path.write_text(
+        SPLIT_CONFIG
+        + f'\n[training]\nscreen_rows = "{directory.as_posix()}"\n'
+        + 'pool_policy = "spread"\ngenerations_per_prompt = 16\n'
+        + "rollouts_per_step = 64\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    train, _ = build_prompts(config)
     store = ScreenStore(directory)
     for index, prompt in enumerate(train):
         passed = 0 if index < 10 else 8
@@ -1015,13 +1052,6 @@ def test_a_fake_run_uses_the_measured_pool_and_the_spread_schedule(
             )
         )
 
-    path = tmp_path / "measured.toml"
-    path.write_text(
-        SPLIT_CONFIG
-        + f'\n[training]\nscreen_rows = "{directory.as_posix()}"\n'
-        + 'pool_policy = "spread"\nrollouts_per_step = 64\n',
-        encoding="utf-8",
-    )
     runs_root = tmp_path / "runs"
 
     assert (
@@ -1051,7 +1081,7 @@ def test_a_fake_run_uses_the_measured_pool_and_the_spread_schedule(
     assert meta["pool_policy"] == "spread"
     assert meta["screen_rows"] == directory.as_posix()
     assert metric["pool_policy"] == "spread"
-    assert metric["train_prompts"] == 7
+    assert metric["train_prompts"] == 3
     assert metric["parked_prompts"] == 1
 
 

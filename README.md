@@ -110,8 +110,10 @@ into its own output folder, not a run folder.
 `--questions` is a JSONL file in the MBPP row schema, so the synthetic easy set
 and the MBPP rows both work. `--samples` is the number of model samples per
 question. It defaults to sixteen, which is the group size of the two parked-pool
-arms. The screen samples with thinking off, at the completion cap from
-`[training] max_completion_tokens`, because training uses that cap.
+arms. The screen asks for thinking off, at the completion cap from
+`[training] max_completion_tokens`, because training uses that cap. Qwen honors
+the toggle. The LFM template always opens a reasoning block, so the toggle is
+ignored for LFM and the screen samples thinking at the 2,048 token cap.
 
 A screen for a parked-pool arm must cover exactly the 711 training questions.
 The arm runbook below writes that question file. A screen over the full 961 row
@@ -183,7 +185,9 @@ used. The command resumes if it is interrupted.
 
 The summary must report 711 questions, and `zero_pass`, `partial_pass` and
 `full_pass` must add up to 711. The zero and full counts are the parked and
-rehearsal pools. The partial count is the train pool.
+rehearsal pools. The partial count is the train pool. `samples_per_question`
+must be 16, the same as `[training] generations_per_prompt`. A run stops at load
+if they differ, so an old eight sample folder cannot be reused by accident.
 
 Run the arms one at a time. Use a separate run root for each so `--resume`
 cannot pick the other arm's folder.
