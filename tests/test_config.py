@@ -267,18 +267,18 @@ def test_length_settings_are_read_from_the_training_table(tmp_path) -> None:
 def test_the_thinking_budget_is_read_from_the_training_table(tmp_path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
-        GOOD + "\n[training]\nthinking_budget_start = 512\n", encoding="utf-8"
+        GOOD + "\n[training]\nthinking_budget = 512\n", encoding="utf-8"
     )
     config = load_config(path)
-    assert config.thinking_budget_start == 512
+    assert config.thinking_budget == 512
 
 
 def test_a_zero_thinking_budget_is_named(tmp_path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
-        GOOD + "\n[training]\nthinking_budget_start = 0\n", encoding="utf-8"
+        GOOD + "\n[training]\nthinking_budget = 0\n", encoding="utf-8"
     )
-    with pytest.raises(ConfigError, match="training.thinking_budget_start"):
+    with pytest.raises(ConfigError, match="training.thinking_budget"):
         load_config(path)
 
 
@@ -424,31 +424,35 @@ def test_seed_defaults_to_zero_and_is_read(write_config) -> None:
     assert load_config(path).seed == 7
 
 
-def test_curriculum_defaults(write_config) -> None:
+def test_thinking_budget_defaults_to_one_value(write_config) -> None:
     config = load_config(write_config(GOOD))
-    assert config.stage == "very easy"
-    assert config.carry_over_ratio == 0.2
+    assert config.thinking_budget == 1024
 
 
-def test_curriculum_settings_are_read(write_config) -> None:
+def test_the_thinking_budget_is_read_from_the_training_table(write_config) -> None:
+    path = write_config(
+        GOOD + "\n[training]\nthinking_budget = 512\n", name="budget.toml"
+    )
+    assert load_config(path).thinking_budget == 512
+
+
+def test_a_zero_thinking_budget_is_named(write_config) -> None:
+    path = write_config(
+        GOOD + "\n[training]\nthinking_budget = 0\n", name="zero-budget.toml"
+    )
+    with pytest.raises(ConfigError, match="training.thinking_budget"):
+        load_config(path)
+
+
+def test_the_removed_curriculum_keys_are_ignored(write_config) -> None:
     path = write_config(
         GOOD + '\n[curriculum]\nstage = "hard"\ncarry_over_ratio = 0.35\n',
         name="curriculum.toml",
     )
     config = load_config(path)
-    assert config.stage == "hard"
-    assert config.carry_over_ratio == 0.35
-
-
-@pytest.mark.parametrize(
-    "line",
-    ['stage = "easy"', "stage = 3", "carry_over_ratio = 1.0", "carry_over_ratio = -0.1"],
-)
-def test_a_bad_curriculum_setting_is_named(tmp_path, line: str) -> None:
-    path = tmp_path / "config.toml"
-    path.write_text(GOOD + f"\n[curriculum]\n{line}\n", encoding="utf-8")
-    with pytest.raises(ConfigError, match="curriculum"):
-        load_config(path)
+    assert "curriculum" in config.raw
+    assert not hasattr(config, "stage")
+    assert not hasattr(config, "carry_over_ratio")
 
 
 def test_throughput_settings_have_bounded_defaults(write_config) -> None:

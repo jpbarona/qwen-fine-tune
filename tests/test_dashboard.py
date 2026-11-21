@@ -1434,3 +1434,55 @@ def test_dashboard_tolerates_invalid_utf8_during_file_writes(tmp_path):
     with (run_dir / "metrics.jsonl").open("ab") as handle:
         handle.write(b'{"step":3,"message":"\xff')
     assert collect_dashboard([run_dir])["runs"][0]["steps_done"] == 2
+
+
+def test_an_unstaged_run_renders_without_a_curriculum(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "stage": "unstaged",
+            "rollouts": 8,
+            "mean_reward": 0.5,
+            "pass_rate": 0.5,
+            "mean_entropy": 0.8,
+            "mean_completion_tokens": 80.0,
+            "cache_hits": 1,
+            "truncation_rate": 0.1,
+        }
+    ]
+    rollouts = stage_rollouts(1, "p1", passes=8)
+    for record in rollouts:
+        record["stage"] = "unstaged"
+    run_dir = write_run(
+        tmp_path / "runs",
+        rows=rows,
+        rollouts=rollouts,
+        meta_extra={"pools": {"train": 2, "rehearsal": 0, "parked": 0, "samples": 16}},
+    )
+
+    data = collect_dashboard([run_dir])
+    run = data["runs"][0]
+
+    assert run["stage"] == "unstaged"
+    assert run["bands"] == [
+        {"band": "unstaged", "rollouts": 8, "pass_rate": pytest.approx(1.0)}
+    ]
+    assert run["stage_progress"]["band"] == "unstaged"
+    assert run["stage_progress"]["total"] == 2
+    assert run["stage_progress"]["solved"] == 1
+    assert "unstaged" in render_html(data)
+
+
+def test_a_metric_row_without_a_stage_key_does_not_break_the_dashboard(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs")
+    lines = (run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines()
+    stripped = [
+        json.dumps({k: v for k, v in json.loads(line).items() if k != "stage"})
+        for line in lines
+    ]
+    (run_dir / "metrics.jsonl").write_text("\n".join(stripped) + "\n", encoding="utf-8")
+
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["stage"] is None

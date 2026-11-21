@@ -39,13 +39,14 @@ import json
 import sys
 from pathlib import Path
 from time import perf_counter
-from typing import Mapping, Sequence
+from typing import Sequence
 
 from .batching import START_PROMPTS, BatchSizePolicy
 from .config import Config, ConfigError, default_config_path, load_config
 from .control import CONTROL_NAME, ControlWatcher
 from .checkpoint import find_latest_checkpoint, read_checkpoint_manifest
 from .data import (
+    DEFAULT_LABELS_PATH,
     TEST_SIZE,
     TRAIN_SIZE,
     DatasetError,
@@ -67,11 +68,11 @@ from .fake import (
     FakeGenerator,
     FakeJudge,
     FakeTestRunner,
-    fake_band_labels,
     fake_memory,
 )
 from .judge import JudgeClient, MissingAPIKeyError
 from .memory import configure_expandable_segments, read_torch_memory
+from .pools import Pools
 from .publish import PublishError, publish_report
 from .reward import (
     ARMS,
@@ -85,26 +86,19 @@ from .resume import (
     ResumeError,
     manifest_count as _manifest_count,
     resume_batch_policy as _resume_batch_policy,
-    resume_stage as _resume_stage,
     validate_resume,
 )
 from .runs import RunStore
 from .screening import ScreenError, screen as run_screen
-from .stages import (
-    BANDS,
-    LabelledRow,
-    Stage,
-    StageError,
-    build_stages as build_ordered_stages,
-)
+from .stages import BANDS
 from .summary import SummaryError, format_summary, load_reports, write_report
 from .synthetic import SyntheticError, load_synthetic_questions
 
 __all__ = [
-    "build_curriculum",
     "build_generator",
     "build_judge",
     "build_parser",
+    "build_pools",
     "build_prompts",
     "build_screen_test_runner",
     "build_test_runner",
@@ -348,8 +342,8 @@ def load_synthetic_rows() -> tuple[MBPPQuestion, ...]:
     """The 50 synthetic very easy questions as runner rows.
 
     The synthetic file is committed beside the MBPP data. A missing or invalid
-    file stops the run before a folder is made, because the very easy stage has
-    no other material.
+    file stops the run before a folder is made, because the synthetic rows are
+    part of the fixed training set.
     """
     try:
         return tuple(
@@ -394,59 +388,20 @@ def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
     return train_prompts, eval_prompts
 
 
-def build_curriculum(
-    config: Config, prompts: list[Prompt], *, fake: bool
-) -> tuple[Stage[Prompt], ...]:
-    """Build the ordered stages for the training prompts.
+def build_pools(prompts: Sequence[Prompt], *, samples: int) -> Pools:
+    """The single training pool for a run that has not been screened yet.
 
-    A real run validates the difficulty label file against the MBPP split for
-    the configured seed. A missing file, an unknown or duplicated id, or labels
-    written for a different split seed all stop the run with a clear message,
-    so a wrong config cannot put every row in one band.
-
-    The 50 synthetic rows are always placed in the very easy band. They carry
-    their own tests and exist to make the first stage solvable.
-
-    The fake path supplies its own deterministic labels. The first fake prompt
-    that fully passes is put alone in the first band, so the fake run shows a
-    stage one exhaustion and a stage two start at a fixed step.
+    Every prompt goes to `train`, and the rehearsal and parked pools are empty.
+    Task 4 replaces this with the pools read from screen rows. Until then the
+    run still takes a `Pools` value, so the experiment has one pool interface
+    and no curriculum build.
     """
-    if fake:
-        labels: Mapping[str, str] = fake_band_labels(prompts)
-        synthetic_ids: set[str] = set()
-    else:
-        try:
-            split = load_split(seed=config.split_seed)
-            labels = load_difficulty_labels(split)
-        except DatasetError as error:
-            raise UsageError(f"cannot load difficulty labels: {error}") from error
-        synthetic_ids = {question.prompt_id for question in load_synthetic_rows()}
-
-    rows = []
-    for prompt in prompts:
-        if prompt.prompt_id in synthetic_ids:
-            band = BANDS[0]
-        else:
-            band = labels.get(prompt.prompt_id)
-            if band is None:
-                raise UsageError(
-                    f"prompt {prompt.prompt_id!r} has no difficulty label. "
-                    f"The label file must cover the training split for seed "
-                    f"{config.split_seed}."
-                )
-        rows.append(
-            LabelledRow(prompt_id=prompt.prompt_id, band=band, item=prompt)
-        )
-    try:
-        return build_ordered_stages(
-            rows,
-            BANDS,
-            config.carry_over_ratio,
-            seed=config.split_seed,
-            start_stage=config.stage,
-        )
-    except StageError as error:
-        raise UsageError(f"cannot build curriculum stages: {error}") from error
+    return Pools(
+        train=tuple(prompt.prompt_id for prompt in prompts),
+        rehearsal=(),
+        parked=(),
+        samples=samples,
+    )
 
 
 def build_test_runner(config: Config, *, fake: bool):
@@ -454,8 +409,7 @@ def build_test_runner(config: Config, *, fake: bool):
 
     The real runner holds every question because training rollouts run the
     train questions and the synthetic easy questions, and evaluation runs the
-    held-out test questions and each stage's held-out slice. The fake runner
-    ignores questions entirely.
+    held-out test questions. The fake runner ignores questions entirely.
     """
     if fake:
         return FakeTestRunner()
@@ -576,7 +530,8 @@ def run_command(args: argparse.Namespace) -> int:
     judge = build_judge(args.arm, config, fake=args.fake)
 
     train_prompts, eval_prompts = build_prompts(config)
-    stages = build_curriculum(config, train_prompts, fake=args.fake)
+    pools = build_pools(train_prompts, samples=config.generations_per_prompt)
+    labels_path = None if args.fake else DEFAULT_LABELS_PATH
     if config.eval_final_questions is not None:
         eval_prompts = eval_prompts[: config.eval_final_questions]
 
@@ -591,9 +546,6 @@ def run_command(args: argparse.Namespace) -> int:
 
     resume_step = 0
     resume_prompt_cursor = 0
-    resume_stage_index: int | None = None
-    resume_stage_step = 0
-    resume_stage_pool: list[str] | None = None
     batch_policy: BatchSizePolicy | None = None
     prior_evaluations: list[dict] = []
     checkpoint = None
@@ -609,9 +561,6 @@ def run_command(args: argparse.Namespace) -> int:
         if manifest["arm"] != args.arm:
             raise UsageError(f"checkpoint arm mismatch: {manifest['arm']!r}")
         resume_prompt_cursor = _manifest_count(manifest, "prompt_cursor", 0)
-        resume_stage_index, resume_stage_step, resume_stage_pool = _resume_stage(
-            manifest
-        )
         batch_policy = _resume_batch_policy(config, manifest)
         resume_step = checkpoint.step
 
@@ -651,16 +600,14 @@ def run_command(args: argparse.Namespace) -> int:
         test_runner=test_runner,
         store=store,
         prompts=train_prompts,
-        stages=stages,
+        pools=pools,
+        labels_path=labels_path,
         eval_prompts=eval_prompts,
         resume_step=resume_step,
         prior_evaluations=prior_evaluations,
         fake=args.fake,
         memory=fake_memory if args.fake else read_torch_memory,
         resume_prompt_cursor=resume_prompt_cursor,
-        resume_stage_index=resume_stage_index,
-        resume_stage_step=resume_stage_step,
-        resume_stage_pool=resume_stage_pool,
         batch_policy=batch_policy,
         control=control,
     )
@@ -672,11 +619,6 @@ def run_command(args: argparse.Namespace) -> int:
         f"stop_reason={summary.stop_reason} stage={summary.stage or '-'} "
         f"run folder: {summary.run_dir}"
     )
-    if summary.stop_reason == "curriculum_complete":
-        print(
-            "curriculum complete: every stage pool was exhausted "
-            f"after {summary.steps} steps"
-        )
     return 0
 
 

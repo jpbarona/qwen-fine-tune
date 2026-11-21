@@ -36,9 +36,9 @@ lora_rank = 32
 lora_alpha = 64
 max_prompt_tokens = 512
 max_completion_tokens = 2048
-# Thinking budget is not enforced under vLLM, which has no per-request
-# logits processors. The value is recorded but does not end a rollout.
-thinking_budget_start = 768
+# One thinking budget for every step. Not enforced under vLLM, which has no
+# per-request logits processors. The value is recorded but does not end a rollout.
+thinking_budget = 1024
 # Measure entropy every N training steps. Zero disables it.
 entropy_every_steps = 500
 clip_epsilon = 0.2

@@ -42,7 +42,7 @@ from urllib.parse import urlsplit
 
 from .dashboard_io import _all_rollout_records, _read_json, _read_jsonl, _read_tail_lines
 from .memory import MEMORY_METRIC_FIELDS
-from .stages import BANDS
+from .stages import BANDS, UNSTAGED_STAGE
 
 __all__ = ["collect_dashboard", "render_html", "sample_gpu", "serve_dashboard"]
 
@@ -481,11 +481,11 @@ def _tests_passed_histogram(passed_counts: list[int]) -> dict[str, Any]:
 
 
 def _band_pass_rates(run_dir: Path) -> list[dict[str, Any]]:
-    """Full pass rate per curriculum band, over the whole rollout file.
+    """Full pass rate per stage value, over the whole rollout file.
 
     A rollout counts as passed only when every test passed, matching the
-    training pool rule. Bands appear in the fixed order first, then any band
-    name the run folder carries that is not one of the four.
+    training pool rule. The four fixed bands appear in order first, then any
+    other stage value the run folder carries, including `unstaged`.
     """
     counts: dict[str, int] = {}
     passed: dict[str, int] = {}
@@ -519,10 +519,10 @@ def _band_pass_rates(run_dir: Path) -> list[dict[str, Any]]:
 def _stage_progress(
     run_dir: Path, meta: Mapping[str, Any], dropped_by_band: Mapping[str, int] | None = None
 ) -> dict[str, Any]:
-    """How much of the current curriculum band has been solved, per step.
+    """How much of the current stage value has been solved, per step.
 
     A prompt counts as solved in a step only when every rollout of that prompt
-    in that step passed, which is the training pool rule. The total for a band
+    in that step passed, which is the training pool rule. The total for a stage
     is its starting training pool from `meta.json`, so the percentage is stable
     even though the pool shrinks.
 
@@ -534,6 +534,9 @@ def _stage_progress(
     The whole rollout file is streamed, because a solved prompt can sit far
     before the tail. The series keeps one point per training step, and carries
     the band with it, because a run that moves to a new band restarts at zero.
+
+    A run with no curriculum has one pool. Its total is the `train` count from
+    `meta.json`, under the `unstaged` band name, so the chart still renders.
     """
     curriculum = meta.get("curriculum")
     totals: dict[str, int] = {}
@@ -547,6 +550,12 @@ def _stage_progress(
                 count = _integer(stage.get("train"))
                 if name is not None and count:
                     totals[name] = count
+
+    pools = meta.get("pools")
+    if isinstance(pools, Mapping):
+        count = _integer(pools.get("train"))
+        if count:
+            totals[UNSTAGED_STAGE] = count
 
     dropped_counts = dropped_by_band or {}
     solved: dict[str, set[str]] = {}

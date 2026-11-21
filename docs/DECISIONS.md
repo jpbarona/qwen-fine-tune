@@ -21,9 +21,10 @@ Advantage is normalised inside one prompt group. The backward pass runs once per
 generation and gradients accumulate across the group, so only one autograd graph
 is alive at a time. This is what makes the 2,048 token cap fit at a larger batch.
 
-A checkpoint records the prompt cursor, the batch policy state, and the
-curriculum position. A resume continues on the next batch boundary with the same
-prompt position, batch size, and stage pool.
+A checkpoint records the prompt cursor and the batch policy state. A resume
+continues on the next batch boundary with the same prompt position and batch
+size. Older checkpoints may carry a stage position. It is ignored, because a
+run now has one pool.
 
 ## D1. One arm only for now
 
@@ -219,15 +220,14 @@ not kept, so no timing is quoted here. `scripts/smoke_lfm_vllm.py` now writes
 uses a synthetic adapter and does not call the trainer's `apply_update`, so the
 per-step handoff from the trainer remains unproven.
 
-## D12. Thinking budget schedule
+## D12. Thinking budget
 
 Status: not enforced under vLLM, documented limitation.
-`[training] thinking_budget_start` defaults to 768 and doubles at each
-curriculum stage, capped at `max_completion_tokens`, so the four bands get 768,
-1536, 2048, 2048. The value is recorded but not enforced. vLLM 0.34 removed
-per-request logits processors, so a rollout that reaches the budget is not
-ended there. The schedule is kept for a later vLLM mechanism, or for a switch
-to a sampler that can enforce it.
+`[training] thinking_budget` defaults to 1024 and is the same on every step. The
+per-stage ladder was deleted with the curriculum. The value is recorded but not
+enforced. vLLM 0.34 removed per-request logits processors, so a rollout that
+reaches the budget is not ended there. The value is kept for a later vLLM
+mechanism, or for a switch to a sampler that can enforce it.
 
 Closing the block pays up to 0.4 when no test passed, capped below one test so
 one pass always beats closing alone. With three tests it pays 0.3. It does not

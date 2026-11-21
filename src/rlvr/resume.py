@@ -1,4 +1,8 @@
-"""Checkpoint resume state and compatibility checks, without model imports."""
+"""Checkpoint resume state and compatibility checks, without model imports.
+
+A manifest written before the pool change may carry a `stage` table. It is
+ignored on read, because a run now has one pool and no stage position.
+"""
 
 from __future__ import annotations
 
@@ -43,27 +47,6 @@ def resume_batch_policy(config: Config, manifest: dict) -> BatchSizePolicy | Non
         largest_fit=largest_fit,
         settled=settled,
     )
-
-
-def resume_stage(manifest: dict) -> tuple[int | None, int, list[str] | None]:
-    """The saved curriculum position, or defaults for an older manifest.
-
-    `None` for the index and the pool means "start the curriculum from the
-    beginning", which is what a pre-batching manifest gets.
-    """
-    stage = manifest.get("stage")
-    if not isinstance(stage, dict):
-        return None, 0, None
-    index = stage.get("index")
-    step = stage.get("step", 0)
-    pool = stage.get("pool")
-    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
-        return None, 0, None
-    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
-        return None, 0, None
-    if not isinstance(pool, list) or not all(isinstance(item, str) for item in pool):
-        return index, step, None
-    return index, step, list(pool)
 
 
 def manifest_count(manifest: dict, name: str, default: int) -> int:

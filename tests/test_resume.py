@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.checkpoint import checkpoint_dir_name, find_latest_checkpoint, write_checkpoint_manifest
+from rlvr.checkpoint import (
+    checkpoint_dir_name,
+    find_latest_checkpoint,
+    read_checkpoint_manifest,
+    write_checkpoint_manifest,
+)
 from rlvr.config import load_config
 from rlvr.experiment import Experiment, Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner
@@ -172,4 +177,49 @@ def test_resume_continues_without_duplicating_records(tmp_path) -> None:
 
     _experiment(tmp_path, resumed, resume_step=checkpoint.step, prior=prior).run()
 
+    assert _rollout_steps(resumed.run_dir) == [1] * 8 + [2] * 8 + [3] * 8
+
+
+def test_an_old_checkpoint_with_stage_fields_still_resumes(tmp_path) -> None:
+    from rlvr.resume import manifest_count, resume_batch_policy
+
+    root = tmp_path / "runs"
+    store = RunStore(root, "code-score", timestamp=TIMESTAMP)
+    store.write_meta({"arm": "code-score"})
+    for step in (1, 2):
+        for _ in range(8):
+            store.append_rollout(_record(step))
+        store.append_metric({"step": step})
+
+    # A checkpoint written before the pool change carries a stage position.
+    write_checkpoint_manifest(
+        store.checkpoints_dir / checkpoint_dir_name(2),
+        step=2,
+        arm="code-score",
+        timestamp=TIMESTAMP,
+        prompt_cursor=2,
+        batch={"current": 1, "largest_fit": 1, "settled": True},
+        stage={"index": 1, "step": 3, "pool": ["mbpp-0000"]},
+    )
+
+    resumed = RunStore.resume(root, "code-score")
+    checkpoint = find_latest_checkpoint(resumed.checkpoints_dir)
+    assert checkpoint is not None and checkpoint.step == 2
+
+    manifest = read_checkpoint_manifest(checkpoint.directory)
+    assert manifest["stage"]["index"] == 1
+    assert manifest_count(manifest, "prompt_cursor", 0) == 2
+    config = load_config(_config_path(tmp_path))
+    policy = resume_batch_policy(config, manifest)
+    assert policy is not None and policy.current == 1
+
+    resumed.truncate_to_step(checkpoint.step)
+    result = _experiment(
+        tmp_path,
+        resumed,
+        resume_step=checkpoint.step,
+        prior=resumed.read_evaluations(),
+    ).run()
+
+    assert result.steps == 3
     assert _rollout_steps(resumed.run_dir) == [1] * 8 + [2] * 8 + [3] * 8

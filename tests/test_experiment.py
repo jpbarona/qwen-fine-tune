@@ -374,6 +374,8 @@ def build(
     prior_evaluations=None,
     memory=None,
     batch_policy=None,
+    pools=None,
+    labels_path=None,
 ):
     config = load_config(_write_config(tmp_path, config_text))
     training = prompts if prompts is not None else make_prompts()
@@ -385,6 +387,8 @@ def build(
         test_runner=runner or StubTestRunner(),
         store=store or RecordingStore(),
         prompts=training,
+        pools=pools,
+        labels_path=labels_path,
         # Unit tests default the eval pool to the training prompts. The
         # Experiment itself has no such fallback, and the CLI passes the real
         # held-out split.
@@ -1369,7 +1373,7 @@ def test_a_prompt_is_solved_only_when_every_generation_passes(tmp_path) -> None:
     prompt = make_prompts(1)[0]
     generations = experiment.generator.generate(prompt, n=8, temperature=0.9)
     _records, _truncated, _prompt_truncated, _entropy, solved = experiment._prompt_group(
-        1, prompt, "very easy", generations, measure_entropy=False
+        1, prompt, generations, measure_entropy=False
     )
     assert solved is False
 
@@ -1377,6 +1381,87 @@ def test_a_prompt_is_solved_only_when_every_generation_passes(tmp_path) -> None:
     prompt = make_prompts(1)[0]
     generations = all_pass.generator.generate(prompt, n=8, temperature=0.9)
     _records, _truncated, _prompt_truncated, _entropy, solved = all_pass._prompt_group(
-        1, prompt, "very easy", generations, measure_entropy=False
+        1, prompt, generations, measure_entropy=False
     )
     assert solved is True
+
+
+def test_a_run_with_no_stages_completes(tmp_path) -> None:
+    store = RecordingStore()
+    result = build("code-score", tmp_path, store=store).run()
+
+    assert result.stop_reason == "completed"
+    assert result.steps == 2
+    assert len(store.metrics) == 2
+
+
+def test_records_metrics_and_evaluations_carry_the_unstaged_value(tmp_path) -> None:
+    store = RecordingStore()
+    build("code-score", tmp_path, store=store).run()
+
+    assert {record.stage for record in store.rollouts} == {"unstaged"}
+    assert {row["stage"] for row in store.metrics} == {"unstaged"}
+    assert {point["stage"] for point in store.eval["evaluations"]} == {"unstaged"}
+
+
+def test_the_pool_train_members_are_the_only_prompts_trained(tmp_path) -> None:
+    from rlvr.pools import Pools
+
+    prompts = make_prompts(3)
+    pools = Pools(
+        train=("mbpp-0001",),
+        rehearsal=("mbpp-0000",),
+        parked=("mbpp-0002",),
+        samples=16,
+    )
+    store = RecordingStore()
+    result = build("code-score", tmp_path, store=store, prompts=prompts, pools=pools).run()
+
+    assert {record.prompt_id for record in store.rollouts} == {"mbpp-0001"}
+    assert result.stop_reason == "completed"
+
+
+def test_meta_records_the_pool_and_the_label_file(tmp_path) -> None:
+    from rlvr.pools import Pools
+
+    labels = tmp_path / "labels.jsonl"
+    pools = Pools(train=("mbpp-0000",), rehearsal=(), parked=("mbpp-0001",), samples=16)
+    store = RecordingStore()
+    build(
+        "code-score",
+        tmp_path,
+        store=store,
+        prompts=make_prompts(2),
+        pools=pools,
+        labels_path=labels,
+    ).run()
+
+    assert store.meta["pools"] == {
+        "train": 1,
+        "rehearsal": 0,
+        "parked": 1,
+        "samples": 16,
+    }
+    assert store.meta["labels_path"] == str(labels)
+    assert "curriculum" not in store.meta
+
+
+def test_the_one_thinking_budget_reaches_every_step(tmp_path) -> None:
+    seen: list[int | None] = []
+
+    class BudgetGenerator(StubGenerator):
+        def generate_batch(self, prompts, *, n, temperature, thinking_budget=None):
+            seen.append(thinking_budget)
+            return super().generate_batch(
+                prompts, n=n, temperature=temperature, thinking_budget=thinking_budget
+            )
+
+    text = CONFIG_TEXT + "\n[training]\nthinking_budget = 777\n"
+    build(
+        "code-score",
+        tmp_path,
+        generator=BudgetGenerator(),
+        config_text=text,
+    ).run()
+
+    assert {value for value in seen if value is not None} == {777}
