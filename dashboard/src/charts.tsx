@@ -253,7 +253,9 @@ export function LineChart({
   const rightPad = hasRight
     ? Math.max(10, Math.ceil(Math.max(...rightTicks.map((tick) => rightFormat(tick).length)) * 6.4) + 10)
     : 10
-  const pad = { left: 42, right: rightPad, top: 6, bottom: 16 }
+  // The highest tick sits on the top edge of the plot, so it needs enough
+  // room above the baseline for the glyph to render without clipping.
+  const pad = { left: 42, right: rightPad, top: 12, bottom: 16 }
   const xLo = Math.min(...xs)
   const xHi = Math.max(...xs)
   const plotWidth = Math.max(width - pad.left - pad.right, 8)

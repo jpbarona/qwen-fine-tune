@@ -390,27 +390,41 @@ export default function RunSection({ run }: { run: Run }) {
             empty="no pool data"
           />
         </Panel>
-        <Panel
-          title="Group signal"
-          legend={
-            <>
-              <Swatch color={ACCENT} label="group spread" />
-              <Swatch color={MUTED} label="group sd" />
-            </>
-          }
-        >
-          <LineChart
-            series={[
-              { color: ACCENT, points: pairs(steps, run.series.group_spread) },
-              { color: MUTED, points: pairs(steps, run.series.group_sd) },
-            ]}
-            yMin={0}
-            yMax={1}
-            height={70}
-            tickCount={6}
-            format={decimalTick}
-            empty="no group signal"
-          />
+        <Panel title="Group signal">
+          <div>
+            <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] text-[#6b6b73]">
+              <span className="whitespace-nowrap">
+                <Swatch color={ACCENT} label="group spread" />
+              </span>
+              <span className="shrink-0 tabular-nums text-[#8b8b94]">{num(latest.group_spread)}</span>
+            </div>
+            <LineChart
+              series={[{ color: ACCENT, points: pairs(steps, run.series.group_spread) }]}
+              yMin={0}
+              yMax={1}
+              height={150}
+              tickCount={6}
+              format={decimalTick}
+              empty="no group signal"
+            />
+          </div>
+          <div className="mt-1 border-t border-white/[0.06] pt-1">
+            <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] text-[#6b6b73]">
+              <span className="whitespace-nowrap">
+                <Swatch color={MUTED} label="group sd" />
+              </span>
+              <span className="shrink-0 tabular-nums text-[#8b8b94]">{num(latest.group_sd)}</span>
+            </div>
+            <LineChart
+              series={[{ color: MUTED, points: pairs(steps, run.series.group_sd) }]}
+              yMin={0}
+              yMax={1}
+              height={150}
+              tickCount={6}
+              format={decimalTick}
+              empty="no group signal"
+            />
+          </div>
           <div className="mt-1 border-t border-white/[0.06] pt-1">
             <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] text-[#6b6b73]">
               <span className="whitespace-nowrap">
@@ -422,7 +436,7 @@ export default function RunSection({ run }: { run: Run }) {
               series={[{ color: DIM, points: pairs(steps, run.series.advantage_share) }]}
               yMin={0}
               yMax={1}
-              height={70}
+              height={150}
               tickCount={6}
               format={shareTick}
               empty="no group signal"
