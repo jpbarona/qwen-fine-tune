@@ -186,3 +186,13 @@ compresses any gain. Machine-translated prompts can fail on comprehension
 rather than on transfer, so use the expert subset. MultiPL-E needs a compiler
 per language, which is the one piece of setup nobody has done yet.
 
+### Note, 21 November 2026
+
+The LFM run ended flat at 138 steps, 0.53 against a base of 0.51, with 61 percent
+all-fail groups at step 60. That repeats the pool problem from run 17, so the
+next run fixes the pool before changing the model or the rate.
+
+The plan is a screen of the 711 train prompts at 16 rollouts each, pools built
+from the pass counts, and parked prompts re-screened inside training steps so
+their rollouts still produce gradients. See D32 and `IDEAS.md`.
+

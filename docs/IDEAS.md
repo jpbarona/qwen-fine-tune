@@ -130,3 +130,49 @@ Cost. A stop rule is a convention. A scheduler is a small change in the update
 loop and one test.
 
 Where. The run notes, and `src/rlvr/experiment.py` for a scheduler.
+
+## Re-screening parked prompts inside training
+
+The problem. Parked prompts, the ones the model fails 8 of 8, are currently left
+alone. Some become solvable as training moves, and nothing notices.
+
+The idea. Two ways to keep the parked labels fresh. Both keep the rollouts in the
+gradient instead of throwing them away as evaluation work.
+
+Option 1, spread. Every step, include `k` parked prompts beside the training
+pool, each with 16 rollouts. The results update the label. `k` is chosen so the
+pool cycles once every `N` steps.
+
+    k = min(19, ceil(P / N))
+
+`P` is the parked count and `N` the refresh interval in steps. The cap of 19 is
+half of a 38 prompt step, so parked work never passes half the batch. If the pool
+grows, raise `N` rather than the share.
+
+Option 2, dedicated batches. Every `N` steps, run `m` steps through the whole
+parked pool, group size 16, keeping 608 rollouts per step.
+
+    m = ceil(P / 38)
+
+For `P` of 300 that is 8 dedicated steps.
+
+Why option 1. A prompt's 16 rollouts happen in one step, so its label is already
+a snapshot of one adapter. Spreading prompts across steps costs nothing in label
+quality. Option 2 spends `m` consecutive steps on a batch that is mostly all-fail
+groups, which carry no advantage, and it shifts the batch distribution abruptly.
+Same compute, worse shape.
+
+Promotion bar. 2 of 16 or more, so one lucky pass does not promote a prompt that
+still fails.
+
+Why it might work. It keeps a pool of prompts that can produce advantage, which
+is the failure mode of run 17 and the LFM run, where 61 percent of groups failed
+all eight.
+
+Cost. A screen job, a label file, a slice in the step loop, and a test for the
+slice cap. About a day.
+
+Where. The prompt draw in `src/rlvr/experiment.py`, a new `src/rlvr/screening.py`,
+and `data/` for the label file.
+
+Status. Option 1 chosen on 21 November 2026. Not built.
