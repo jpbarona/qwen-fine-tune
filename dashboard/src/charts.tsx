@@ -97,45 +97,91 @@ function axisBand(values: number[], yMin?: number, yMax?: number): [number, numb
   return [lo, hi]
 }
 
-function ticksFor(hi: number, lo: number, tickCount: number): number[] {
-  return Array.from({ length: tickCount }, (_, index) =>
-    tickCount === 1 ? hi : hi - ((hi - lo) * index) / (tickCount - 1),
-  )
-}
-
-const MIN_TICK_SPAN = 6
-
 function labelsRepeat(values: number[], format: (value: number) => string): boolean {
   const labels = values.map((value) => format(value))
   return new Set(labels).size < labels.length
 }
 
-function tickBand(
+const NICE_STEPS = [1, 2, 2.5, 5]
+
+// Round a preferred step up to the next value from 1, 2, 2.5, 5 times a
+// power of ten. An integer axis never uses a step that is not a whole number,
+// so every tick stays exact.
+function niceStep(raw: number, integerOnly: boolean): number {
+  const target = Number.isFinite(raw) && raw > 0 ? raw : 1
+  const magnitude = Math.pow(10, Math.floor(Math.log10(target)))
+  for (const mantissa of NICE_STEPS) {
+    const step = mantissa * magnitude
+    if (step >= target && (!integerOnly || Number.isInteger(step))) return step
+  }
+  const next = magnitude * 10
+  return integerOnly ? Math.max(1, Math.round(next)) : next
+}
+
+function nextNiceStep(step: number, integerOnly: boolean): number {
+  return niceStep(step * (1 + 1e-9), integerOnly)
+}
+
+function roundUpTo(value: number, step: number): number {
+  return Math.ceil(value / step - 1e-9) * step
+}
+
+// Strip floating point noise so a tick is an exact multiple of its step.
+function cleanTick(value: number, step: number): number {
+  if (!Number.isFinite(value)) return value
+  if (Number.isInteger(step)) return Math.round(value)
+  const digits = Math.max(0, Math.ceil(-Math.log10(step)) + 2)
+  return Number(value.toFixed(Math.min(digits, 12)))
+}
+
+function looksInteger(format: (value: number) => string): boolean {
+  return /^-?\d+%?$/.test(format(2.5).trim())
+}
+
+function makeTicks(
   values: number[],
   yMin: number | undefined,
   yMax: number | undefined,
   tickCount: number,
   format: (value: number) => string,
-): [number, number] {
-  let [lo, hi] = axisBand(values, yMin, yMax)
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    if (!labelsRepeat(ticksFor(hi, lo, tickCount), format)) break
-    if (yMin !== undefined && yMax !== undefined) break
-    const step = (hi - lo) / Math.max(tickCount - 1, 1)
-    // A step that rounds to zero produces duplicate labels, so widen the band
-    // to at least six units. Otherwise double it until the labels differ.
-    const span = Math.max(hi - lo, step < 1 ? MIN_TICK_SPAN : (hi - lo) * 2)
-    const grow = span - (hi - lo)
-    if (yMin !== undefined) {
-      hi += grow
-    } else if (yMax !== undefined) {
-      lo -= grow
-    } else {
-      lo -= grow / 2
-      hi += grow / 2
+): { lo: number; hi: number; ticks: number[] } {
+  const [lo, hi] = axisBand(values, yMin, yMax)
+  const integerOnly = values.length > 0 && values.every((value) => Number.isInteger(value)) && looksInteger(format)
+  const intervals = Math.max(tickCount - 1, 1)
+  if (yMin !== undefined && yMax !== undefined) {
+    const step = (hi - lo) / intervals
+    return {
+      lo,
+      hi,
+      ticks: Array.from({ length: tickCount }, (_, index) => cleanTick(hi - index * step, step)),
     }
   }
-  return [lo, hi]
+  let step = niceStep((hi - lo) / intervals, integerOnly)
+  let bottom = lo
+  let top = hi
+  let ticks: number[] = []
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (yMin !== undefined) {
+      bottom = yMin
+      top = yMin + step * intervals
+    } else if (yMax !== undefined) {
+      top = yMax
+      bottom = yMax - step * intervals
+    } else {
+      top = roundUpTo(hi, step)
+      bottom = top - step * intervals
+      // Aligning the top tick upward on a non-negative series should not add
+      // negative grid lines it never had.
+      if (bottom < 0 && lo >= 0) {
+        bottom = 0
+        top = step * intervals
+      }
+    }
+    ticks = Array.from({ length: tickCount }, (_, index) => cleanTick(top - index * step, step))
+    if (!labelsRepeat(ticks, format)) break
+    step = nextNiceStep(step, integerOnly)
+  }
+  return { lo: bottom, hi: top, ticks }
 }
 
 function linePath(points: [number, number | null][], sx: (x: number) => number, sy: (y: number) => number): string {
@@ -195,10 +241,15 @@ export function LineChart({
   const leftFormat = leftSeries.find((entry) => entry.format)?.format ?? format
   const rightFormat = rightSeries.find((entry) => entry.format)?.format ?? format
   const leftValues = leftYs.length ? leftYs : rightYs
-  const [lo, hi] = tickBand(leftValues, yMin, yMax, tickCount, leftFormat)
+  const left = makeTicks(leftValues, yMin, yMax, tickCount, leftFormat)
+  const lo = left.lo
+  const hi = left.hi
+  const ticks = left.ticks
   const hasRight = rightYs.length > 0
-  const [rightLo, rightHi] = hasRight ? tickBand(rightYs, undefined, undefined, tickCount, rightFormat) : [0, 1]
-  const rightTicks = hasRight ? ticksFor(rightHi, rightLo, tickCount) : []
+  const right = hasRight ? makeTicks(rightYs, undefined, undefined, tickCount, rightFormat) : { lo: 0, hi: 1, ticks: [] }
+  const rightLo = right.lo
+  const rightHi = right.hi
+  const rightTicks = right.ticks
   const rightPad = hasRight
     ? Math.max(10, Math.ceil(Math.max(...rightTicks.map((tick) => rightFormat(tick).length)) * 6.4) + 10)
     : 10
@@ -213,7 +264,6 @@ export function LineChart({
     pad.top + (1 - (Math.min(Math.max(y, rightLo), rightHi) - rightLo) / (rightHi - rightLo)) * plotHeight
   const syOf = (entry: ChartSeries) => (entry.axis === 'right' ? syRight : syLeft)
 
-  const ticks = ticksFor(hi, lo, tickCount)
   const crossesZero = lo < 0 && hi > 0
 
   const lastPoints = series.map((entry) => {
@@ -326,7 +376,9 @@ export function BarChart({
     )
   }
 
-  const hi = Math.max(...counts, 1)
+  const barTick = (value: number) => String(Math.round(value))
+  const axis = makeTicks(counts, 0, undefined, 6, barTick)
+  const hi = axis.hi
   const plotWidth = Math.max(width - pad.left - pad.right, 8)
   const plotHeight = height - pad.top - pad.bottom
   const slot = plotWidth / counts.length
@@ -337,17 +389,14 @@ export function BarChart({
     <div ref={ref} className="w-full">
       {width > 0 ? (
         <svg width={width} height={height} role="img" aria-label="distribution">
-          {[0, 0.5, 1].map((fraction) => {
-            const value = Math.round(hi * (1 - fraction))
-            return (
-              <g key={fraction}>
-                <line x1={pad.left} x2={width - pad.right} y1={pad.top + fraction * plotHeight} y2={pad.top + fraction * plotHeight} stroke={GRID} strokeWidth={1} strokeDasharray="3 3" />
-                <text x={pad.left - 6} y={pad.top + fraction * plotHeight + 3} textAnchor="end" fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS}>
-                  {value}
-                </text>
-              </g>
-            )
-          })}
+          {axis.ticks.map((tick) => (
+            <g key={tick}>
+              <line x1={pad.left} x2={width - pad.right} y1={sy(tick)} y2={sy(tick)} stroke={GRID} strokeWidth={1} strokeDasharray="3 3" />
+              <text x={pad.left - 6} y={sy(tick) + 3} textAnchor="end" fontSize={10.5} fontFamily="ui-monospace, monospace" fill={AXIS}>
+                {barTick(tick)}
+              </text>
+            </g>
+          ))}
           {counts.map((count, index) => (
             <rect
               key={index}
