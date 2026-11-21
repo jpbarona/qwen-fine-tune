@@ -51,6 +51,10 @@ function percentTick(value: number): string {
   return `${percent.toFixed(digits)}%`
 }
 
+function shareTick(value: number): string {
+  return `${Math.round(value * 100)}%`
+}
+
 function StepProgress({ run }: { run: Run }) {
   // One step samples a growing batch of prompts, so the planned step count
   // depends on the batch size and is only correct at the starting size. The
@@ -197,6 +201,8 @@ export default function RunSection({ run }: { run: Run }) {
   const hasTiming = hasValues(pairs(steps, run.series.step_seconds))
   const stageDone = run.stage_progress.percent
   const entropyPoints = pairs(steps, run.series.mean_entropy)
+  const rewardPoints = pairs(steps, run.series.mean_reward)
+  const rewardHasNegative = rewardPoints.some(([, value]) => value !== null && value < 0)
   const checkpointPoints = pairs(run.pass_at_1.checkpoint.steps, run.pass_at_1.checkpoint.values)
   const finalPoints = pairs(run.pass_at_1.final.steps, run.pass_at_1.final.values)
   const hasPassAtOne = hasValues(checkpointPoints) || hasValues(finalPoints)
@@ -286,7 +292,11 @@ export default function RunSection({ run }: { run: Run }) {
           </Panel>
         ) : null}
         <Panel title="reward per step" right={num(latest.mean_reward)}>
-          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.mean_reward) }]} yMin={-1} yMax={1} />
+          <LineChart
+            series={[{ color: ACCENT, points: rewardPoints }]}
+            yMin={rewardHasNegative ? -1 : 0}
+            yMax={1}
+          />
         </Panel>
         <Panel title="pass rate per step" right={rate(latest.pass_rate)}>
           <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.pass_rate) }]} yMin={0} yMax={1} format={percentTick} />
@@ -306,6 +316,8 @@ export default function RunSection({ run }: { run: Run }) {
                 { color: MUTED, dots: true, points: checkpointPoints },
                 { color: ACCENT, dots: true, points: finalPoints },
               ]}
+              yMin={0}
+              yMax={1}
               format={percentTick}
             />
           </Panel>
@@ -364,24 +376,33 @@ export default function RunSection({ run }: { run: Run }) {
               { color: MUTED, points: pairs(steps, run.series.parked_prompts) },
             ]}
             yMin={0}
+            height={70}
+            tickCount={3}
             format={(value) => String(Math.round(value))}
             empty="no pool data"
           />
           <div className="mt-1 border-t border-white/[0.06] pt-1">
-            <div className="flex items-baseline justify-between font-mono text-[10px] text-[#6b6b73]">
-              <Swatch color={DIM} label="advantage share" />
-              <span className="tabular-nums text-[#8b8b94]">{num(latest.advantage_share)}</span>
+            <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] text-[#6b6b73]">
+              <span className="whitespace-nowrap">
+                <Swatch color={DIM} label="advantage share" />
+              </span>
+              <span className="shrink-0 tabular-nums text-[#8b8b94]">{num(latest.advantage_share)}</span>
             </div>
             <LineChart
               series={[{ color: DIM, points: pairs(steps, run.series.advantage_share) }]}
               yMin={0}
               yMax={1}
-              format={percentTick}
+              height={70}
+              tickCount={3}
+              format={shareTick}
               empty="no pool data"
             />
           </div>
         </Panel>
-        <Panel title="stage completion per step (%)" right={run.stage_progress.band ?? undefined}>
+        <Panel
+          title={run.stage && run.stage !== 'unstaged' ? 'stage completion per step (%)' : 'pool solved share'}
+          right={run.stage_progress.band ?? undefined}
+        >
           <LineChart series={stageSegments(run.stage_progress.points)} format={(value) => `${value.toFixed(0)}%`} />
         </Panel>
         <Panel

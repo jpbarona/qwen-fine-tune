@@ -48,9 +48,9 @@ export function Panel({
   className?: string
 }) {
   return (
-    <section className={`border border-white/[0.07] bg-[#0b0b0d] ${className}`}>
-      <header className="flex items-baseline justify-between gap-3 px-3 pb-1.5 pt-2.5">
-        <h3 className="text-[11px] uppercase tracking-[0.09em] text-[#6b6b73]">{title}</h3>
+    <section className={`min-w-0 border border-white/[0.07] bg-[#0b0b0d] ${className}`}>
+      <header className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-3 pb-1.5 pt-2.5">
+        <h3 className="min-w-0 break-words text-[11px] uppercase tracking-[0.09em] text-[#6b6b73]">{title}</h3>
         {right ? <div className="flex items-center gap-3 font-mono text-[11px] text-[#8b8b94]">{right}</div> : null}
       </header>
       {legend ? (
@@ -120,8 +120,16 @@ export function LineChart({
   let lo = yMin ?? rawLo
   let hi = yMax ?? rawHi
   if (lo === hi) {
-    lo -= 0.5
-    hi += 0.5
+    // A flat series needs a visible band. Respect a pinned lower bound so a
+    // zero series draws 0 to 1 instead of -0.5 to 0.5.
+    if (yMin !== undefined) {
+      hi = lo + 1
+    } else if (yMax !== undefined) {
+      lo = hi - 1
+    } else {
+      lo -= 0.5
+      hi += 0.5
+    }
   }
   if (yMin === undefined && yMax === undefined) {
     const span = hi - lo
