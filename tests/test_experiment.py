@@ -1441,9 +1441,23 @@ def test_meta_records_the_pool_and_the_label_file(tmp_path) -> None:
         "rehearsal": 0,
         "parked": 1,
         "samples": 16,
+        "measured": True,
     }
     assert store.meta["labels_path"] == str(labels)
     assert "curriculum" not in store.meta
+
+
+def test_an_unmeasured_pool_records_no_sample_count(tmp_path) -> None:
+    store = RecordingStore()
+    build("code-score", tmp_path, store=store).run()
+
+    assert store.meta["pools"] == {
+        "train": 2,
+        "rehearsal": 0,
+        "parked": 0,
+        "samples": None,
+        "measured": False,
+    }
 
 
 def test_the_one_thinking_budget_reaches_every_step(tmp_path) -> None:

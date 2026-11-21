@@ -754,20 +754,9 @@ def test_the_fake_run_carries_the_unstaged_value(
     assert {point["stage"] for point in payload["evaluations"]} == {"unstaged"}
     assert meta["pools"]["train"] > 0
     assert meta["pools"]["parked"] == 0
+    assert meta["pools"]["samples"] is None
+    assert meta["pools"]["measured"] is False
     assert "curriculum" not in meta
-
-
-def test_build_pools_puts_every_training_prompt_in_the_train_pool(write_config) -> None:
-    from rlvr import cli
-
-    config = load_config(write_config())
-    prompts, _ = build_prompts(config)
-    pools = cli.build_pools(prompts, samples=config.generations_per_prompt)
-
-    assert pools.train == tuple(prompt.prompt_id for prompt in prompts)
-    assert pools.rehearsal == ()
-    assert pools.parked == ()
-    assert pools.samples == config.generations_per_prompt
 
 
 def test_build_test_runner_uses_fakes_or_docker(write_config) -> None:

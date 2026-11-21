@@ -72,7 +72,6 @@ from .fake import (
 )
 from .judge import JudgeClient, MissingAPIKeyError
 from .memory import configure_expandable_segments, read_torch_memory
-from .pools import Pools
 from .publish import PublishError, publish_report
 from .reward import (
     ARMS,
@@ -98,7 +97,6 @@ __all__ = [
     "build_generator",
     "build_judge",
     "build_parser",
-    "build_pools",
     "build_prompts",
     "build_screen_test_runner",
     "build_test_runner",
@@ -388,22 +386,6 @@ def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
     return train_prompts, eval_prompts
 
 
-def build_pools(prompts: Sequence[Prompt], *, samples: int) -> Pools:
-    """The single training pool for a run that has not been screened yet.
-
-    Every prompt goes to `train`, and the rehearsal and parked pools are empty.
-    Task 4 replaces this with the pools read from screen rows. Until then the
-    run still takes a `Pools` value, so the experiment has one pool interface
-    and no curriculum build.
-    """
-    return Pools(
-        train=tuple(prompt.prompt_id for prompt in prompts),
-        rehearsal=(),
-        parked=(),
-        samples=samples,
-    )
-
-
 def build_test_runner(config: Config, *, fake: bool):
     """The Docker runner over the full split and the synthetic rows, or the fake.
 
@@ -530,7 +512,9 @@ def run_command(args: argparse.Namespace) -> int:
     judge = build_judge(args.arm, config, fake=args.fake)
 
     train_prompts, eval_prompts = build_prompts(config)
-    pools = build_pools(train_prompts, samples=config.generations_per_prompt)
+    # No screen rows are read yet, so the run has no measured pool. The
+    # experiment trains every prompt and records the pool as unmeasured.
+    # Task 4 replaces this with the pool built from screen rows.
     labels_path = None if args.fake else DEFAULT_LABELS_PATH
     if config.eval_final_questions is not None:
         eval_prompts = eval_prompts[: config.eval_final_questions]
@@ -600,7 +584,6 @@ def run_command(args: argparse.Namespace) -> int:
         test_runner=test_runner,
         store=store,
         prompts=train_prompts,
-        pools=pools,
         labels_path=labels_path,
         eval_prompts=eval_prompts,
         resume_step=resume_step,

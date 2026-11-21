@@ -607,8 +607,10 @@ class Experiment:
     def _pools_meta(self) -> dict[str, Any]:
         """The pool counts for the run record.
 
-        An unscreened run has every provided prompt in train, so the record
-        still names a single pool.
+        A run without a measured pool trains every provided prompt. Its
+        `samples` is null and `measured` is false, because no screen count backs
+        the membership. A real pool records its measured sample count and
+        `measured` true.
         """
         pools = self.pools
         if pools is None:
@@ -617,12 +619,14 @@ class Experiment:
                 "rehearsal": 0,
                 "parked": 0,
                 "samples": None,
+                "measured": False,
             }
         return {
             "train": len(pools.train),
             "rehearsal": len(pools.rehearsal),
             "parked": len(pools.parked),
             "samples": pools.samples,
+            "measured": True,
         }
 
     def _prompts_for_step(self, count: int) -> list[Prompt]:
