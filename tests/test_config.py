@@ -529,3 +529,19 @@ def test_a_bad_pool_setting_is_named(tmp_path, line: str, key: str) -> None:
 
     with pytest.raises(ConfigError, match=key):
         load_config(path)
+
+
+def test_a_pool_policy_cannot_be_combined_with_max_prompts(tmp_path) -> None:
+    path = tmp_path / "conflict.toml"
+    path.write_text(
+        GOOD
+        + '\n[training]\npool_policy = "spread"\nmax_prompts = 10\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as error:
+        load_config(path)
+
+    message = str(error.value)
+    assert "training.pool_policy" in message
+    assert "training.max_prompts" in message

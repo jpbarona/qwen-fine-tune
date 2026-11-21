@@ -82,6 +82,7 @@ from .schedule import (
     Spread,
     StepPlan,
     label_from_row,
+    streak_from_row,
 )
 from .reward import (
     SYNTAX_ERROR_CLASS,
@@ -391,6 +392,9 @@ class Experiment:
     _policy: BatchSizePolicy | None = field(init=False, default=None, repr=False)
     _schedule: Schedule | None = field(init=False, default=None, repr=False)
     _parked_prompts: list[Prompt] = field(init=False, default_factory=list, repr=False)
+    _saved_streaks: dict[str, int] = field(
+        init=False, default_factory=dict, repr=False
+    )
 
     def run(self) -> RunSummary:
         """Run every training step, evaluate on schedule, and summarize.
@@ -698,11 +702,12 @@ class Experiment:
         return getattr(self._schedule, "name", self.config.pool_policy)
 
     def _load_labels(self) -> None:
-        """Replay pool changes from the run's label file, for a resume.
+        """Replay pool changes and failure streaks from the run's label file.
 
-        The file holds one row per change in step order. The last label for a
-        prompt wins. A row with an unknown label is ignored, so a future label
-        name cannot move a prompt by accident.
+        The file holds one row per change and one row per saved train streak,
+        in step order. The last row for a prompt wins. A row with an unknown
+        label or streak is ignored, so a future row name cannot move a prompt
+        by accident.
         """
         reader = getattr(self.store, "read_labels", None)
         if reader is None:
@@ -710,19 +715,63 @@ class Experiment:
                 "a scheduled run needs a store with read_labels, so a resume "
                 "keeps the pool labels"
             )
+        restore = getattr(self._schedule, "restore_streak", None)
         for row in reader():
             parsed = label_from_row(row)
-            if parsed is None:
+            if parsed is not None:
+                prompt_id, label = parsed
+                self._move_prompt(prompt_id, to_train=label == "train")
+                # A pool move starts the prompt with a clean streak. An older
+                # file has no explicit zero row, so clear it here.
+                if restore is not None:
+                    restore(prompt_id, 0)
+                self._saved_streaks[prompt_id] = 0
                 continue
-            prompt_id, label = parsed
-            self._move_prompt(prompt_id, to_train=label == "train")
+            saved_streak = streak_from_row(row)
+            if saved_streak is not None and restore is not None:
+                prompt_id, streak = saved_streak
+                restore(prompt_id, streak)
+                self._saved_streaks[prompt_id] = streak
 
     def _observe_step(self, step: int, result: StepResult) -> None:
-        """Ask the schedule for label changes, then apply and record them."""
+        """Ask the schedule for label changes, then apply and record them.
+
+        Every train group's failure streak is saved after the label changes,
+        so a resume continues counting instead of starting again at zero.
+        """
         if self._schedule is None or not result.outcomes:
             return
         updates = self._schedule.observe(step, result.outcomes)
         self._apply_label_updates(updates)
+        self._record_streaks(step, result.outcomes)
+
+    def _record_streaks(
+        self, step: int, outcomes: Sequence[GroupOutcome]
+    ) -> None:
+        """Append a train failure streak when it differs from the saved one."""
+        streak_for = getattr(self._schedule, "failure_streak", None)
+        if streak_for is None:
+            return
+        writer = getattr(self.store, "append_label", None)
+        if writer is None:
+            raise TypeError(
+                "a scheduled run needs a store with append_label, so a resume "
+                "keeps the pool labels"
+            )
+        for outcome in outcomes:
+            if outcome.parked:
+                continue
+            streak = streak_for(outcome.prompt_id)
+            if self._saved_streaks.get(outcome.prompt_id, 0) == streak:
+                continue
+            writer(
+                {
+                    "step": step,
+                    "prompt_id": outcome.prompt_id,
+                    "streak": streak,
+                }
+            )
+            self._saved_streaks[outcome.prompt_id] = streak
 
     def _apply_label_updates(self, updates: Sequence[LabelUpdate]) -> None:
         """Write each label change, then move the prompt to its new pool."""
@@ -732,9 +781,21 @@ class Experiment:
                 "a scheduled run needs a store with append_label, so a resume "
                 "keeps the pool labels"
             )
+        tracks_streak = getattr(self._schedule, "failure_streak", None) is not None
         for update in updates:
             writer(update.to_dict())
             self._move_prompt(update.prompt_id, to_train=update.label == "train")
+            # A pool move starts the failure streak again at zero. Write the
+            # zero so a resume does not restore an older streak for this prompt.
+            if tracks_streak:
+                writer(
+                    {
+                        "step": update.step,
+                        "prompt_id": update.prompt_id,
+                        "streak": 0,
+                    }
+                )
+                self._saved_streaks[update.prompt_id] = 0
 
     def _move_prompt(self, prompt_id: str, *, to_train: bool) -> None:
         """Move one prompt between the train list and the parked list."""

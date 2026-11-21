@@ -1053,3 +1053,25 @@ def test_a_fake_run_uses_the_measured_pool_and_the_spread_schedule(
     assert metric["pool_policy"] == "spread"
     assert metric["train_prompts"] == 7
     assert metric["parked_prompts"] == 1
+
+
+def test_a_partial_screen_fails_loudly(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    for prompt in train[:-3]:
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=16,
+                passed=8,
+                pass_rate=0.5,
+            )
+        )
+
+    with pytest.raises(UsageError, match="3 missing"):
+        build_pools(load_config(write_screen_config(tmp_path, directory)), train)

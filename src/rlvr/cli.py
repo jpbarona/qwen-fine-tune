@@ -399,9 +399,9 @@ def build_pools(config: Config, prompts: Sequence[Prompt]) -> Pools | None:
 
     Every row must belong to the supplied training prompts. A row from another
     split would send a prompt id the run cannot train, so it is a config error,
-    not a silently ignored row. Missing prompts are allowed, because a screen
-    in progress is a real state and the operator can see the pool count in the
-    run record.
+    not a silently ignored row. Every training prompt must also have a row,
+    because a partial screen would leave prompts in no pool and train less than
+    the operator asked for.
     """
     if config.screen_rows is None:
         return None
@@ -439,6 +439,13 @@ def build_pools(config: Config, prompts: Sequence[Prompt]) -> Pools | None:
         raise UsageError(
             f"screen rows name {len(unknown)} prompt ids that are not in the "
             f"training split, for example {unknown[0]!r}"
+        )
+    missing = sorted(known - measured)
+    if missing:
+        shown = ", ".join(repr(prompt_id) for prompt_id in missing[:3])
+        raise UsageError(
+            f"screen rows cover {len(measured)} of {len(known)} training "
+            f"prompts, {len(missing)} missing, for example {shown}"
         )
     return pools
 

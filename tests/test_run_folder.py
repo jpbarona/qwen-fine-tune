@@ -291,3 +291,34 @@ def test_truncate_drops_label_changes_past_the_checkpoint(tmp_path) -> None:
         {"step": 1, "prompt_id": "a", "label": "train"}
     ]
     assert read_jsonl(store.labels_path) == store.read_labels()
+
+
+def test_a_torn_final_label_line_is_dropped_and_removed(tmp_path) -> None:
+    from rlvr.runs import RunStore
+
+    store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
+    store.append_label({"step": 1, "prompt_id": "a", "label": "train"})
+    with store.labels_path.open("a", encoding="utf-8") as handle:
+        handle.write('{"step": 2, "prompt_id": "b"')
+
+    assert store.read_labels() == [
+        {"step": 1, "prompt_id": "a", "label": "train"}
+    ]
+    text = store.labels_path.read_text(encoding="utf-8")
+    assert text.endswith("\n")
+    assert "\"b\"" not in text
+
+
+def test_a_bad_label_line_that_is_not_the_torn_tail_raises(tmp_path) -> None:
+    from rlvr.runs import RunStore
+
+    store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
+    store.labels_path.write_text(
+        '{"step": 1, "prompt_id": "a", "label": "train"}\n'
+        "not json\n"
+        '{"step": 3, "prompt_id": "c", "label": "train"}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="label file line 2"):
+        store.read_labels()

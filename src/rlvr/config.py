@@ -70,7 +70,8 @@ It is an absolute figure, never a percentage.
 memory allows. It caps sequences per step. Step time is unverified, because
 test containers and judge calls run outside the batch. The value is at least
 one. An absent key means no cap, so a config written before this key keeps its
-old growth behaviour.
+old growth behaviour. It cannot be combined with `pool_policy`, because a
+schedule takes its step size from `rollouts_per_step`.
 
 `thinking_budget` is the token budget for the reasoning block. The same value
 is used on every step. It is recorded only, because vLLM 0.34 does not enforce
@@ -404,6 +405,15 @@ def load_config(path: str | Path) -> Config:
 
     _reject_engine_keys(raw)
 
+    pool_policy = _pool_policy(raw, "training.pool_policy")
+    max_prompts = _optional_int_none(raw, "training.max_prompts")
+    if pool_policy is not None and max_prompts is not None:
+        raise ConfigError(
+            "config: 'training.pool_policy' and 'training.max_prompts' cannot "
+            "both be set. A schedule uses the rollout budget as the step size, "
+            "so max_prompts would be ignored."
+        )
+
     return Config(
         path=file_path,
         raw=raw,
@@ -477,12 +487,12 @@ def load_config(path: str | Path) -> Config:
         memory_floor_mib=_optional_non_negative_int(
             raw, "training.memory_floor_mib", DEFAULT_MEMORY_FLOOR_MIB
         ),
-        max_prompts=_optional_int_none(raw, "training.max_prompts"),
+        max_prompts=max_prompts,
         test_workers=_optional_positive_int(raw, "training.test_workers", 4),
         eval_batch_size=_optional_positive_int(raw, "training.eval_batch_size", 8),
         prefetch_scoring=_optional_bool(raw, "training.prefetch_scoring", True),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
-        pool_policy=_pool_policy(raw, "training.pool_policy"),
+        pool_policy=pool_policy,
         screen_rows=_optional_string(raw, "training.screen_rows", None),
         rollouts_per_step=_optional_positive_int(
             raw, "training.rollouts_per_step", DEFAULT_ROLLOUTS_PER_STEP

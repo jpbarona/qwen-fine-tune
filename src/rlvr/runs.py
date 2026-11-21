@@ -149,7 +149,7 @@ class RunStore:
         )
 
     def _truncate_labels(self, step: int) -> None:
-        """Drop label changes past `step` so a replay cannot duplicate them."""
+        """Drop label and streak rows past `step` so a replay cannot duplicate them."""
         if not self.labels_path.exists():
             return
         kept: list[str] = []
@@ -250,29 +250,44 @@ class RunStore:
         )
 
     def append_label(self, row: Mapping[str, Any]) -> None:
-        """Append one pool label change to the run's label file."""
+        """Append one pool label change or saved failure streak."""
         self._append_line(
             self.labels_path,
             json.dumps(dict(row), ensure_ascii=False, allow_nan=False),
         )
 
     def read_labels(self) -> list[dict[str, Any]]:
-        """Every label change in file order, for a resumed run.
+        """Every label change and saved streak in file order, for a resume.
 
-        A malformed line is an error. The label file decides pool membership,
-        so silently skipping a line would resume with the wrong pools.
+        A torn final line, left by a write that did not finish, is dropped and
+        the file is rewritten without it. That is the same rule the screen
+        store uses. A bad line anywhere else is an error, because the label
+        file decides pool membership and a silent skip would resume with the
+        wrong pools.
         """
         if not self.labels_path.exists():
             return []
+        try:
+            text = self.labels_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise ValueError(f"cannot read the label file: {error}") from error
+        if not text:
+            return []
+
+        lines = text.splitlines()
+        terminated = text.endswith("\n")
         rows: list[dict[str, Any]] = []
-        for line_number, line in enumerate(
-            self.labels_path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
+        torn = False
+        for line_number, line in enumerate(lines, start=1):
             if not line.strip():
                 continue
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError as error:
+                is_torn_tail = line_number == len(lines) and not terminated
+                if is_torn_tail:
+                    torn = True
+                    break
                 raise ValueError(
                     f"label file line {line_number}: not valid JSON: {error}"
                 ) from error
@@ -281,6 +296,15 @@ class RunStore:
                     f"label file line {line_number}: row must be an object"
                 )
             rows.append(payload)
+
+        if torn:
+            self._write_atomic(
+                self.labels_path,
+                "".join(
+                    json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n"
+                    for row in rows
+                ),
+            )
         return rows
 
     def write_eval(self, payload: Mapping[str, Any]) -> None:

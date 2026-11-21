@@ -43,6 +43,8 @@ __all__ = [
     "Schedule",
     "Spread",
     "StepPlan",
+    "label_from_row",
+    "streak_from_row",
 ]
 
 #: A parked prompt is promoted at two passing rollouts or more. The value is
@@ -311,6 +313,22 @@ class Spread:
         """The current full-failure streak for a train prompt."""
         return self._failure_streak.get(prompt_id, 0)
 
+    def restore_streak(self, prompt_id: str, streak: int) -> None:
+        """Set a prompt's failure streak from a saved label row.
+
+        A resume replays the rows in file order, so a later row with a zero
+        streak clears an earlier nonzero one. A negative or non-integer count
+        is ignored, because a hand-edited row must not break the run.
+        """
+        if not isinstance(prompt_id, str) or not prompt_id.strip():
+            return
+        if isinstance(streak, bool) or not isinstance(streak, int) or streak < 0:
+            return
+        if streak == 0:
+            self._failure_streak.pop(prompt_id, None)
+        else:
+            self._failure_streak[prompt_id] = streak
+
 
 def label_from_row(row: Mapping[str, Any]) -> tuple[str, str] | None:
     """The prompt id and label in a stored label row, or None when malformed.
@@ -325,3 +343,14 @@ def label_from_row(row: Mapping[str, Any]) -> tuple[str, str] | None:
     if label not in (TRAIN_LABEL, PARKED_LABEL):
         return None
     return prompt_id, label
+
+
+def streak_from_row(row: Mapping[str, Any]) -> tuple[str, int] | None:
+    """The prompt id and saved failure streak, or None when the row has none."""
+    prompt_id = row.get("prompt_id")
+    streak = row.get("streak")
+    if not isinstance(prompt_id, str) or not prompt_id.strip():
+        return None
+    if isinstance(streak, bool) or not isinstance(streak, int) or streak < 0:
+        return None
+    return prompt_id, streak

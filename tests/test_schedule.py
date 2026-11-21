@@ -278,3 +278,30 @@ def test_a_label_update_dict_has_the_run_file_fields() -> None:
 def test_a_bad_group_outcome_is_rejected(values: dict) -> None:
     with pytest.raises(ValueError):
         GroupOutcome(**values)
+
+
+def test_a_saved_streak_is_restored_and_zero_clears_it() -> None:
+    policy = spread()
+
+    policy.restore_streak("p", 7)
+    assert policy.failure_streak("p") == 7
+
+    policy.restore_streak("p", 0)
+    assert policy.failure_streak("p") == 0
+
+
+def test_a_bad_saved_streak_is_ignored() -> None:
+    policy = spread()
+    policy.restore_streak("p", 4)
+
+    policy.restore_streak("p", -1)
+    policy.restore_streak("p", True)
+    assert policy.failure_streak("p") == 4
+
+
+def test_streak_from_row_reads_a_saved_streak() -> None:
+    from rlvr.schedule import streak_from_row
+
+    assert streak_from_row({"prompt_id": "p", "streak": 9}) == ("p", 9)
+    assert streak_from_row({"prompt_id": "p", "streak": -1}) is None
+    assert streak_from_row({"prompt_id": "p", "label": "train"}) is None

@@ -1664,7 +1664,8 @@ def test_promotion_at_two_passes_writes_a_label_and_moves_the_prompt(tmp_path) -
         config_text=TWO_STEP_CONFIG,
     ).run()
 
-    assert store.labels == [
+    promotions = [row for row in store.labels if row.get("reason") == "promoted"]
+    assert promotions == [
         {
             "step": 1,
             "prompt_id": "mbpp-0001",
@@ -1674,6 +1675,7 @@ def test_promotion_at_two_passes_writes_a_label_and_moves_the_prompt(tmp_path) -
             "samples": 16,
         }
     ]
+    assert {"step": 1, "prompt_id": "mbpp-0001", "streak": 0} in store.labels
     # The promoted prompt is in the train pool for the next step.
     assert "mbpp-0001" in generator.batch_calls[1]
     assert generator.batch_calls[1] == ("mbpp-0000", "mbpp-0001")
@@ -1699,7 +1701,8 @@ def test_demotion_after_ten_full_failure_groups(tmp_path) -> None:
         config_text=TEN_STEP_CONFIG,
     ).run()
 
-    assert store.labels == [
+    demotions = [row for row in store.labels if row.get("reason") == "demoted"]
+    assert demotions == [
         {
             "step": 10,
             "prompt_id": "mbpp-0000",
@@ -1709,6 +1712,12 @@ def test_demotion_after_ten_full_failure_groups(tmp_path) -> None:
             "samples": 16,
         }
     ]
+    assert {"step": 10, "prompt_id": "mbpp-0000", "streak": 0} in store.labels
+    assert {
+        "step": 9,
+        "prompt_id": "mbpp-0000",
+        "streak": 9,
+    } in store.labels
 
 
 def test_a_resume_replays_the_label_file(tmp_path) -> None:
@@ -1812,3 +1821,61 @@ def test_a_schedule_run_writes_the_label_file_in_the_run_folder(tmp_path) -> Non
     assert rows[0]["prompt_id"] == "mbpp-0001"
     assert rows[0]["label"] == "train"
     assert (store.run_dir / "labels.jsonl").is_file()
+
+
+def test_a_resume_continues_the_demotion_streak(tmp_path) -> None:
+    from rlvr.pools import Pools
+    from rlvr.schedule import Spread
+
+    prompts = make_prompts(1)
+    pools = Pools(train=("mbpp-0000",), rehearsal=(), parked=(), samples=16)
+    store = RecordingStore()
+    store.labels = [{"step": 9, "prompt_id": "mbpp-0000", "streak": 9}]
+
+    build(
+        "code-score",
+        tmp_path,
+        runner=StubTestRunner(total=1, passes=0),
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        schedule=Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0),
+        config_text=TEN_STEP_CONFIG,
+        resume_step=9,
+    ).run()
+
+    demotions = [row for row in store.labels if row.get("reason") == "demoted"]
+    assert demotions == [
+        {
+            "step": 10,
+            "prompt_id": "mbpp-0000",
+            "label": "parked",
+            "reason": "demoted",
+            "passed": 0,
+            "samples": 16,
+        }
+    ]
+
+
+def test_a_saved_streak_below_the_bar_does_not_demote(tmp_path) -> None:
+    from rlvr.pools import Pools
+    from rlvr.schedule import Spread
+
+    prompts = make_prompts(1)
+    pools = Pools(train=("mbpp-0000",), rehearsal=(), parked=(), samples=16)
+    store = RecordingStore()
+    store.labels = [{"step": 9, "prompt_id": "mbpp-0000", "streak": 4}]
+
+    build(
+        "code-score",
+        tmp_path,
+        runner=StubTestRunner(total=1, passes=0),
+        store=store,
+        prompts=prompts,
+        pools=pools,
+        schedule=Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0),
+        config_text=TEN_STEP_CONFIG,
+        resume_step=9,
+    ).run()
+
+    assert not any(row.get("reason") == "demoted" for row in store.labels)
