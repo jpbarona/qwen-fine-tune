@@ -654,6 +654,8 @@ def test_the_parked_pool_arm_configs_load(name: str, policy: str) -> None:
     assert config.max_steps == 100
     assert config.max_prompts is None
     assert config.screen_rows == "screens/mbpp-base/rows.jsonl"
+    assert config.eval_every_steps == 5
+    assert config.checkpoint_every_steps == 10
 
 
 @pytest.mark.parametrize("name", ("lfm-spread.toml", "lfm-sweep.toml"))

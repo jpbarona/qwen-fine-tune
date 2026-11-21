@@ -79,7 +79,7 @@ rollouts_per_step = 304
 
 [run]
 checkpoint_every_steps = 10
-eval_every_steps = 10
+eval_every_steps = 5
 eval_questions = 100
 eval_subset_seed = 2026
 

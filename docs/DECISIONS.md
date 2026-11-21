@@ -817,3 +817,10 @@ One record-keeping gap: `meta.json` is written when a run folder is created and
 is not refreshed on resume, so it still reports the first start's values, such as
 `eval_every_steps = 20`. The schedule uses the loaded config, not the metadata,
 so behaviour is correct and the record is stale.
+
+## D39. Both parked-pool arms evaluate every five steps
+
+Both arms now evaluate every 5 training steps on the pinned 100. A 100 question
+cohort has about five points of noise, so ten steps between points is too coarse
+to catch a turn. Checkpoints stay at 10 steps. Evaluations are cheap, about 3
+minutes measured.

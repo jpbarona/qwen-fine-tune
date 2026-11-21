@@ -144,3 +144,4 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 126. Steps halve to nineteen prompts, about 240 seconds
 127. Meta keeps the first start values after a resume
 128. Step 21 after the cap, 486 tokens and five percent truncated
+129. Both arms evaluate every five steps on the pinned hundred
