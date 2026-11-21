@@ -155,9 +155,8 @@ questions of the pinned split, in the MBPP row schema, so no generation step is
 needed. The arm config reads `screens/mbpp-base/rows.jsonl`, so the screen output
 folder must be `screens/mbpp-base`.
 
-```bash
-ls data/train_split.jsonl
-```
+Evaluations and checkpoints run every 10 steps. A resumed run evaluates the
+checkpoint it loads before the first new step.
 
 Then screen the base model. Leave out `--samples` so the default sixteen is
 used. The command resumes if it is interrupted.
