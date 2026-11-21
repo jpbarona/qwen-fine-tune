@@ -772,3 +772,38 @@ Cost. At 500 seconds a step, a 100 step arm is about 14 hours. Two arms are abou
 The truncation fall over one step with a rising pass rate suggests the model is
 learning to close its reasoning block under the truncation penalty, without the
 forced stop.
+
+## D38. The spread arm drifted from step 26, and the fixes that follow
+
+Status: measured 21 November 2026.
+
+The arm started from step 20 with the screen pools and drifted over seven steps.
+
+| Step | Reward | Train pass | Mean tokens | Syntax errors | Truncation |
+| --- | --- | --- | --- | --- | --- |
+| 26 | 0.657 | 65% | 483 | 49 | 0% |
+| 30 | 0.476 | 53% | 845 | 55 | 0% |
+| 32 | 0.292 | 43% | 1,026 | 105 | 0% |
+| 33 | -0.065 | 30% | 1,324 | 297 | 30% |
+
+The policy inflated its traces and then failed to finish the code. It was not one
+bad step, and the gradient norm rose with it, 0.03 to 0.23.
+
+Three conditions allowed it. The thinking budget is unenforced under vLLM, so
+nothing shortened an answer. The length term is capped at 0.2 total, which is
+small against a 1.3 second per sequence cost. And the train pool is 29 prompts
+seen every nine steps, which is thin for sixteen samples.
+
+Four changes.
+
+1. `max_completion_tokens` becomes 1024, so a runaway answer is truncated at -1.
+   The cap was 2,048, which is far enough away to be ignored.
+2. Checkpoints every ten steps, asserted by a config test so it cannot drift.
+3. The dashboard serves `no-store`, so a reload shows the current build without a
+   query string.
+4. `rollouts_per_step` becomes 304, which is 19 prompts at group size 16, halving
+   the step to about 240 seconds. The parked cap becomes four prompts and the
+   sweep covers the pool in fifteen steps.
+
+The arm restarts from the step-20 checkpoint, the last one before the drift, so
+the bad steps are discarded.

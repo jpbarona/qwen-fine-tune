@@ -139,3 +139,6 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 121. Screen splits 711 into 270 train, 174 solved, 267 parked
 122. A pooled step costs 500 seconds, half of it the update
 123. Completions run 1,200 tokens since vLLM cannot stop at the budget
+124. The spread arm inflated to 1,300 tokens and broke syntax at step 33
+125. The cap drops to 1,024 so a runaway answer scores minus one
+126. Steps halve to nineteen prompts, about 240 seconds
