@@ -137,3 +137,5 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 
 120. The screen covers the 711 train rows, not all 961
 121. Screen splits 711 into 270 train, 174 solved, 267 parked
+122. A pooled step costs 500 seconds, half of it the update
+123. Completions run 1,200 tokens since vLLM cannot stop at the budget

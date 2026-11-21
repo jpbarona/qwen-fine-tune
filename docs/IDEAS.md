@@ -216,3 +216,21 @@ Risk. The difference may be smaller than the measurement noise. A null result is
 still worth writing down, since it settles the scheduling argument.
 
 Where. Same files as the entry above, plus a config key for the policy choice.
+
+## Enforce the thinking budget under vLLM
+
+The problem. The Hugging Face loop forced EOS when a rollout spent its thinking
+budget without closing. vLLM 0.34 removed per-request logits processors, so the
+budget is only a config value and completions run five times longer than the
+budget. That costs generation time and update time.
+
+Options. Cap `max_tokens` at the budget plus a fixed allowance for the answer,
+which truncates long answers but bounds cost. Or stop on the closing marker with
+a stop string, then issue a second request for the code, which doubles request
+count. Or leave it, since truncation fell from 33.6 to 20.9 percent in one step
+and the penalty seems to teach the model to close.
+
+Cost. The first two options need a change in the vLLM backend and a reward check.
+About a day with tests.
+
+Where. `src/rlvr/vllm_backend.py` sampling parameters, and `configs/*.toml`.

@@ -748,3 +748,27 @@ percent. That keeps the two arms within one prompt of equal compute.
 
 The sweep arm covers 267 prompts in eight steps at 38 per step, with a gap of 24
 steps.
+
+## D37. A pooled step costs about 500 seconds, and the update is half of it
+
+Status: measured on the first two steps of the spread arm, 21 November 2026.
+
+| Step | Generation | Scoring | Update | Total |
+| --- | --- | --- | --- | --- |
+| 1 | 204 | 75 | 248 | 527 |
+| 2 | 186 | 93 | 216 | 494 |
+
+Each step is 38 prompts and 608 sequences, split 29 train and 9 parked. Completion
+length fell from 1,360 to 1,171 tokens. Truncation fell from 33.6 to 20.9 percent.
+Pass rate rose from 37.3 to 51.5 percent.
+
+The earlier 236 second step carried 226 token completions, because the Hugging
+Face loop forced EOS at the thinking budget. vLLM cannot do that, so completions
+are about five times longer and the update pass scales with them.
+
+Cost. At 500 seconds a step, a 100 step arm is about 14 hours. Two arms are about
+28 hours, near 16 dollars at the current price.
+
+The truncation fall over one step with a rising pass rate suggests the model is
+learning to close its reasoning block under the truncation penalty, without the
+forced stop.
