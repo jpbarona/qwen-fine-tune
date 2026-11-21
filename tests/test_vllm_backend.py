@@ -76,6 +76,7 @@ class FakeTrainer:
 
     def __init__(self) -> None:
         self.encoded: list[str] = []
+        self.thinking: list[bool] = []
         self.built: list[dict] = []
         self.accumulated: list[tuple[str, int]] = []
         self.updates = 0
@@ -84,8 +85,9 @@ class FakeTrainer:
         self.adapter_saves: list[str] = []
         self.checkpoint_calls: list[tuple[str, object]] = []
 
-    def encode_prompt(self, prompt):
+    def encode_prompt(self, prompt, *, thinking=True):
         self.encoded.append(prompt.prompt_id)
+        self.thinking.append(thinking)
         return [100, 101], False
 
     def build_generation_batch(
@@ -156,6 +158,17 @@ def test_n_answers_per_prompt_stay_grouped_in_prompt_order(tmp_path) -> None:
     assert trainer.built[0]["cache"] is True
 
 
+def test_the_screen_can_turn_thinking_off_through_the_same_generator(tmp_path) -> None:
+    trainer = FakeTrainer()
+    generator = VLLMGenerator(
+        trainer=trainer, engine=FakeEngine(), adapter_dir=tmp_path
+    )
+
+    generator.generate(prompt(0), n=2, temperature=0.9, thinking=False)
+
+    assert trainer.thinking == [False]
+
+
 def test_generate_single_prompt_is_one_group(tmp_path) -> None:
     generator = VLLMGenerator(
         trainer=FakeTrainer(), engine=FakeEngine(), adapter_dir=tmp_path
@@ -190,6 +203,22 @@ def test_second_update_hands_over_again(tmp_path) -> None:
 
     assert len(engine.adapters) == 3
     assert trainer.updates == 2
+
+
+def test_an_untrainable_trainer_samples_the_base_weights_with_no_adapter(
+    tmp_path,
+) -> None:
+    trainer = FakeTrainer()
+    trainer.trainable = False
+    engine = FakeEngine()
+    generator = VLLMGenerator(trainer=trainer, engine=engine, adapter_dir=tmp_path)
+
+    batch = generator.generate(prompt(0), n=2, temperature=0.9)
+
+    assert len(batch) == 2
+    assert engine.adapters == []
+    assert trainer.adapter_saves == []
+    assert trainer.built[0]["cache"] is False
 
 
 def test_the_initial_adapter_is_handed_to_the_engine(tmp_path) -> None:
@@ -228,8 +257,7 @@ def test_checkpoints_delegate_to_the_trainer_and_resync(tmp_path) -> None:
 def test_missing_vllm_package_is_a_usage_error_naming_vllm(
     write_config, monkeypatch
 ) -> None:
-    path = write_config(CONFIG + '\n[training]\nengine = "vllm"\n')
-    config = load_config(path)
+    config = load_config(write_config(CONFIG))
     monkeypatch.setitem(sys.modules, "vllm", None)
 
     with pytest.raises(UsageError) as raised:
@@ -237,44 +265,30 @@ def test_missing_vllm_package_is_a_usage_error_naming_vllm(
 
     message = str(raised.value)
     assert "vllm package" in message
-    assert 'engine = "hf"' in message
+    assert "pip install -e '.[vllm]'" in message
 
 
-def test_engine_config_rejects_an_unknown_value(write_config) -> None:
-    path = write_config(CONFIG + '\n[training]\nengine = "tensorrt"\n')
+def test_the_removed_engine_key_is_a_config_error(write_config) -> None:
+    path = write_config(CONFIG + '\n[training]\nengine = "vllm"\n')
 
     with pytest.raises(ConfigError, match="training.engine"):
         load_config(path)
 
 
-def test_engine_defaults_to_hf(write_config) -> None:
-    config = load_config(write_config(CONFIG))
-
-    assert config.engine == "hf"
-
-
-def test_engine_accepts_vllm(write_config) -> None:
-    path = write_config(CONFIG + '\n[training]\nengine = "vllm"\n')
-
-    assert load_config(path).engine == "vllm"
-
-
-def test_engine_accepts_the_inference_engine_spelling(write_config) -> None:
+def test_the_removed_inference_engine_spelling_is_a_config_error(write_config) -> None:
     path = write_config(CONFIG + '\n[training]\ninference_engine = "vllm"\n')
 
-    assert load_config(path).engine == "vllm"
+    with pytest.raises(ConfigError, match="training.inference_engine"):
+        load_config(path)
 
 
-def test_shipped_real_config_uses_vllm() -> None:
-    path = Path(__file__).resolve().parents[1] / "configs" / "real.toml"
+def test_no_committed_config_sets_an_engine_key() -> None:
+    root = Path(__file__).resolve().parents[1] / "configs"
 
-    assert load_config(path).engine == "vllm"
-
-
-def test_the_engine_defaults_to_hf_when_the_key_is_absent() -> None:
-    config = load_config(Path(__file__).resolve().parents[1] / "configs" / "smoke.toml")
-
-    assert config.engine == "hf"
+    for path in sorted(root.glob("*.toml")):
+        training = load_config(path).raw.get("training", {})
+        assert "engine" not in training, path.name
+        assert "inference_engine" not in training, path.name
 
 
 def test_set_adapter_needs_an_engine_to_hand_the_adapter_to() -> None:
@@ -290,41 +304,30 @@ def test_set_adapter_needs_an_engine_to_hand_the_adapter_to() -> None:
 def test_lfm_vllm_needs_the_engine_that_supports_its_lora_layers() -> None:
     from rlvr.model_profiles import validate_inference_engine
 
-    validate_inference_engine("LiquidAI/LFM2.5-2.6B", "hf")
-    validate_inference_engine(
-        "LiquidAI/LFM2.5-2.6B", "vllm", vllm_version="0.17.0"
-    )
-    validate_inference_engine(
-        "LiquidAI/LFM2.5-2.6B", "vllm", vllm_version="0.34.0"
-    )
+    validate_inference_engine("LiquidAI/LFM2.5-2.6B", vllm_version="0.17.0")
+    validate_inference_engine("LiquidAI/LFM2.5-2.6B", vllm_version="0.34.0")
     with pytest.raises(ValueError, match="vllm >= 0.17.0"):
-        validate_inference_engine(
-            "LiquidAI/LFM2.5-2.6B", "vllm", vllm_version="0.10.1"
-        )
+        validate_inference_engine("LiquidAI/LFM2.5-2.6B", vllm_version="0.10.1")
 
 
 def test_lfm_vllm_rejects_the_release_before_the_lora_support() -> None:
     from rlvr.model_profiles import validate_inference_engine
 
     with pytest.raises(ValueError, match="vllm >= 0.17.0"):
-        validate_inference_engine(
-            "LiquidAI/LFM2.5-2.6B", "vllm", vllm_version="0.16.9"
-        )
+        validate_inference_engine("LiquidAI/LFM2.5-2.6B", vllm_version="0.16.9")
 
 
 def test_lfm_vllm_accepts_a_development_build_at_the_floor() -> None:
     from rlvr.model_profiles import validate_inference_engine
 
-    validate_inference_engine(
-        "LiquidAI/LFM2.5-2.6B", "vllm", vllm_version="0.17.0.dev0"
-    )
+    validate_inference_engine("LiquidAI/LFM2.5-2.6B", vllm_version="0.17.0.dev0")
 
 
 def test_qwen_keeps_no_vllm_floor() -> None:
     from rlvr.model_profiles import validate_inference_engine
 
     for version in ("0.9.0", "0.10.1", "0.17.0"):
-        validate_inference_engine("Qwen/Qwen3-0.6B", "vllm", vllm_version=version)
+        validate_inference_engine("Qwen/Qwen3-0.6B", vllm_version=version)
 
 
 def test_a_source_checkout_version_comes_from_the_module(monkeypatch) -> None:
@@ -341,11 +344,11 @@ def test_a_source_checkout_version_comes_from_the_module(monkeypatch) -> None:
     module.__version__ = "0.17.0"
     monkeypatch.setitem(sys.modules, "vllm", module)
 
-    profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B", "vllm")
+    profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B")
 
     module.__version__ = "0.16.9"
     with pytest.raises(ValueError, match="vllm >= 0.17.0"):
-        profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B", "vllm")
+        profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B")
 
 
 def test_an_importable_vllm_with_no_version_is_an_error(monkeypatch) -> None:
@@ -361,7 +364,7 @@ def test_an_importable_vllm_with_no_version_is_an_error(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "vllm", types.ModuleType("vllm"))
 
     with pytest.raises(ValueError, match="cannot read the vllm version"):
-        profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B", "vllm")
+        profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B")
 
 
 def test_a_missing_vllm_package_is_left_to_the_engine_builder(monkeypatch) -> None:
@@ -376,7 +379,7 @@ def test_a_missing_vllm_package_is_left_to_the_engine_builder(monkeypatch) -> No
     monkeypatch.setattr("importlib.metadata.version", missing)
     monkeypatch.setitem(sys.modules, "vllm", None)
 
-    profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B", "vllm")
+    profiles.validate_inference_engine("LiquidAI/LFM2.5-2.6B")
 
 
 def test_a_refused_adapter_load_is_an_error(tmp_path, monkeypatch) -> None:

@@ -500,22 +500,19 @@ def _qwen_generator(config: Config, *, trainable: bool):
 def build_generator(config: Config, *, fake: bool, trainable: bool = True):
     """The real generator, or the fake generator.
 
-    `trainable` false loads the base model with no adapter and no optimizer.
-    The difficulty screen uses that, and it always stays on the Hugging Face
-    path. Training honours `[training] engine`, building the vLLM wrapper when
-    it is `vllm`.
+    Every real generator samples through vLLM. `trainable` false loads the base
+    model with no adapter and no optimizer, and the engine samples those base
+    weights. The difficulty screen uses that. Training keeps the default, so
+    the adapter is written and handed to the engine after each step.
     """
     if fake:
         return FakeGenerator()
     from .model_profiles import validate_inference_engine
 
-    if trainable:
-        try:
-            validate_inference_engine(config.model_name, config.engine)
-        except ValueError as error:
-            raise UsageError(str(error)) from error
-    if not trainable or config.engine == "hf":
-        return _qwen_generator(config, trainable=trainable)
+    try:
+        validate_inference_engine(config.model_name)
+    except ValueError as error:
+        raise UsageError(str(error)) from error
 
     from .vllm_backend import VLLMEngine, VLLMGenerator
 
@@ -531,12 +528,11 @@ def build_generator(config: Config, *, fake: bool, trainable: bool = True):
         )
     except ImportError as error:
         raise UsageError(
-            "the vllm inference engine needs the vllm package. install it or "
-            'set engine = "hf" under [training]. '
-            f"({error})"
+            "the rollout engine needs the vllm package. install it with "
+            f"pip install -e '.[vllm]'. ({error})"
         ) from error
     try:
-        trainer = _qwen_generator(config, trainable=True)
+        trainer = _qwen_generator(config, trainable=trainable)
         return VLLMGenerator(trainer=trainer, engine=engine)
     except BaseException:
         try:
@@ -747,7 +743,11 @@ def eval_band_command(args: argparse.Namespace) -> int:
     except ValueError as error:
         raise UsageError(str(error)) from error
 
-    generator = _qwen_generator(config, trainable=False)
+    # A checkpoint needs an adapter, so that path builds a trainable trainer.
+    # Without one the base weights are sampled and no checkpoint is written.
+    generator = build_generator(
+        config, fake=False, trainable=args.checkpoint is not None
+    )
     if args.checkpoint is not None:
         try:
             generator.load_checkpoint(args.checkpoint)

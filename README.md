@@ -7,49 +7,25 @@ the current choices.
 
 ## Install
 
+One environment installs the trainer and the vLLM sampler:
+
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -e . && .venv/bin/pip install pytest
+.venv/bin/pip install -e ".[vllm]" "pytest>=9,<10"
 ```
 
-The real training path needs the `train` extra, pinned for a CUDA 12, Python
-3.12 host:
-
-```bash
-.venv/bin/pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
-.venv/bin/pip install -e ".[train,vllm]"
-```
-
-vLLM 0.10.1 ships CUDA 12.8 binaries, so torch must come from the cu128 index.
-The driver must support CUDA 12.8. The `train` extra pins
-`transformers==4.57.1`, `peft==0.17.1`, `accelerate==1.8.1`, and
-`safetensors==0.5.3`. The `vllm` extra pins `vllm==0.10.1`. The real config
-samples with vLLM. Set `engine = "hf"` to use the Hugging Face loop instead,
-which works on the cu126 build.
+The `vllm` extra pins vLLM 0.34.0, torch 2.14.0, Transformers 5.22.2, PEFT
+0.18.1 and Accelerate 1.8.1. It needs a CUDA 12 host whose driver supports the
+torch wheel. Every rollout in training and in the screen samples with vLLM.
 
 ## LFM2.5-2.6B
 
-LFM uses the same GRPO trainer, reward arms, curriculum, evaluation, controls,
-and checkpoint workflow. Its model profile selects the tokenizer behavior and
-attention projection names. Use an isolated environment because the LFM
-Transformers 5 stack has different pins from the Qwen vLLM stack.
-
-The environment lives at `.venv-lfm` in the repository root and is built by
-`scripts/setup-lfm-env.sh`. The script creates the venv, installs torch 2.7.1
-from the cu128 index, installs the `lfm` extra, installs pytest, and prints the
-versions. It reuses an existing venv, so a second run is safe.
-
-```bash
-./scripts/setup-lfm-env.sh            # writes .venv-lfm
-./scripts/setup-lfm-env.sh /path/to/venv   # or an explicit path
-RLVR_VENV=.venv-lfm ./run.sh code-score --config configs/lfm-smoke.toml --runs-root runs-lfm-smoke
-RLVR_VENV=.venv-lfm ./run.sh code-score --config configs/lfm.toml --runs-root runs-lfm
-.venv-lfm/bin/python -m pytest tests/test_qwen.py -q
-```
-
-Do not run `python3 -m venv .venv-lfm` by hand on a host without
-`python3.12-venv`. That venv creation fails at ensurepip, and the script falls
-back to `--without-pip` plus the system pip when it hits that.
+LFM uses the same environment, GRPO trainer, reward arms, curriculum,
+evaluation, controls, and checkpoint workflow. Its model profile selects the
+tokenizer behavior and attention projection names. vLLM must be 0.17 or newer
+for LoRA over the fused MLP and short convolution, and the extra pins 0.34.0.
+`scripts/smoke_lfm_vllm.py` serves the model, loads an adapter, samples, and
+swaps in a second adapter without training.
 
 Use separate run roots for the smoke and full runs if both need to be resumed.
 Add `--resume` with the original config and run root to continue a checkpoint.
@@ -57,34 +33,7 @@ Model identity, revision, split seed, and fake/real mode are checked against
 saved metadata before run records are truncated.
 
 The LFM profile pins `LiquidAI/LFM2.5-2.6B` at revision
-`7141b56cd4650af95c7c7b86983443aed050c96a`. It defaults to `engine = "hf"`.
-Set `engine = "vllm"` to sample with vLLM, which needs vLLM 0.17 or newer for
-LoRA over the fused MLP and short convolution. The shipped Qwen `vllm` extra
-stays at 0.10.1. `scripts/smoke_lfm_vllm.py` serves the model, loads an
-adapter, samples, and swaps in a second adapter without training.
-
-### One environment for LFM training and serving
-
-The `vllm-lfm` extra contains only vLLM. vLLM 0.17 and newer bring their own
-torch and Transformers, so the `lfm` extra pins (torch 2.7.1, Transformers
-5.0.0) cannot be installed beside it. An environment that both trains and
-serves LFM needs vLLM's torch and Transformers, plus PEFT and Accelerate:
-
-```bash
-python3 -m venv .venv-lfm-vllm
-.venv-lfm-vllm/bin/pip install -e ".[vllm-lfm]"
-.venv-lfm-vllm/bin/pip install "peft==0.18.1" "accelerate==1.8.1"
-.venv-lfm-vllm/bin/pip install "pytest>=9,<10"
-RLVR_VENV=.venv-lfm-vllm ./run.sh code-score --config configs/lfm.toml --runs-root runs-lfm
-```
-
-The first install resolves vLLM 0.34.0, which installs torch 2.14.0,
-Transformers 5.22.2, safetensors 0.8.0, and huggingface-hub 2.4.0 on Python
-3.12. The second adds PEFT 0.18.1 and Accelerate 1.8.1 without changing torch
-or Transformers. Do not install the `lfm` extra in this environment. Its torch
-and Transformers pins conflict with vLLM and pip will replace one or the other.
-`scripts/setup-lfm-env.sh` still builds `.venv-lfm`, the Hugging Face only
-environment from the `lfm` extra, which cannot serve vLLM.
+`7141b56cd4650af95c7c7b86983443aed050c96a`.
 The native LFM template always opens a reasoning block, including for screening
 and evaluation. The comparison starts from Qwen's hyperparameters. The
 `[training] lora_targets` key chooses the adapter placement: `attention` adapts

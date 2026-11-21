@@ -256,11 +256,20 @@ def test_without_fake_the_command_asks_for_the_train_extra(
     config_path, tmp_path, capsys, monkeypatch
 ) -> None:
     import rlvr.qwen
+    import rlvr.vllm_backend as backend
 
     def missing(*args, **kwargs):
         raise ImportError("simulated missing torch")
 
+    class StubEngine:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
     monkeypatch.setattr(rlvr.qwen, "QwenGenerator", missing)
+    monkeypatch.setattr(backend, "VLLMEngine", StubEngine)
     runs_root = tmp_path / "runs"
     code = main(
         ["run", "--arm", "code-score", "--config", str(config_path), "--runs-root", str(runs_root)]

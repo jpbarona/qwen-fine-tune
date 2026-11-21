@@ -559,11 +559,20 @@ def test_cli_screen_without_fake_asks_for_the_train_extra(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     import rlvr.qwen
+    import rlvr.vllm_backend as backend
 
     def missing(*args, **kwargs):
         raise ImportError("simulated missing torch")
 
+    class StubEngine:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
     monkeypatch.setattr(rlvr.qwen, "QwenGenerator", missing)
+    monkeypatch.setattr(backend, "VLLMEngine", StubEngine)
     questions = write_questions(tmp_path / "questions.jsonl")
     output = tmp_path / "screen"
 
@@ -614,28 +623,48 @@ def test_the_screen_asks_for_a_non_trainable_base_model(
     assert captured == {"trainable": False}
 
 
-def test_build_generator_passes_the_base_model_flag_and_the_cap(
+def test_build_generator_wraps_every_real_generator_in_the_vllm_backend(
     write_config, monkeypatch
 ) -> None:
     import rlvr.qwen
+    import rlvr.vllm_backend as backend
 
-    captured: list[dict[str, object]] = []
+    engines: list[dict[str, object]] = []
+    trainers: list[object] = []
+
+    class StubTrainer:
+        def __init__(self, **kwargs) -> None:
+            self.trainable = bool(kwargs["trainable"])
+            self.max_completion_tokens = kwargs["max_completion_tokens"]
+
+    class StubEngine:
+        def __init__(self, **kwargs) -> None:
+            engines.append(kwargs)
+
+        def close(self) -> None:
+            pass
 
     class StubGenerator:
-        def __init__(self, **kwargs) -> None:
-            captured.append(kwargs)
+        def __init__(self, *, trainer, engine) -> None:
+            trainers.append(trainer)
 
-    monkeypatch.setattr(rlvr.qwen, "QwenGenerator", StubGenerator)
+    monkeypatch.setattr(rlvr.qwen, "QwenGenerator", StubTrainer)
+    monkeypatch.setattr(backend, "VLLMEngine", StubEngine)
+    monkeypatch.setattr(backend, "VLLMGenerator", StubGenerator)
     config = load_config(write_config())
 
     build_generator(config, fake=False, trainable=False)
     build_generator(config, fake=False)
     build_generator(config, fake=True)
 
-    assert captured[0]["trainable"] is False
-    assert captured[1]["trainable"] is True
-    assert captured[0]["max_completion_tokens"] == config.max_completion_tokens
-    assert len(captured) == 2
+    assert engines[0]["max_model_len"] == (
+        config.max_prompt_tokens + config.max_completion_tokens
+    )
+    assert trainers[0].trainable is False
+    assert trainers[1].trainable is True
+    assert trainers[0].max_completion_tokens == config.max_completion_tokens
+    assert len(engines) == 2
+    assert len(trainers) == 2
 
 
 def test_build_screen_test_runner_uses_fakes_or_docker() -> None:

@@ -1,5 +1,5 @@
 # Twenty step learning-rate probe on LFM2.5-2.6B with all-linear LoRA.
-# Install .[lfm] in an isolated environment. Its native template always thinks.
+# Install .[vllm] for the one environment. Its native template always thinks.
 # Full training profile for one reward arm. Prompt batches grow from two
 # groups as memory permits, with eight generations per prompt. The CLI derives
 # the step budget from epochs and the initial number of prompt batches.
@@ -30,8 +30,6 @@ test_size = 250
 
 [training]
 method = "grpo"
-# LFM uses the Hugging Face sampler. The trainer and reward loop are the same.
-engine = "hf"
 generations_per_prompt = 8
 temperature = 0.9
 learning_rate = 1e-3

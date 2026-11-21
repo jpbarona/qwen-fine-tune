@@ -67,7 +67,7 @@ class ScreenGenerator(Protocol):
     """The part of the generator seam the screen uses.
 
     `thinking` is explicit because the screen runs with it off while training
-    runs with it on. The fake and Qwen generators both accept the flag.
+    runs with it on. The fake and vLLM generators both accept the flag.
     """
 
     def generate(

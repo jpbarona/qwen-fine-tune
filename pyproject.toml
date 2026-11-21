@@ -13,36 +13,15 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=9,<10"]
 
-# The real training path. Pinned exact versions for a CUDA 12, Python 3.12
-# host. Install torch from the cu128 index first, then this extra. Versions
-# chosen to satisfy Qwen3 (transformers >= 4.51) and PEFT on a 3090.
-train = [
-    "torch==2.7.1",
-    "transformers==4.57.1",
-    "peft==0.17.1",
-    "accelerate==1.8.1",
-    "safetensors==0.5.3",
-]
-
-# The rollout engine. vLLM 0.10.1 ships CUDA 12.8 binaries, so install torch
-# from the cu128 index. Install after the train extra, on a CUDA 12 host.
-vllm = ["vllm==0.10.1"]
-
-# LFM2.5 rollout on vLLM. Kept separate from the Qwen pin because LFM needs
-# LoRA on the fused MLP and short convolution, which first shipped in 0.17.0.
-# vLLM 0.17 and newer pull their own torch and Transformers 5, so install this
-# in its own environment, not beside the [train] extra. Training in that
-# environment also needs peft and accelerate, which vLLM does not install.
-vllm-lfm = ["vllm>=0.17,<0.35"]
-
-# LFM2.5 has a Transformers 5 tokenizer. Install in its own environment with
-# .[lfm], since the Qwen vLLM extra pins a Transformers 4 stack.
-lfm = [
-    "torch==2.7.1",
-    "transformers==5.0.0",
+# The one runtime environment. vLLM samples every rollout and the same process
+# keeps the Hugging Face model for the optimizer. Pinned exact versions for a
+# CUDA 12, Python 3.12 host. LFM LoRA needs vLLM 0.17 or newer.
+vllm = [
+    "vllm==0.34.0",
+    "torch==2.14.0",
+    "transformers==5.22.2",
     "peft==0.18.1",
     "accelerate==1.8.1",
-    "safetensors==0.5.3",
 ]
 
 [project.scripts]

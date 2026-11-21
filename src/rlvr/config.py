@@ -23,7 +23,6 @@ Optional keys, with the defaults shown:
     [training] generations_per_prompt = 8
     [training] epochs = 5
     [training] temperature = 0.9
-    [training] engine = "hf"  (also accepted as inference_engine)
     [training] learning_rate = 1e-5
     [training] lora_rank = 32
     [training] lora_alpha = 64
@@ -78,7 +77,10 @@ fixed bands. `[curriculum] carry_over_ratio` is the share of the previous band
 added to the next stage, at least 0 and below 1.
 
 Extra keys and tables are kept and ignored here. Later tasks add the training,
-data, and judge settings they need without changing this loader's contract.
+data, and judge settings they need without changing this loader's contract. The
+removed engine keys are the exception: `training.engine` and its
+`training.inference_engine` spelling raise an error that names the key, because
+sampling always uses vLLM now.
 
 The judge API key is never part of the config. It comes from the environment
 named by `[judge] api_key_env`, which defaults per provider. The loader keeps
@@ -136,11 +138,6 @@ DEFAULT_CLIP_EPSILON = 0.2
 DEFAULT_KL_BETA = 0.0
 DEFAULT_SEED = 0
 
-#: Which backend samples rollouts. Training always stays on the Hugging Face
-#: model, so `vllm` changes the sampler only.
-DEFAULT_INFERENCE_ENGINE = "hf"
-INFERENCE_ENGINES: tuple[str, ...] = ("hf", "vllm")
-
 #: The band a run starts at, and the default carry over share.
 DEFAULT_STAGE = BANDS[0]
 
@@ -166,7 +163,6 @@ class Config:
     generations_per_prompt: int = DEFAULT_GENERATIONS_PER_PROMPT
     epochs: int = DEFAULT_EPOCHS
     temperature: float = DEFAULT_TEMPERATURE
-    engine: str = DEFAULT_INFERENCE_ENGINE
     learning_rate: float = DEFAULT_LEARNING_RATE
     lora_rank: int = DEFAULT_LORA_RANK
     lora_alpha: int = DEFAULT_LORA_ALPHA
@@ -330,29 +326,21 @@ def _optional_unit_float(raw: dict[str, Any], dotted: str, default: float) -> fl
     return number
 
 
-def _engine(raw: dict[str, Any], default: str) -> str:
-    """One of the allowed inference engines, or `default` when absent.
+def _reject_engine_keys(raw: dict[str, Any]) -> None:
+    """Reject the removed sampling engine keys.
 
-    `training.engine` is the documented key. `training.inference_engine` is
-    accepted as the same setting, so the sample config's spelling also works.
-    Conflicting values are rejected rather than silently picking one.
+    Sampling always uses vLLM, so the key has no meaning. A config that still
+    sets it fails loudly and names the key instead of being silently ignored.
     """
-    primary = _optional(raw, "training.engine", None)
-    alias = _optional(raw, "training.inference_engine", None)
-    if primary is not None and alias is not None and primary != alias:
-        raise ConfigError(
-            "config: 'training.engine' and 'training.inference_engine' disagree, "
-            f"got {_shown(primary)} and {_shown(alias)}"
-        )
-    value = primary if primary is not None else alias
-    if value is None:
-        return default
-    if not isinstance(value, str) or value not in INFERENCE_ENGINES:
-        raise ConfigError(
-            "config: 'training.engine' must be one of "
-            f"{', '.join(INFERENCE_ENGINES)}, got {_shown(value)}"
-        )
-    return value
+    training = raw.get("training")
+    if not isinstance(training, dict):
+        return
+    for key in ("engine", "inference_engine"):
+        if key in training:
+            raise ConfigError(
+                f"config: 'training.{key}' is not a setting. Sampling always "
+                "uses vLLM, so remove the key."
+            )
 
 
 def _optional_int_none(raw: dict[str, Any], dotted: str) -> int | None:
@@ -383,6 +371,8 @@ def load_config(path: str | Path) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError(f"config: {file_path} must contain a table of settings")
 
+    _reject_engine_keys(raw)
+
     return Config(
         path=file_path,
         raw=raw,
@@ -411,7 +401,6 @@ def load_config(path: str | Path) -> Config:
         temperature=_optional_float(
             raw, "training.temperature", DEFAULT_TEMPERATURE, positive=True
         ),
-        engine=_engine(raw, DEFAULT_INFERENCE_ENGINE),
         learning_rate=_optional_float(
             raw, "training.learning_rate", DEFAULT_LEARNING_RATE, positive=True
         ),

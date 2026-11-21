@@ -1,5 +1,5 @@
 # LFM2.5-2.6B uses the shared GRPO workflow and all-linear LoRA.
-# Install .[lfm] in an isolated environment. Its native template always thinks.
+# Install .[vllm] for the one environment. Its native template always thinks.
 # Hyperparameters start from the Qwen profile, with rank 16 and alpha 32.
 
 # Full training profile for one reward arm. Prompt batches grow from two
@@ -32,8 +32,6 @@ test_size = 250
 
 [training]
 method = "grpo"
-# LFM serves rollouts on vLLM 0.17 or newer, with the adapter refreshed each step.
-engine = "vllm"
 generations_per_prompt = 8
 temperature = 0.9
 learning_rate = 1e-4
