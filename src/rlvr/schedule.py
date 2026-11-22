@@ -60,6 +60,7 @@ __all__ = [
     "streak_from_row",
     "sweep_order_from_row",
     "sweep_position_from_row",
+    "sweep_steps_from_row",
 ]
 
 #: A parked prompt is promoted at two passing rollouts or more. The value is
@@ -88,7 +89,7 @@ class StepPlan:
     """The prompts one step runs.
 
     `train` holds the prompts that fill the step and `parked` holds the re-screen
-    slice. The order is the order the generator receives.
+    block. The order is the order the generator receives.
     """
 
     train: tuple["Prompt", ...] = ()
@@ -321,11 +322,11 @@ class Spread:
         half = max(4, self.prompts_per_step // 2)
         return min(half, self.prompts_per_step - 1)
 
-    def planned_parked_share(self, parked: int | None = None) -> float:
+    def planned_parked_share(self) -> float:
         """The share of one step's prompts that the parked block takes.
 
-        `parked` keeps the call shape shared with `Sweep`. The spread share is a
-        feature of the step size, not of the parked pool size.
+        The spread share is a feature of the step size, not of the parked pool
+        size.
         """
         return self.parked_count() / self.prompts_per_step
 
@@ -463,7 +464,10 @@ class Sweep:
     is skipped. No prompt runs twice, and no remaining parked prompt is skipped.
 
     The schedule keeps a cycle position. Position `0` to `m - 1` is a sweep
-    step and the rest of the cycle is a training step. The position is saved
+    step and the rest of the cycle is a training step. The sweep length is fixed
+    when the sweep starts and kept until the sweep ends, so a promotion in the
+    middle of a sweep cannot shorten the cycle and skip its last block. The next
+    sweep recomputes the length from the live parked count. The position is saved
     beside the label state after every step, so a resume continues the same
     sweep at the same index even when the parked count changed.
 
@@ -484,6 +488,7 @@ class Sweep:
     )
     _position: int = field(default=0, init=False, repr=False)
     _order: tuple[str, ...] | None = field(default=None, init=False, repr=False)
+    _sweep_steps: int | None = field(default=None, init=False, repr=False)
     _train_queue: PromptQueue = field(
         default_factory=PromptQueue, init=False, repr=False
     )
@@ -607,7 +612,16 @@ class Sweep:
         if sweep_steps == 0:
             self._position = 0
             self._order = None
+            self._sweep_steps = None
             return StepPlan(train=self._train_step(train_by_id))
+
+        # The length is fixed when the sweep starts. A promotion during the
+        # sweep shrinks the parked pool, and a live count would shorten the
+        # cycle and skip the last block. The next sweep at position zero
+        # recomputes the length.
+        if self._position == 0 or self._sweep_steps is None:
+            self._sweep_steps = sweep_steps
+        sweep_steps = self._sweep_steps
 
         cycle = sweep_steps + self.gap_ratio * sweep_steps
         self._position %= cycle
@@ -680,23 +694,29 @@ class Sweep:
         """Keep the cycle position inside the cycle after a pool change."""
         if self._order is None:
             return
-        cycle = self.cycle_length(len(self._order))
+        sweep_steps = self._sweep_steps
+        if sweep_steps is None:
+            sweep_steps = self.sweep_length(len(self._order))
+        cycle = sweep_steps + self.gap_ratio * sweep_steps
         if cycle:
             self._position %= cycle
 
     def state_row(self, step: int) -> dict[str, Any]:
-        """The saved cycle position and train queue after this step.
+        """The saved cycle position, frozen length and train queue after a step.
 
         The row also saves the sweep order. A resume then reuses the order from
         the sweep start, so a prompt promoted in an earlier step cannot run
-        twice and no prompt is skipped. The parked list is the same order,
-        because the shared resume path restores the train queue only from a row
-        that holds both queue keys. `restore_order` remains the source for the
-        parked steps.
+        twice and no prompt is skipped. The frozen sweep length is saved too, so
+        a resume mid-sweep keeps the same number of sweep steps. The parked list
+        is the same order, because the shared resume path restores the train
+        queue only from a row that holds both queue keys. `restore_order`
+        remains the source for the parked steps.
         """
         row: dict[str, Any] = {"step": step, "sweep_position": self._position}
         if self._order is not None:
             row["sweep_order"] = list(self._order)
+        if self._sweep_steps is not None:
+            row["sweep_steps"] = self._sweep_steps
         row["parked_queue"] = list(self._order) if self._order is not None else []
         row["train_queue"] = self._train_queue.as_list()
         return row
@@ -739,6 +759,18 @@ class Sweep:
             return
         self._position = position
 
+    def restore_sweep_steps(self, sweep_steps: int) -> None:
+        """Set the frozen sweep length from a saved label row.
+
+        A non-integer value or a value below one is ignored, because a
+        hand-edited row must not break the run.
+        """
+        if isinstance(sweep_steps, bool) or not isinstance(sweep_steps, int):
+            return
+        if sweep_steps < 1:
+            return
+        self._sweep_steps = sweep_steps
+
     def failure_streak(self, prompt_id: str) -> int:
         """The current zero-pass count for a train prompt."""
         return _saved_streak(self._failure_streak, prompt_id)
@@ -780,6 +812,16 @@ def sweep_position_from_row(row: Mapping[str, Any]) -> int | None:
     if isinstance(position, bool) or not isinstance(position, int) or position < 0:
         return None
     return position
+
+
+def sweep_steps_from_row(row: Mapping[str, Any]) -> int | None:
+    """The saved frozen sweep length, or None when the row has none."""
+    sweep_steps = row.get("sweep_steps")
+    if isinstance(sweep_steps, bool) or not isinstance(sweep_steps, int):
+        return None
+    if sweep_steps < 1:
+        return None
+    return sweep_steps
 
 
 def sweep_order_from_row(row: Mapping[str, Any]) -> tuple[str, ...] | None:

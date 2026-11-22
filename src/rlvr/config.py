@@ -78,7 +78,7 @@ schedule takes its step size from `rollouts_per_step`.
 is used on every step. It is recorded only, because vLLM 0.34 does not enforce
 a per-request budget.
 
-`pool_policy` names the parked prompt schedule. `"spread"` sends a slice of
+`pool_policy` names the parked prompt schedule. `"spread"` sends a block of
 parked prompts with every step. `"sweep"` covers the whole parked pool in
 consecutive all-parked steps, then trains for a gap. An absent key means no
 schedule, so the run trains the measured train pool and leaves parked prompts

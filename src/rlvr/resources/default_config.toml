@@ -81,7 +81,7 @@ eval_batch_size = 8
 # Score the next generated prompt group while the current group backpropagates.
 prefetch_scoring = true
 
-# Pool policy for the parked prompts. "spread" sends a fixed slice of parked
+# Pool policy for the parked prompts. "spread" sends a fixed block of parked
 # prompts with every step. "sweep" covers the whole parked pool in consecutive
 # all-parked steps, then trains for a gap. Unset means no schedule: the run
 # trains the train pool and leaves parked prompts alone.

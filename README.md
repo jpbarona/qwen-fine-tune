@@ -484,14 +484,14 @@ and a demotion resets it. They never promote a prompt, because a prompt selected
 for a low pass count regresses upward on the next measurement. A parked prompt
 is promoted at two passes of sixteen or more.
 
-Spread keeps a queue per pool. A step takes its block from the front, and a
-prompt that stays in the pool goes to the back, so a pool covers every prompt
-once before any repeat. Sweep keeps a fixed parked order and a train queue for
-its gap steps. In spread a promoted prompt joins the back of the train queue and
-a demoted prompt joins the back of the parked queue. In sweep a promoted prompt
-joins the back of the train queue and a demoted prompt joins the end of the
-parked order. The queues and the order are saved in `labels.jsonl` after each
-step, and a resume continues the same order.
+Spread keeps a queue per pool. A step takes its block from the front and moves
+that block to the back, so a pool covers every prompt once before any repeat.
+The prompts that stay in the pool keep their place. Sweep keeps a fixed parked
+order and a train queue for its gap steps. In spread a promoted prompt joins the
+back of the train queue and a demoted prompt joins the back of the parked queue.
+In sweep a promoted prompt joins the back of the train queue and a demoted
+prompt joins the end of the parked order. The queues and the order are saved in
+`labels.jsonl` after each step, and a resume continues the same order.
 
 Two schedules put parked prompts back into training. The spread policy joins a
 parked block to every step. The block is half of the step, with a minimum of

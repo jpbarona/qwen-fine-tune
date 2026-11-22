@@ -87,6 +87,7 @@ from .schedule import (
     streak_from_row,
     sweep_order_from_row,
     sweep_position_from_row,
+    sweep_steps_from_row,
 )
 from .reward import (
     SYNTAX_ERROR_CLASS,
@@ -775,8 +776,9 @@ class Experiment:
         a prompt wins. A row with an unknown label or streak is ignored, so a
         future row name cannot move a prompt by accident. A sweep position row
         is replayed last, so a resume mid sweep continues at the saved cycle
-        index. A queues row is reconciled with the current pool before the
-        schedule sees it.
+        index. The frozen sweep length is replayed too, so a resume keeps the
+        number of sweep steps planned at the sweep start. A queues row is
+        reconciled with the current pool before the schedule sees it.
         """
         reader = getattr(self.store, "read_labels", None)
         if reader is None:
@@ -786,6 +788,7 @@ class Experiment:
             )
         restore = getattr(self._schedule, "restore_streak", None)
         restore_position = getattr(self._schedule, "restore_position", None)
+        restore_steps = getattr(self._schedule, "restore_sweep_steps", None)
         restore_order = getattr(self._schedule, "restore_order", None)
         restore_state = getattr(self._schedule, "restore_state", None)
         for row in reader():
@@ -805,6 +808,9 @@ class Experiment:
                 restore(prompt_id, streak)
                 self._saved_streaks[prompt_id] = streak
                 continue
+            saved_steps = sweep_steps_from_row(row)
+            if saved_steps is not None and restore_steps is not None:
+                restore_steps(saved_steps)
             saved_position = sweep_position_from_row(row)
             if saved_position is not None and restore_position is not None:
                 restore_position(saved_position)
@@ -965,7 +971,12 @@ class Experiment:
             return None
         parked = len(self._parked_prompts)
         share_for = getattr(schedule, "planned_parked_share", None)
-        share = share_for(parked) if callable(share_for) else None
+        if not callable(share_for):
+            share = None
+        elif isinstance(schedule, Sweep):
+            share = share_for(parked)
+        else:
+            share = share_for()
         return {
             "policy": self._pool_policy_name(),
             "step_prompts": schedule.prompts_per_step,
@@ -988,7 +999,7 @@ class Experiment:
     def _plan_step(self, step: int, policy: BatchSizePolicy) -> StepPlan:
         """The prompts for one step, from the schedule or the batch policy.
 
-        A configured schedule owns the prompt count, because its slice formula
+        A configured schedule owns the prompt count, because its block formula
         depends on the rollout budget. Without one, the batch policy keeps the
         old adaptive count and only train prompts are drawn.
         """

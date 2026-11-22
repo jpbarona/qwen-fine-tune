@@ -15,6 +15,7 @@ from rlvr.schedule import (
     Sweep,
     sweep_order_from_row,
     sweep_position_from_row,
+    sweep_steps_from_row,
 )
 
 STEP = 38
@@ -561,6 +562,65 @@ def test_a_promotion_mid_sweep_does_not_repeat_a_prompt() -> None:
     }
 
 
+def test_a_promotion_mid_sweep_does_not_skip_the_last_block() -> None:
+    # Nine parked prompts at four per step gives three sweep steps. One
+    # promotion in the first step leaves eight prompts, which is two steps, so
+    # a live count would drop the last block and skip one prompt.
+    policy = sweep(prompts_per_step=4, gap_ratio=3, seed=3)
+    parked = prompts("parked", 9)
+    train = prompts("train", 6)
+
+    first = policy.plan(1, train, parked)
+    assert len(first.parked) == 4
+    promoted = first.parked[0].prompt_id
+    updates = policy.observe(
+        1,
+        [GroupOutcome(prompt_id=promoted, passed=2, samples=16, parked=True)],
+    )
+    assert [update.reason for update in updates] == ["promoted"]
+    remaining = [prompt for prompt in parked if prompt.prompt_id != promoted]
+
+    seen = [prompt.prompt_id for prompt in first.parked]
+    for step in (2, 3):
+        plan = policy.plan(step, train, remaining)
+        assert plan.train == ()
+        seen.extend(prompt.prompt_id for prompt in plan.parked)
+
+    gap = policy.plan(4, train, remaining)
+
+    assert gap.parked == ()
+    assert len(seen) == 9
+    assert sorted(seen) == [prompt.prompt_id for prompt in parked]
+    assert set(seen) == {prompt.prompt_id for prompt in parked}
+
+
+def test_a_resume_mid_sweep_keeps_the_frozen_length() -> None:
+    parked = prompts("parked", 9)
+    train = prompts("train", 6)
+    original = sweep(prompts_per_step=4, gap_ratio=3, seed=3)
+
+    first = original.plan(1, train, parked)
+    promoted = first.parked[0].prompt_id
+    original.observe(
+        1,
+        [GroupOutcome(prompt_id=promoted, passed=2, samples=16, parked=True)],
+    )
+    saved = original.state_row(1)
+    remaining = [prompt for prompt in parked if prompt.prompt_id != promoted]
+    expected = [original.plan(step, train, remaining) for step in (2, 3)]
+
+    order = sweep_order_from_row(saved)
+    assert order is not None
+    assert sweep_steps_from_row(saved) == 3
+
+    resumed = sweep(prompts_per_step=4, gap_ratio=3, seed=3)
+    resumed.restore_position(saved["sweep_position"])
+    resumed.restore_order(order)
+    resumed.restore_sweep_steps(sweep_steps_from_row(saved))
+
+    assert [resumed.plan(step, train, remaining) for step in (2, 3)] == expected
+
+
 def test_a_saved_sweep_order_keeps_the_sequence_across_a_resume() -> None:
     parked = prompts("parked", 4)
     original = sweep(prompts_per_step=2, gap_ratio=3, seed=1)
@@ -643,6 +703,10 @@ def test_the_state_row_carries_the_next_position() -> None:
     assert sweep_position_from_row({"step": 1, "sweep_position": 1}) == 1
     assert sweep_position_from_row({"step": 1, "prompt_id": "p"}) is None
     assert sweep_position_from_row({"step": 1, "sweep_position": -1}) is None
+    assert sweep_steps_from_row(row) == 2
+    assert sweep_steps_from_row({"step": 1, "sweep_steps": 0}) is None
+    assert sweep_steps_from_row({"step": 1, "sweep_steps": True}) is None
+    assert sweep_steps_from_row({"step": 1}) is None
 
 
 def test_a_bad_saved_position_is_ignored() -> None:
