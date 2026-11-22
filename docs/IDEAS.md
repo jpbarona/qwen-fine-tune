@@ -306,36 +306,69 @@ Where. The prompt draw and step loop in `src/rlvr/experiment.py`, plus
 The question. Given a fixed rollout budget, which GRPO sampling and
 gradient-weighting strategy maximizes held-out accuracy?
 
-The five strategies.
+The four strategies, each against the same vanilla control.
 
-| Strategy | What happens |
-|---|---|
-| 1. Vanilla GRPO | Average all group gradients |
-| 2. Active-only | Exclude zero-variance groups and renormalize |
-| 3. Std-weighted | Weight each gradient by reward std |
-| 4. Dynamic replacement | Resample uninformative groups within the fixed budget |
-| 5. Soft adaptive | Allocate more rollouts based on group signal |
+| Arm | Strategy | What happens |
+|---|---|---|
+| 0 | Vanilla GRPO | Average all group gradients |
+| 1 | Std-weighted gradients | Weight each group's update by its reward std |
+| 2 | Drop low-signal groups | Exclude groups at or below a threshold and renormalize |
+| 3 | Replace low-signal groups | Resample groups at or below a threshold within the fixed budget |
+| 4 | Temperature lift | For groups at or below a threshold, raise the sampling temperature until enough signal appears |
 
-What the current code does. Vanilla is the running arm. Every group is weighted
-equally and `apply_update` divides by the group count.
+What the current code does. Arm 0 is the running behaviour. Every group is
+weighted equally and `apply_update` divides by the group count.
 
-Note on arm 2. `group_advantages` already returns exact zeros when a group's
-reward std is below 1e-8. A flat group therefore contributes no gradient today.
-Excluding it and renormalizing changes the size of the step, not its direction.
+Threshold. One number is needed, for example a group reward std below 0.05
+counts as no signal. Arm 2 has a second size, the renormalization after the
+drop. Arm 4 has a step size and a cap, for example raise by 0.1 up to 1.2.
 
-Note on arms 3 and 4. They expand the two entries above. The dynamic replacement
-idea above allows a step to take longer. This arm keeps the rollout budget fixed
-and resamples inside it, so the comparison stays at equal compute.
+Note on arm 1. Advantages are already divided by the group std in
+`group_advantages`. Weighting the gradient by the same value partly cancels that
+normalization. Pick the weight family before building.
 
-Note on arm 5. Rollouts move from flat groups to active groups. The realised
-split has to be logged, or the arm is not equal compute either.
+Note on arm 2. `group_advantages` already returns zeros when the std is below
+1e-8, so a flat group contributes no gradient today. Excluding it and
+renormalizing changes the size of the step, not its direction. The arm only
+differs from vanilla when the threshold is above 1e-8.
+
+Note on arm 3. The replacement entry above allows a step to take longer. This
+arm keeps the rollout budget fixed and resamples inside it, so the comparison
+stays at equal compute.
+
+Note on arm 4. The loss computes both old and new logprobs at temperature 1.0
+(`src/rlvr/qwen.py:741`), while rollouts run at 0.9. Raising the sampling
+temperature widens that mismatch. The update is then not the gradient of the
+sampling policy. Record the realised temperature per group and cap it. This arm
+may need a loss that matches the sampling temperature before its result can be
+read.
+
+### Secondary options
+
+Two arms that did not make the main four. Keep them as follow-ups if the main
+arms are inconclusive.
+
+**Soft adaptive.** Give more rollouts to groups that show signal and fewer to
+flat groups, inside the same total rollout budget. A group starts at `n`. If its
+reward spread is above a threshold, draw another `n` to sharpen the baseline. If
+it is flat, stop at the minimum. Risk: the budget drifts toward prompts that
+already work, which starves the hard ones.
+
+**Within-group top-up.** Keep the same prompt and add samples until its group
+spread clears a threshold. This is the same family as the temperature lift with
+a different lever. Risk: when the pass rate is near zero, extra samples almost
+never help, so the compute is wasted.
+
+The temperature lift covers the same problem with less plumbing, which is why it
+is in the main four.
 
 Measurement. Pass@1 on the pinned 100, same cohort, same step count and same
 total rollout budget for every arm. Record the advantage share, the mean group
-spread, and the realised rollout split beside it.
+spread, and the realised temperature or replacement count beside it.
 
-Cost. Five arms at 60 to 100 steps each. Arms 2 to 5 need code and tests, about
+Cost. Five arms at 60 to 100 steps each. Arms 1 to 4 need code and tests, about
 a day. The runs are about one day of wall clock and 5 to 8 dollars.
 
-Where. `src/rlvr/qwen.py` for the weighting, `src/rlvr/experiment.py` for the
-draw and the step, `src/rlvr/schedule.py` for replacement.
+Where. `src/rlvr/qwen.py` for the weighting and the loss temperature,
+`src/rlvr/experiment.py` for the draw and the step, `src/rlvr/schedule.py` for
+replacement.
