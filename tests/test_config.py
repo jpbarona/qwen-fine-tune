@@ -637,7 +637,7 @@ def test_the_parked_pool_arm_configs_load(name: str, policy: str) -> None:
     assert config.model_name == "LiquidAI/LFM2.5-2.6B"
     assert config.pool_policy == policy
     assert config.generations_per_prompt == 16
-    assert config.rollouts_per_step == 304
+    assert config.rollouts_per_step == 160
     assert config.max_completion_tokens == 1024
     assert config.learning_rate == 3e-5
     assert config.lora_targets == "all-linear"
@@ -666,11 +666,11 @@ def test_the_half_size_step_keeps_the_planned_parked_arithmetic() -> None:
     group = spread.generations_per_prompt
     prompts_per_step = spread.rollouts_per_step // group
 
-    assert prompts_per_step == 19
-    assert Spread(prompts_per_step=prompts_per_step).parked_count() == 9
+    assert prompts_per_step == 10
+    assert Spread(prompts_per_step=prompts_per_step).parked_count() == 5
     sweep_schedule = Sweep(prompts_per_step=sweep.rollouts_per_step // group)
-    assert sweep_schedule.sweep_length(267) == 15
-    assert sweep_schedule.gap_length(267) == 45
+    assert sweep_schedule.sweep_length(267) == 27
+    assert sweep_schedule.gap_length(267) == 81
 
 
 def test_the_arm_config_accepts_a_screen_for_every_trained_prompt(

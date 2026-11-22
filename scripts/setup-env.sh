@@ -26,6 +26,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 check_only=0
 strict=0
 install_cuda_flag=1
+fast=0
 venv=""
 
 for arg in "$@"; do
@@ -33,6 +34,7 @@ for arg in "$@"; do
     --check) check_only=1 ;;
     --strict) strict=1 ;;
     --no-cuda) install_cuda_flag=0 ;;
+    --fast) fast=1 ;;
     -h|--help)
       sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
@@ -121,6 +123,18 @@ echo "repository: $repo_root"
 echo "venv:       $venv"
 echo "python:     $python_bin ($py_version)"
 
+# Compile for one architecture only. The default builds for every supported GPU
+# generation, which multiplies setup time and the first step.
+if [ -z "${TORCH_CUDA_ARCH_LIST:-}" ] && command -v nvidia-smi >/dev/null 2>&1; then
+  compute_cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | tr -d ' ')"
+  case "$compute_cap" in
+    [0-9].[0-9]) export TORCH_CUDA_ARCH_LIST="$compute_cap" ;;
+  esac
+fi
+if [ -n "${TORCH_CUDA_ARCH_LIST:-}" ]; then
+  echo "arch:       $TORCH_CUDA_ARCH_LIST"
+fi
+
 # Development headers. Triton and torch inductor compile a small C extension at
 # engine start, so a missing Python.h stops the run after the model download.
 include_dir="$("$python_bin" -c 'import sysconfig; print(sysconfig.get_paths()["include"])')"
@@ -138,7 +152,10 @@ fi
 host_packages=()
 [ "$headers_ok" -eq 0 ] && host_packages+=("python${py_version}-dev")
 [ "$ninja_ok" -eq 0 ] && host_packages+=("ninja-build")
-if ! command -v cc >/dev/null 2>&1 || ! command -v gcc >/dev/null 2>&1; then
+# nvcc preprocesses through the host C++ compiler, so g++ is required, not just
+# the C compiler. A host with gcc and no g++ fails inside nvcc with a bare
+# "cc1plus: No such file or directory".
+if ! command -v g++ >/dev/null 2>&1 || ! command -v gcc >/dev/null 2>&1; then
   host_packages+=("build-essential")
 fi
 
@@ -187,6 +204,22 @@ venv_cuda_prefix() {
     [ -x "$candidate" ] || continue
     dirname "$(dirname "$candidate")"
     return 0
+  done
+  return 1
+}
+
+# nvcc must match the CUDA version torch was built with. The venv toolkit can be
+# newer, and mixing it with the torch headers fails inside nvcc with a version
+# complaint. Prefer /usr/local/cuda-<torch version> when it exists.
+matching_cuda_prefix() {
+  local want="$1"
+  local candidate
+  case "$want" in
+    [0-9]*.[0-9]*) ;;
+    *) return 1 ;;
+  esac
+  for candidate in "/usr/local/cuda-${want}" "/usr/local/cuda-${want%%.*}"; do
+    [ -x "$candidate/bin/nvcc" ] && { echo "$candidate"; return 0; }
   done
   return 1
 }
@@ -269,6 +302,16 @@ if [ "$screen_missing" -gt 0 ]; then
   echo "  rclone copy hetzner-dumps:opencodeagent1/dumps/vm/rl-grpo-data/2026-11-21-lfm-screen \\"
   echo "    \"$repo_root/screens/mbpp-base\""
   echo "  the two arm configs fail at load without it."
+  if [ "$check_only" -eq 0 ] && command -v rclone >/dev/null 2>&1; then
+    mkdir -p "$repo_root/screens/mbpp-base"
+    if rclone copy hetzner-dumps:opencodeagent1/dumps/vm/rl-grpo-data/2026-11-21-lfm-screen \
+        "$repo_root/screens/mbpp-base" >/dev/null 2>&1; then
+      echo "  fetched the screen with rclone"
+      screen_missing=0
+    else
+      echo "  rclone could not fetch it, check the remote name and the config"
+    fi
+  fi
 fi
 
 echo "checks: headers=$headers_ok ninja=$ninja_ok cuda=$cuda_ok screens_missing=$screen_missing errors=$ERRORS warnings=$WARNINGS"
@@ -326,34 +369,55 @@ echo "installing pytest"
 # torch reports the CUDA version its wheel was built for. Install the matching
 # toolkit when nvcc is missing, so the fast kernels build on the first try.
 if [ "$install_cuda_flag" -eq 1 ] && [ "$cuda_ok" -eq 0 ]; then
-  # The torch wheel ships its own CUDA toolkit, nvcc included. Prefer it over an
-  # apt install, because the versions match by construction.
+  want="$("$venv/bin/python" -c 'import torch; print(torch.version.cuda or "")' 2>/dev/null || true)"
+
+  # Order of preference: the toolkit that matches torch exactly, then the copy
+  # inside the venv only when its version matches, then an apt install.
+  matching="$(matching_cuda_prefix "$want" || true)"
   venv_cuda="$(venv_cuda_prefix || true)"
-  if [ -n "$venv_cuda" ]; then
-    CUDA_HOME="$venv_cuda"
+
+  if [ -n "$matching" ]; then
+    CUDA_HOME="$matching"
     export CUDA_HOME
     export PATH="$CUDA_HOME/bin:$PATH"
     cuda_ok=1
-    echo "using the toolkit in the venv: CUDA_HOME=$CUDA_HOME"
-    echo "  run.sh sets this for every training run, so no export is needed."
-  else
-    want="$("$venv/bin/python" -c 'import torch; print(torch.version.cuda or "")' 2>/dev/null || true)"
-    if [ -z "$want" ]; then
-      warn "torch reports no CUDA build, so the toolkit is skipped."
-    elif install_cuda "$want"; then
+  elif [ -n "$venv_cuda" ]; then
+    venv_version="$("$venv_cuda/bin/nvcc" --version 2>/dev/null | sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p' | head -n 1)"
+    if [ -n "$want" ] && [ "$venv_version" != "$want" ]; then
+      warn "the venv toolkit is CUDA $venv_version but torch was built with $want"
+      if [ "$check_only" -eq 0 ]; then
+        echo "installing the matching toolkit"
+        install_cuda "$want" && cuda_ok=1
+      fi
+    else
+      CUDA_HOME="$venv_cuda"
+      export CUDA_HOME
+      export PATH="$CUDA_HOME/bin:$PATH"
       cuda_ok=1
     fi
+  elif [ -z "$want" ]; then
+    warn "torch reports no CUDA build, so the toolkit is skipped."
+  elif install_cuda "$want"; then
+    cuda_ok=1
   fi
 fi
 
-if [ "$cuda_ok" -eq 1 ]; then
-  echo "installing causal_conv1d"
-  if ! "$venv/bin/python" -m pip install -q causal_conv1d; then
-    warn "causal_conv1d did not install, the LFM path uses the slow reference kernel."
-  fi
-  echo "downloading the prebuilt FlashInfer kernels"
-  if ! "$venv/bin/python" -m vllm download-kernels >/dev/null 2>&1; then
-    warn "vllm download-kernels did not run. FlashInfer compiles its kernels at the first step instead."
+if [ "$fast" -eq 1 ]; then
+  echo "fast mode, skipping the optional causal_conv1d kernel"
+  echo "the LFM path uses the reference convolution, which is slower per step"
+elif [ "$cuda_ok" -eq 1 ]; then
+  if ! command -v g++ >/dev/null 2>&1; then
+    warn "g++ is missing, so no CUDA extension can compile."
+    echo "  sudo apt-get install -y build-essential"
+  else
+    echo "installing causal_conv1d"
+    # Build isolation would pull a second torch into a temporary environment.
+    # Build against the venv torch so the extension matches the runtime. CC is
+    # what torch hands to nvcc as the host compiler, and a plain gcc of a
+    # different major version has no C++ front end.
+    if ! env CC=g++ CXX=g++ "$venv/bin/python" -m pip install -q --no-build-isolation causal_conv1d; then
+      warn "causal_conv1d did not install, the LFM path uses the slow reference kernel."
+    fi
   fi
 else
   echo "skipping causal_conv1d, no CUDA toolkit to build it"
@@ -375,5 +439,10 @@ print(f"vllm         {vllm.__version__}")
 print(f"cuda         {torch.cuda.is_available()}")
 PY
 
-echo "done. use the environment with:"
-echo "  RLVR_VENV=$venv ./run.sh code-score --config configs/lfm.toml --runs-root runs-lfm"
+echo "done"
+echo
+echo "READY. start training with:"
+echo "  ./run.sh code-score --config configs/lfm-spread.toml --runs-root runs"
+echo "run.sh sets CUDA_HOME from the venv, so the fast kernels are used."
+echo "the dashboard reads the same runs folder:"
+echo "  $venv/bin/rlvr dashboard --runs-root runs --port 8081"

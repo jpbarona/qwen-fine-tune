@@ -7,53 +7,58 @@ the current choices.
 
 ## Install
 
-One environment installs the trainer and the vLLM sampler. On a fresh GPU host,
-run the preflight first. It reports the things that otherwise fail late, after
-the model has downloaded:
+Two commands on a fresh GPU host:
 
 ```bash
-./scripts/setup-env.sh --check
+./setup.sh
+./run.sh code-score --config configs/lfm-spread.toml --runs-root runs
 ```
 
-Then install:
+`setup.sh` installs everything that is missing and skips everything that is
+already there, so running it twice costs seconds. It installs the Python 3.12
+runtime, the compiler and headers, the venv, the pinned torch and vLLM stack,
+the CUDA toolkit that matches torch, the fast convolution kernel, and the screen
+file. It ends with a READY line and the run command.
 
-```bash
-./scripts/setup-env.sh
-```
+Use `./setup.sh --check` to see the state without changing anything.
 
-The script needs Python 3.12 or newer, the Python development headers and ninja.
-It installs the headers, ninja and the build tools itself when passwordless sudo
-is available. If a check fails it prints the exact command to fix it.
-
-The torch wheel ships a matching CUDA toolkit inside the venv, `nvcc` included.
-The script uses that copy to build `causal_conv1d`, and `run.sh` exports
-`CUDA_HOME` for every training run, so neither needs a hand install or a shell
-export. Only when the venv toolkit is absent does the script fall back to the
-NVIDIA apt repository.
-
-Without a toolkit the run still works. FlashInfer and `causal_conv1d` fall back
-to slow reference kernels, so each step takes longer.
-
-The two arm configs also need the screen. `screens/` is in `.gitignore`, so a
-fresh clone has none and each arm fails at load with `screen_rows path not
-found`. Restore it once:
-
-```bash
-rclone copy hetzner-dumps:opencodeagent1/dumps/vm/rl-grpo-data/2026-11-21-lfm-screen \
-  screens/mbpp-base
-```
-
-A manual install is the same as the script does:
-
-```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -e ".[vllm]" "pytest>=9,<10"
-```
+`run.sh` exports `CUDA_HOME` and `CC` for every run, so the fast kernels build
+without any manual export. Without a toolkit the run still works, but FlashInfer
+and `causal_conv1d` fall back to slow reference kernels.
 
 The `vllm` extra pins vLLM 0.34.0, torch 2.14.0, Transformers 5.22.2, PEFT
-0.18.1 and Accelerate 1.8.1. The torch wheel here is built for CUDA 13.0, so the
-host driver must support it. Every rollout in training and in the screen samples
-with vLLM.
+0.18.1 and Accelerate 1.8.1. The torch wheel is built for CUDA 13.0, so the host
+driver must support it and the toolkit must match it. Every rollout in training
+and in the screen samples with vLLM.
+
+## Setup cost
+
+The box costs 0.57 dollars an hour, which is 0.0095 dollars a minute. Money is
+not the reason to make setup fast.
+
+| Event | Time | Cost |
+| --- | --- | --- |
+| Fresh box to first step, measured | about 25 min | 0.24 dollars |
+| Snapshot restore to first step | about 2 min | 0.02 dollars |
+| One hundred steps at 10 groups | about 2.2 h | 1.24 dollars |
+| Full run, 100 steps, four boxes | about 8.7 h | 4.95 dollars |
+
+The optional convolution kernel costs 3 to 5 minutes to build. It saves part of
+a step, so it pays back only if a run is long. The one-time vLLM kernel compile
+costs 3 to 5 minutes, then every step samples faster, so it pays back inside a
+few steps.
+
+Three rules follow.
+
+1. Never hold training for an optional kernel. Start the run, then build the
+   extra kernel in a quiet window.
+2. Snapshot a box after one successful setup and clone that image for the next
+   run. This cuts 25 minutes to about 2.
+3. Configure several boxes at the same time, not one after another.
+
+`./setup.sh --fast` skips the optional convolution kernel and starts the rest
+without pausing for builds. Use it when the run is short or the box will be
+discarded.
 
 ## LFM2.5-2.6B
 

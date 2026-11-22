@@ -52,15 +52,20 @@ fi
 
 rlvr_venv="${RLVR_VENV:-.venv}"
 
-# vLLM compiles kernels at the first step. The torch wheel ships a matching CUDA
-# toolkit inside the venv, so point the build at that copy. Without this the
-# FlashInfer and causal_conv1d kernels fall back to slow reference paths.
+# vLLM compiles kernels at the first step. The toolkit version must match the
+# torch wheel, or nvcc rejects the torch headers. Prefer the exact match in
+# /usr/local, then the copy inside the venv.
 if [ -z "${CUDA_HOME:-}" ]; then
-  for candidate in "$rlvr_venv"/lib/python*/site-packages/nvidia/cu*/bin/nvcc; do
-    [ -x "$candidate" ] || continue
-    CUDA_HOME="$(dirname "$(dirname "$candidate")")"
-    break
-  done
+  torch_cuda="$("$rlvr_venv/bin/python" -c 'import torch; print(torch.version.cuda or "")' 2>/dev/null || true)"
+  if [ -n "$torch_cuda" ] && [ -x "/usr/local/cuda-$torch_cuda/bin/nvcc" ]; then
+    CUDA_HOME="/usr/local/cuda-$torch_cuda"
+  else
+    for candidate in "$rlvr_venv"/lib/python*/site-packages/nvidia/cu*/bin/nvcc; do
+      [ -x "$candidate" ] || continue
+      CUDA_HOME="$(dirname "$(dirname "$candidate")")"
+      break
+    done
+  fi
 fi
 if [ -n "${CUDA_HOME:-}" ]; then
   export CUDA_HOME
@@ -68,6 +73,15 @@ if [ -n "${CUDA_HOME:-}" ]; then
     *":$CUDA_HOME/bin:"*) ;;
     *) export PATH="$CUDA_HOME/bin:$PATH" ;;
   esac
+fi
+
+# torch passes CC to nvcc as the host compiler. A plain gcc whose major version
+# has no g++ partner cannot compile C++, so name g++ directly.
+if [ -z "${CC:-}" ]; then
+  export CC=g++
+fi
+if [ -z "${CXX:-}" ]; then
+  export CXX=g++
 fi
 
 exec "$rlvr_venv/bin/rlvr" run --arm "$arm" "$@"
