@@ -300,3 +300,42 @@ Cost. A draw loop with a cap, per-step signal tracking, and tests. About a day.
 
 Where. The prompt draw and step loop in `src/rlvr/experiment.py`, plus
 `src/rlvr/schedule.py` if the pool policy owns the replacement.
+
+## Research question: which sampling and weighting rule wins at a fixed rollout budget
+
+The question. Given a fixed rollout budget, which GRPO sampling and
+gradient-weighting strategy maximizes held-out accuracy?
+
+The five strategies.
+
+| Strategy | What happens |
+|---|---|
+| 1. Vanilla GRPO | Average all group gradients |
+| 2. Active-only | Exclude zero-variance groups and renormalize |
+| 3. Std-weighted | Weight each gradient by reward std |
+| 4. Dynamic replacement | Resample uninformative groups within the fixed budget |
+| 5. Soft adaptive | Allocate more rollouts based on group signal |
+
+What the current code does. Vanilla is the running arm. Every group is weighted
+equally and `apply_update` divides by the group count.
+
+Note on arm 2. `group_advantages` already returns exact zeros when a group's
+reward std is below 1e-8. A flat group therefore contributes no gradient today.
+Excluding it and renormalizing changes the size of the step, not its direction.
+
+Note on arms 3 and 4. They expand the two entries above. The dynamic replacement
+idea above allows a step to take longer. This arm keeps the rollout budget fixed
+and resamples inside it, so the comparison stays at equal compute.
+
+Note on arm 5. Rollouts move from flat groups to active groups. The realised
+split has to be logged, or the arm is not equal compute either.
+
+Measurement. Pass@1 on the pinned 100, same cohort, same step count and same
+total rollout budget for every arm. Record the advantage share, the mean group
+spread, and the realised rollout split beside it.
+
+Cost. Five arms at 60 to 100 steps each. Arms 2 to 5 need code and tests, about
+a day. The runs are about one day of wall clock and 5 to 8 dollars.
+
+Where. `src/rlvr/qwen.py` for the weighting, `src/rlvr/experiment.py` for the
+draw and the step, `src/rlvr/schedule.py` for replacement.
