@@ -38,5 +38,11 @@ ARG CUDA_ARCH=8.6
 RUN TORCH_CUDA_ARCH_LIST=${CUDA_ARCH} CC=g++ CXX=g++ \
     /opt/venv/bin/pip install --no-build-isolation --no-cache-dir causal_conv1d
 
+# The test runner shells out to `docker` and talks to the mounted host socket.
+# Without the client every rollout records runner_error.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 CMD ["bash"]
