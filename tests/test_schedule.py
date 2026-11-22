@@ -673,6 +673,108 @@ def test_a_gap_step_demotes_a_full_failure_train_prompt() -> None:
     assert [update.reason for update in updates] == ["demoted"]
 
 
+def test_the_gap_covers_the_train_pool_before_a_repeat() -> None:
+    # Four parked prompts at two per step is two sweep steps and a gap of six.
+    # The train pool holds ten prompts, so five gap steps cover all of them.
+    policy = sweep(prompts_per_step=2, gap_ratio=3)
+    parked = prompts("parked", 4)
+    train = prompts("train", 10)
+
+    policy.plan(1, train, parked)
+    policy.plan(2, train, parked)
+    seen: list[str] = []
+    for step in range(3, 8):
+        plan = policy.plan(step, train, parked)
+        assert plan.parked == ()
+        seen.extend(prompt.prompt_id for prompt in plan.train)
+
+    assert len(seen) == 10
+    assert len(set(seen)) == 10
+    assert set(seen) == {prompt.prompt_id for prompt in train}
+
+
+def test_a_promoted_id_joins_the_back_of_the_train_queue() -> None:
+    policy = sweep(prompts_per_step=2, gap_ratio=3, seed=1)
+    parked = prompts("parked", 4)
+    train = prompts("train", 3)
+
+    first = policy.plan(1, train, parked)
+    promoted = first.parked[0].prompt_id
+    updates = policy.observe(
+        1, [GroupOutcome(prompt_id=promoted, passed=2, samples=16, parked=True)]
+    )
+    row = policy.state_row(1)
+
+    assert [update.reason for update in updates] == ["promoted"]
+    assert row["train_queue"][-1] == promoted
+
+
+def test_a_demoted_id_leaves_training_and_joins_the_end_of_the_sweep_order() -> None:
+    policy = sweep(prompts_per_step=2, gap_ratio=3, seed=1, demote_after=1)
+    parked = prompts("parked", 4)
+    train = prompts("train", 3)
+
+    policy.plan(1, train, parked)
+    policy.plan(2, train, parked)
+    gap = policy.plan(3, train, parked)
+    assert gap.parked == ()
+    demoted = gap.train[0].prompt_id
+    failing = GroupOutcome(prompt_id=demoted, passed=0, samples=16, parked=False)
+
+    updates = policy.observe(3, [failing])
+    row = policy.state_row(3)
+    order = sweep_order_from_row(row)
+
+    assert [update.reason for update in updates] == ["demoted"]
+    assert demoted not in row["train_queue"]
+    assert order is not None
+    assert order[-1] == demoted
+
+
+def test_the_sweep_state_row_saves_the_train_queue() -> None:
+    policy = sweep(prompts_per_step=2, gap_ratio=3, seed=1)
+    parked = prompts("parked", 4)
+    train = prompts("train", 6)
+
+    policy.plan(1, train, parked)
+    row = policy.state_row(1)
+
+    assert sorted(row["train_queue"]) == [prompt.prompt_id for prompt in train]
+    assert queues_from_row(row) is not None
+
+
+def test_a_resume_mid_gap_continues_the_same_train_order() -> None:
+    parked = prompts("parked", 4)
+    train = prompts("train", 10)
+    original = sweep(prompts_per_step=2, gap_ratio=3, seed=5)
+
+    for step in range(1, 5):
+        original.plan(step, train, parked)
+    saved = original.state_row(4)
+    expected = original.plan(5, train, parked)
+
+    saved_queues = queues_from_row(saved)
+    assert saved_queues is not None
+    parked_ids, train_ids = saved_queues
+    order = sweep_order_from_row(saved)
+    assert order is not None
+
+    resumed = sweep(prompts_per_step=2, gap_ratio=3, seed=5)
+    resumed.restore_position(saved["sweep_position"])
+    resumed.restore_order(order)
+    resumed.restore_state(
+        restore_queue(parked_ids, (prompt.prompt_id for prompt in parked)),
+        restore_queue(train_ids, (prompt.prompt_id for prompt in train)),
+    )
+
+    assert resumed.plan(5, train, parked) == expected
+
+
+def test_a_sweep_restore_state_needs_two_queues() -> None:
+    with pytest.raises(TypeError, match="PromptQueue"):
+        sweep().restore_state([], [])
+
+
 def test_the_spread_share_holds_while_the_parked_pool_fills_the_block() -> None:
     # At 38 prompts a step the parked block is 19 and the train block is 19.
     policy = Spread(prompts_per_step=STEP, seed=0)

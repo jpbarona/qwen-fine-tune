@@ -1973,7 +1973,13 @@ def test_the_config_builds_the_sweep_schedule(tmp_path) -> None:
     assert row["pool_policy"] == "sweep"
     assert row["train_prompts"] == 0
     assert row["parked_prompts"] == 1
-    assert {"step": 1, "sweep_position": 1} in store.labels
+    sweep_rows = [
+        label
+        for label in store.labels
+        if "sweep_position" in label and "train_queue" in label
+    ]
+    assert sweep_rows[-1]["step"] == 1
+    assert sweep_rows[-1]["sweep_position"] == 1
     assert store.meta["schedule"] == {
         "policy": "sweep",
         "step_prompts": 1,

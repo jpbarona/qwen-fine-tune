@@ -21,9 +21,12 @@ queue. So the new member waits one tour of its new pool.
 
 `Sweep` is the second policy. It covers the whole parked pool in `m` consecutive
 all-parked steps, then trains for `gap_ratio * m` steps with no parked prompts.
-A parked group is labelled in the step it runs, so a resume loses no sweep
-outcome. The cycle position is saved beside the label state, so a resume
-continues the same sweep at the same index.
+The parked steps use a fixed order and a cycle position. The gap steps take
+their train blocks from a train queue, so the train pool is covered once before
+a prompt repeats. A parked group is labelled in the step it runs, so a resume
+loses no sweep outcome. The cycle position, the sweep order and the train queue
+are saved beside the label state, so a resume continues the same sweep at the
+same index and the same train rotation.
 """
 
 from __future__ import annotations
@@ -186,6 +189,21 @@ def _positive_int(name: str, value: object) -> int:
     return value
 
 
+def _keep_and_fill(queue: PromptQueue, pool_ids: Sequence[str]) -> None:
+    """Drop ids that left the pool and append ids that joined it.
+
+    This runs every step against the live pool. A crash between a label row
+    and a queues row leaves the saved queue one move behind. The label
+    replay moves the pool, so the next plan must repair the queue from the
+    pool. A new id joins at the back, as a live move would put it.
+    """
+    queue.keep(pool_ids)
+    held = set(queue.as_list())
+    for prompt_id in sorted(set(pool_ids)):
+        if prompt_id not in held:
+            queue.append(prompt_id)
+
+
 def _observe_outcome(
     step: int,
     outcome: GroupOutcome,
@@ -319,21 +337,6 @@ class Spread:
         self._train_queue.build(train_ids, self.seed)
         self._queues_built = True
 
-    @staticmethod
-    def _keep_and_fill(queue: PromptQueue, pool_ids: Sequence[str]) -> None:
-        """Drop ids that left the pool and append ids that joined it.
-
-        This runs every step against the live pool. A crash between a label row
-        and a queues row leaves the saved queue one move behind. The label
-        replay moves the pool, so the next plan must repair the queue from the
-        pool. A new id joins at the back, as a live move would put it.
-        """
-        queue.keep(pool_ids)
-        held = set(queue.as_list())
-        for prompt_id in sorted(set(pool_ids)):
-            if prompt_id not in held:
-                queue.append(prompt_id)
-
     def plan(
         self,
         step: int,
@@ -349,8 +352,8 @@ class Spread:
             list(train_by_id),
             list(parked_by_id),
         )
-        self._keep_and_fill(self._parked_queue, list(parked_by_id))
-        self._keep_and_fill(self._train_queue, list(train_by_id))
+        _keep_and_fill(self._parked_queue, list(parked_by_id))
+        _keep_and_fill(self._train_queue, list(train_by_id))
 
         parked_block = self._parked_queue.take(self.parked_count())
         train_size = self.prompts_per_step - len(parked_block)
@@ -451,14 +454,21 @@ class Sweep:
     `gap_ratio * m` training steps. Every step in the sweep is parked only, so
     no train prompt appears. A final sweep step may hold fewer prompts when the
     parked count does not divide evenly. A sweep step never repeats a prompt,
-    because the budget is a target and not a floor. The seeded order is fixed at
-    the start of the sweep and saved with the position. A prompt promoted in an
-    earlier step is skipped, so it cannot run twice and no prompt is skipped.
+    because the budget is a target and not a floor. The seeded order is fixed
+    when the first sweep starts and saved with the position. A later sweep
+    reuses the order, so a prompt that joined the pool waits at the end. A
+    prompt promoted in an earlier step is skipped, so it cannot run twice and no
+    prompt is skipped.
 
     The schedule keeps a cycle position. Position `0` to `m - 1` is a sweep
     step and the rest of the cycle is a training step. The position is saved
     beside the label state after every step, so a resume continues the same
     sweep at the same index even when the parked count changed.
+
+    The gap steps draw their train prompts from a train queue. The queue covers
+    the whole train pool once before any prompt repeats. A promoted id joins the
+    back of the queue. A demoted id leaves the queue and joins the end of the
+    sweep order, so the next sweep runs it after every other parked prompt.
     """
 
     prompts_per_step: int
@@ -472,7 +482,10 @@ class Sweep:
     )
     _position: int = field(default=0, init=False, repr=False)
     _order: tuple[str, ...] | None = field(default=None, init=False, repr=False)
-    _saved_order: tuple[str, ...] | None = field(default=None, init=False, repr=False)
+    _train_queue: PromptQueue = field(
+        default_factory=PromptQueue, init=False, repr=False
+    )
+    _train_queue_built: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         _positive_int("prompts_per_step", self.prompts_per_step)
@@ -522,17 +535,50 @@ class Sweep:
             return 0.0
         return parked / (cycle * self.prompts_per_step)
 
-    def _train_block(
-        self, step: int, train: Sequence["Prompt"]
+    def _ensure_train_queue(self, train_ids: Sequence[str]) -> None:
+        """Build the train queue from the pool on the first step."""
+        if self._train_queue_built:
+            return
+        self._train_queue.build(train_ids, self.seed)
+        self._train_queue_built = True
+
+    def _prepare_order(self, parked_ids: Sequence[str]) -> None:
+        """Build or repair the parked rotation for the current pool.
+
+        The order is shuffled once. A later sweep reuses the rotation, so ids
+        that left the pool are dropped and ids that joined it are appended in
+        sorted order. A demoted id was already appended by `observe`, so it
+        keeps its place at the end of the order.
+
+        The repair runs at the start of a sweep only. Inside a sweep the order
+        stays fixed, so a promoted id keeps its slot. A promoted id is filtered
+        out when the block is built, and the prompts after it keep their
+        positions. That is why no prompt repeats and no prompt is skipped.
+        """
+        if self._order is None:
+            order = list(parked_ids)
+            random.Random(self.seed).shuffle(order)
+        else:
+            order = list(self._order)
+        present = set(parked_ids)
+        kept: list[str] = []
+        seen: set[str] = set()
+        for prompt_id in order:
+            if prompt_id in present and prompt_id not in seen:
+                kept.append(prompt_id)
+                seen.add(prompt_id)
+        for prompt_id in sorted(present):
+            if prompt_id not in seen:
+                kept.append(prompt_id)
+                seen.add(prompt_id)
+        self._order = tuple(kept)
+
+    def _train_step(
+        self, train_by_id: Mapping[str, "Prompt"]
     ) -> tuple["Prompt", ...]:
-        """A full training step from the train pool, cycling when it is short."""
-        if not train:
-            return ()
-        start = ((step - 1) * self.prompts_per_step) % len(train)
-        return tuple(
-            train[(start + index) % len(train)]
-            for index in range(self.prompts_per_step)
-        )
+        """One training block from the train queue."""
+        block = self._train_queue.take(self.prompts_per_step)
+        return tuple(train_by_id[prompt_id] for prompt_id in block)
 
     def plan(
         self,
@@ -544,18 +590,22 @@ class Sweep:
 
         With no parked prompts the sweep never starts, the position stays at
         zero, and every step trains normally. A sweep step plans parked prompts
-        only. A gap step plans train prompts only.
+        only. A gap step plans train prompts only, taken from the train queue.
         """
         _positive_int("step", step)
         parked = sorted(parked_pool, key=_prompt_id)
         train = sorted(train_pool, key=_prompt_id)
+        parked_by_id = {_prompt_id(prompt): prompt for prompt in parked}
+        train_by_id = {_prompt_id(prompt): prompt for prompt in train}
 
-        sweep_steps = self.sweep_length(len(parked))
+        self._ensure_train_queue(list(train_by_id))
+        _keep_and_fill(self._train_queue, list(train_by_id))
+
+        sweep_steps = self.sweep_length(len(parked_by_id))
         if sweep_steps == 0:
             self._position = 0
             self._order = None
-            self._saved_order = None
-            return StepPlan(train=self._train_block(step, train))
+            return StepPlan(train=self._train_step(train_by_id))
 
         cycle = sweep_steps + self.gap_ratio * sweep_steps
         self._position %= cycle
@@ -563,26 +613,19 @@ class Sweep:
 
         if position < sweep_steps:
             if position == 0 or self._order is None:
-                order = [_prompt_id(prompt) for prompt in parked]
-                random.Random(self.seed).shuffle(order)
-                self._order = tuple(order)
-            by_id = {_prompt_id(prompt): prompt for prompt in parked}
+                self._prepare_order(list(parked_by_id))
             start = position * self.prompts_per_step
             block = self._order[start : start + self.prompts_per_step]
             parked_slice = tuple(
-                by_id[prompt_id] for prompt_id in block if prompt_id in by_id
+                parked_by_id[prompt_id]
+                for prompt_id in block
+                if prompt_id in parked_by_id
             )
-            next_position = (position + 1) % cycle
-            self._position = next_position
-            self._saved_order = (
-                self._order if next_position < sweep_steps else None
-            )
+            self._position = (position + 1) % cycle
             return StepPlan(parked=parked_slice)
 
-        self._order = None
-        self._saved_order = None
         self._position = (position + 1) % cycle
-        return StepPlan(train=self._train_block(step, train))
+        return StepPlan(train=self._train_step(train_by_id))
 
     def observe(
         self, step: int, outcomes: Sequence[GroupOutcome]
@@ -592,6 +635,13 @@ class Sweep:
         A parked group is decided in the step it runs, so a sweep promotion does
         not wait for the rest of the sweep and a resume loses nothing. A train
         group in a gap step follows the spread demotion rule.
+
+        A promoted id joins the back of the train queue. Its sweep slot stays in
+        the order so the positions in the rest of the sweep do not move, and the
+        slot is skipped when a block is built. A demoted id leaves the train
+        queue and joins the end of the sweep order, unless the order already
+        holds it. The position is clamped after a move, because the cycle length
+        follows the parked count.
         """
         _positive_int("step", step)
         updates: list[LabelUpdate] = []
@@ -606,20 +656,65 @@ class Sweep:
             )
             if update is not None:
                 updates.append(update)
+                self._move_in_queues(update)
 
+        if updates:
+            self._clamp_position()
         return tuple(updates)
 
-    def state_row(self, step: int) -> dict[str, Any]:
-        """The saved cycle position after this step, for the label file.
+    def _move_in_queues(self, update: LabelUpdate) -> None:
+        """Move one changed id in the sweep order and the train queue."""
+        if not self._train_queue_built:
+            return
+        if update.label == TRAIN_LABEL:
+            self._train_queue.append(update.prompt_id)
+            return
+        self._train_queue.remove(update.prompt_id)
+        if self._order is None or update.prompt_id in self._order:
+            return
+        self._order = (*self._order, update.prompt_id)
 
-        A position inside a sweep also saves the shuffled order. A resume then
-        reuses the order from the sweep start, so a prompt promoted in an
-        earlier step cannot run twice and no prompt is skipped.
+    def _clamp_position(self) -> None:
+        """Keep the cycle position inside the cycle after a pool change."""
+        if self._order is None:
+            return
+        cycle = self.cycle_length(len(self._order))
+        if cycle:
+            self._position %= cycle
+
+    def state_row(self, step: int) -> dict[str, Any]:
+        """The saved cycle position and train queue after this step.
+
+        The row also saves the sweep order. A resume then reuses the order from
+        the sweep start, so a prompt promoted in an earlier step cannot run
+        twice and no prompt is skipped. The parked list is the same order,
+        because the shared resume path restores the train queue only from a row
+        that holds both queue keys. `restore_order` remains the source for the
+        parked steps.
         """
         row: dict[str, Any] = {"step": step, "sweep_position": self._position}
-        if self._saved_order is not None:
-            row["sweep_order"] = list(self._saved_order)
+        if self._order is not None:
+            row["sweep_order"] = list(self._order)
+        row["parked_queue"] = list(self._order) if self._order is not None else []
+        row["train_queue"] = self._train_queue.as_list()
         return row
+
+    def restore_state(
+        self, parked_queue: PromptQueue, train_queue: PromptQueue
+    ) -> None:
+        """Set the train queue from a saved `queues` row.
+
+        The sweep does not draw parked prompts from a queue. The parked list in
+        the row is the sweep order, which `restore_order` restores. The train
+        queue is the source of rotation for the gap steps, so a resume
+        continues the same train order.
+        """
+        if not isinstance(parked_queue, PromptQueue) or not isinstance(
+            train_queue, PromptQueue
+        ):
+            raise TypeError("restore_state needs two PromptQueue objects")
+        self._train_queue = train_queue
+        self._train_queue_built = True
 
     def restore_order(self, order: Sequence[str]) -> None:
         """Set the sweep order from a saved label row. Bad values are ignored."""
