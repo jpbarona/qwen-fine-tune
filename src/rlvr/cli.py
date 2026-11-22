@@ -449,7 +449,7 @@ def build_pools(config: Config, prompts: Sequence[Prompt]) -> Pools | None:
         raise UsageError(f"cannot build the pools: {error}") from error
 
     known = {prompt.prompt_id for prompt in prompts}
-    measured = set(pools.train) | set(pools.rehearsal) | set(pools.parked)
+    measured = set(pools.train) | set(pools.retired) | set(pools.parked)
     unknown = sorted(measured - known)
     if unknown:
         raise UsageError(

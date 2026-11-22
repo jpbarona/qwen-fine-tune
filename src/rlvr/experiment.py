@@ -399,7 +399,7 @@ class Experiment:
     `pools` is the single pool built from measured pass counts. When it is
     present, only ids in `pools.train` and `pools.parked` are held by the
     experiment. The train ids fill the step and the parked ids feed the
-    schedule. Rehearsal prompts are kept in the pool record and never trained.
+    schedule. Retired prompts are kept in the pool record and never trained.
     When it is None, every prompt in `prompts` is trained, which keeps unit
     tests and pre-pool run folders working.
 
@@ -718,7 +718,7 @@ class Experiment:
         """The train and parked prompts the run holds.
 
         With a pool, only the `train` and `parked` ids are kept, in the order
-        the caller gave them. Rehearsal ids are never held. Without a pool,
+        the caller gave them. Retired ids are never held. Without a pool,
         every prompt is train and nothing is parked.
         """
         if self.pools is None:
@@ -918,14 +918,14 @@ class Experiment:
         if pools is None:
             return {
                 "train": len(self.prompts),
-                "rehearsal": 0,
+                "retired": 0,
                 "parked": 0,
                 "samples": None,
                 "measured": False,
             }
         return {
             "train": len(pools.train),
-            "rehearsal": len(pools.rehearsal),
+            "retired": len(pools.retired),
             "parked": len(pools.parked),
             "samples": pools.samples,
             "measured": True,

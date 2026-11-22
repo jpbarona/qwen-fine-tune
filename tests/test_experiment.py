@@ -1423,7 +1423,7 @@ def test_the_pool_train_members_are_the_only_prompts_trained(tmp_path) -> None:
     prompts = make_prompts(3)
     pools = Pools(
         train=("mbpp-0001",),
-        rehearsal=("mbpp-0000",),
+        retired=("mbpp-0000",),
         parked=("mbpp-0002",),
         samples=16,
     )
@@ -1434,24 +1434,48 @@ def test_the_pool_train_members_are_the_only_prompts_trained(tmp_path) -> None:
     assert result.stop_reason == "completed"
 
 
+def test_the_pool_holds_no_retired_prompt(tmp_path) -> None:
+    from rlvr.pools import Pools
+
+    prompts = make_prompts(3)
+    pools = Pools(
+        train=("mbpp-0001",),
+        retired=("mbpp-0000",),
+        parked=("mbpp-0002",),
+        samples=16,
+    )
+    experiment = build("code-score", tmp_path, prompts=prompts, pools=pools)
+    experiment.run()
+
+    assert [prompt.prompt_id for prompt in experiment.prompts] == ["mbpp-0001"]
+    assert [prompt.prompt_id for prompt in experiment._parked_prompts] == [
+        "mbpp-0002"
+    ]
+
+
 def test_meta_records_the_pool_and_the_label_file(tmp_path) -> None:
     from rlvr.pools import Pools
 
     labels = tmp_path / "labels.jsonl"
-    pools = Pools(train=("mbpp-0000",), rehearsal=(), parked=("mbpp-0001",), samples=16)
+    pools = Pools(
+        train=("mbpp-0000",),
+        retired=("mbpp-0002",),
+        parked=("mbpp-0001",),
+        samples=16,
+    )
     store = RecordingStore()
     build(
         "code-score",
         tmp_path,
         store=store,
-        prompts=make_prompts(2),
+        prompts=make_prompts(3),
         pools=pools,
         labels_path=labels,
     ).run()
 
     assert store.meta["pools"] == {
         "train": 1,
-        "rehearsal": 0,
+        "retired": 1,
         "parked": 1,
         "samples": 16,
         "measured": True,
@@ -1466,7 +1490,7 @@ def test_an_unmeasured_pool_records_no_sample_count(tmp_path) -> None:
 
     assert store.meta["pools"] == {
         "train": 2,
-        "rehearsal": 0,
+        "retired": 0,
         "parked": 0,
         "samples": None,
         "measured": False,
@@ -1561,7 +1585,7 @@ def test_a_spread_step_puts_train_and_parked_groups_in_one_update(tmp_path) -> N
     prompts = make_prompts(2)
     pools = Pools(
         train=("mbpp-0000",),
-        rehearsal=(),
+        retired=(),
         parked=("mbpp-0001",),
         samples=16,
     )
@@ -1593,7 +1617,7 @@ def test_a_step_row_records_the_counts_and_the_advantage_share(tmp_path) -> None
     from rlvr.schedule import Spread
 
     prompts = make_prompts(2)
-    pools = Pools(train=("mbpp-0000", "mbpp-0001"), rehearsal=(), parked=(), samples=16)
+    pools = Pools(train=("mbpp-0000", "mbpp-0001"), retired=(), parked=(), samples=16)
     schedule = Spread(prompts_per_step=2, cap=0, refresh_steps=1, seed=0)
     store = RecordingStore()
 
@@ -1643,7 +1667,7 @@ def test_a_group_with_one_reward_counts_zero_advantage(tmp_path) -> None:
     from rlvr.schedule import Spread
 
     prompts = make_prompts(1)
-    pools = Pools(train=("mbpp-0000",), rehearsal=(), parked=(), samples=16)
+    pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
     schedule = Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0)
     store = RecordingStore()
 
@@ -1667,7 +1691,7 @@ def test_promotion_at_two_passes_writes_a_label_and_moves_the_prompt(tmp_path) -
     prompts = make_prompts(2)
     pools = Pools(
         train=("mbpp-0000",),
-        rehearsal=(),
+        retired=(),
         parked=("mbpp-0001",),
         samples=16,
     )
@@ -1708,7 +1732,7 @@ def test_demotion_after_ten_full_failure_groups(tmp_path) -> None:
     from rlvr.schedule import Spread
 
     prompts = make_prompts(1)
-    pools = Pools(train=("mbpp-0000",), rehearsal=(), parked=(), samples=16)
+    pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
     schedule = Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0)
     store = RecordingStore()
 
@@ -1749,7 +1773,7 @@ def test_a_resume_replays_the_label_file(tmp_path) -> None:
     prompts = make_prompts(2)
     pools = Pools(
         train=("mbpp-0000",),
-        rehearsal=(),
+        retired=(),
         parked=("mbpp-0001",),
         samples=16,
     )
@@ -1791,7 +1815,7 @@ def test_the_config_builds_the_spread_schedule(tmp_path) -> None:
     prompts = make_prompts(2)
     pools = Pools(
         train=("mbpp-0000",),
-        rehearsal=(),
+        retired=(),
         parked=("mbpp-0001",),
         samples=16,
     )
@@ -1830,7 +1854,7 @@ def test_a_schedule_run_writes_the_label_file_in_the_run_folder(tmp_path) -> Non
     prompts = make_prompts(2)
     pools = Pools(
         train=("mbpp-0000",),
-        rehearsal=(),
+        retired=(),
         parked=("mbpp-0001",),
         samples=16,
     )
@@ -1857,7 +1881,7 @@ def test_a_resume_continues_the_demotion_streak(tmp_path) -> None:
     from rlvr.schedule import Spread
 
     prompts = make_prompts(1)
-    pools = Pools(train=("mbpp-0000",), rehearsal=(), parked=(), samples=16)
+    pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
     store = RecordingStore()
     store.labels = [{"step": 9, "prompt_id": "mbpp-0000", "streak": 9}]
 
@@ -1891,7 +1915,7 @@ def test_a_saved_streak_below_the_bar_does_not_demote(tmp_path) -> None:
     from rlvr.schedule import Spread
 
     prompts = make_prompts(1)
-    pools = Pools(train=("mbpp-0000",), rehearsal=(), parked=(), samples=16)
+    pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
     store = RecordingStore()
     store.labels = [{"step": 9, "prompt_id": "mbpp-0000", "streak": 4}]
 
@@ -1919,7 +1943,7 @@ def test_the_config_builds_the_sweep_schedule(tmp_path) -> None:
     prompts = make_prompts(2)
     pools = Pools(
         train=("mbpp-0000",),
-        rehearsal=(),
+        retired=(),
         parked=("mbpp-0001",),
         samples=16,
     )
@@ -1960,7 +1984,7 @@ def test_a_resume_mid_sweep_stays_in_the_sweep(tmp_path) -> None:
     prompts = make_prompts(4)
     pools = Pools(
         train=("mbpp-0000",),
-        rehearsal=(),
+        retired=(),
         parked=("mbpp-0001", "mbpp-0002", "mbpp-0003"),
         samples=16,
     )

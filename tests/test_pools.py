@@ -25,12 +25,12 @@ def test_zero_passes_go_to_parked() -> None:
     pools = from_rows([row("q0", 0)], samples=16)
     assert pools.parked == ("q0",)
     assert pools.train == ()
-    assert pools.rehearsal == ()
+    assert pools.retired == ()
 
 
-def test_every_pass_goes_to_rehearsal() -> None:
+def test_every_pass_goes_to_retired() -> None:
     pools = from_rows([row("q16", 16)], samples=16)
-    assert pools.rehearsal == ("q16",)
+    assert pools.retired == ("q16",)
     assert pools.train == ()
     assert pools.parked == ()
 
@@ -39,7 +39,7 @@ def test_a_partial_count_goes_to_train() -> None:
     for passed in (1, 8, 15):
         pools = from_rows([row("q", passed)], samples=16)
         assert pools.train == ("q",)
-        assert pools.rehearsal == ()
+        assert pools.retired == ()
         assert pools.parked == ()
 
 
@@ -55,7 +55,7 @@ def test_the_three_boundaries_split_into_three_pools() -> None:
     )
     assert pools == Pools(
         train=("almost", "one"),
-        rehearsal=("all",),
+        retired=("all",),
         parked=("none",),
         samples=16,
     )
@@ -77,7 +77,7 @@ def test_a_row_with_more_samples_than_configured_names_the_prompt() -> None:
 
 def test_empty_rows_give_three_empty_tuples() -> None:
     pools = from_rows([], samples=16)
-    assert pools == Pools(train=(), rehearsal=(), parked=(), samples=16)
+    assert pools == Pools(train=(), retired=(), parked=(), samples=16)
 
 
 def test_pools_are_sorted_by_prompt_id() -> None:
@@ -86,14 +86,14 @@ def test_pools_are_sorted_by_prompt_id() -> None:
             row("train-c", 8),
             row("parked-b", 0),
             row("train-a", 4),
-            row("rehearsal-d", 16),
+            row("retired-d", 16),
             row("parked-a", 0),
         ],
         samples=16,
     )
     assert pools.train == ("train-a", "train-c")
     assert pools.parked == ("parked-a", "parked-b")
-    assert pools.rehearsal == ("rehearsal-d",)
+    assert pools.retired == ("retired-d",)
 
 
 def test_input_order_does_not_change_the_pools() -> None:
@@ -114,7 +114,7 @@ def test_json_rows_with_the_screen_schema_are_accepted() -> None:
     ]
     pools = from_rows(rows, samples=16)
     assert pools.parked == ("json-a",)
-    assert pools.rehearsal == ("json-b",)
+    assert pools.retired == ("json-b",)
     assert pools.train == ("json-c",)
 
 
@@ -140,12 +140,12 @@ def test_the_default_promotion_bar_is_two() -> None:
 
 def test_a_promotion_bar_above_the_samples_is_allowed() -> None:
     pools = from_rows([], samples=1, promotion_bar=2)
-    assert pools == Pools(train=(), rehearsal=(), parked=(), samples=1)
+    assert pools == Pools(train=(), retired=(), parked=(), samples=1)
 
 
 def test_empty_rows_with_a_non_default_bar_give_three_empty_tuples() -> None:
     pools = from_rows([], samples=16, promotion_bar=5)
-    assert pools == Pools(train=(), rehearsal=(), parked=(), samples=16)
+    assert pools == Pools(train=(), retired=(), parked=(), samples=16)
 
 
 def test_a_promotion_bar_below_one_is_rejected() -> None:

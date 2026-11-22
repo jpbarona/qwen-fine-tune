@@ -349,7 +349,7 @@ def test_written_rows_keep_the_four_pool_fields(tmp_path: Path) -> None:
 
     pools = from_rows(rows, samples=16)
     assert pools.samples == 16
-    assert len(pools.train) + len(pools.rehearsal) + len(pools.parked) == 3
+    assert len(pools.train) + len(pools.retired) + len(pools.parked) == 3
 
 
 def test_screen_resumes_from_the_rows_already_written(tmp_path: Path) -> None:

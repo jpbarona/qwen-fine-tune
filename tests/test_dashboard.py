@@ -468,7 +468,7 @@ def test_a_pooled_run_uses_the_scheduled_step_size(tmp_path) -> None:
             },
             "pools": {
                 "train": 411,
-                "rehearsal": 0,
+                "retired": 0,
                 "parked": 300,
                 "samples": 16,
                 "measured": True,
@@ -1598,7 +1598,7 @@ def test_an_unstaged_run_renders_without_a_curriculum(tmp_path) -> None:
         tmp_path / "runs",
         rows=rows,
         rollouts=rollouts,
-        meta_extra={"pools": {"train": 2, "rehearsal": 0, "parked": 0, "samples": 16}},
+        meta_extra={"pools": {"train": 2, "retired": 0, "parked": 0, "samples": 16}},
     )
 
     data = collect_dashboard([run_dir])

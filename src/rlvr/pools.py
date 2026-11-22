@@ -5,7 +5,7 @@ many samples passed. This module turns those rows into the three pools the
 trainer uses:
 
     parked      no sample passed, so the prompt leaves the training pool
-    rehearsal   every sample passed, so the prompt is kept for maintenance
+    retired     every sample passed, so the prompt is kept but never trained
     train       some but not all samples passed, so the prompt has spread
 
 Membership comes only from the measured counts. Bands, labels and the model name
@@ -50,7 +50,7 @@ class Pools:
     """The three prompt pools and the sample count they were measured at."""
 
     train: tuple[str, ...]
-    rehearsal: tuple[str, ...]
+    retired: tuple[str, ...]
     parked: tuple[str, ...]
     samples: int
 
@@ -70,7 +70,7 @@ def from_rows(
 ) -> Pools:
     """Build the three pools from screen rows measured at `samples` samples.
 
-    A row with zero passes is parked, a row with every pass is rehearsal, and a
+    A row with zero passes is parked, a row with every pass is retired, and a
     row with any other count is train. A row measured at a different sample
     count is an error that names the prompt, because mixing two screens in one
     pool would make the counts incomparable. No rows gives three empty pools.
@@ -89,7 +89,7 @@ def from_rows(
         )
 
     train: list[str] = []
-    rehearsal: list[str] = []
+    retired: list[str] = []
     parked: list[str] = []
     seen: set[str] = set()
 
@@ -131,13 +131,13 @@ def from_rows(
         if passed == 0:
             parked.append(prompt_id)
         elif passed == row_samples:
-            rehearsal.append(prompt_id)
+            retired.append(prompt_id)
         else:
             train.append(prompt_id)
 
     return Pools(
         train=tuple(sorted(train)),
-        rehearsal=tuple(sorted(rehearsal)),
+        retired=tuple(sorted(retired)),
         parked=tuple(sorted(parked)),
         samples=samples,
     )

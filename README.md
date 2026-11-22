@@ -170,7 +170,7 @@ used. The command resumes if it is interrupted.
 
 The summary must report 711 questions, and `zero_pass`, `partial_pass` and
 `full_pass` must add up to 711. The zero and full counts are the parked and
-rehearsal pools. The partial count is the train pool. `samples_per_question`
+retired pools. The partial count is the train pool. `samples_per_question`
 must be 16, the same as `[training] generations_per_prompt`. A run stops at load
 if they differ, so an old eight sample folder cannot be reused by accident.
 
@@ -474,7 +474,7 @@ fails with `optimizer got an empty parameter list`. The loader passes
 
 Training runs from one pool built from a screen. Each training prompt is
 measured at sixteen rollouts. A prompt that passes some but not all of them goes
-to train. A prompt that passes all sixteen goes to rehearsal and is not trained.
+to train. A prompt that passes all sixteen is retired and is not trained.
 A prompt that passes none goes to parked. There are no curriculum stages.
 
 The labels come from screens. Training rollouts may demote a train prompt after

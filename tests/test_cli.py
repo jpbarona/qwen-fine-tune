@@ -884,7 +884,7 @@ def test_build_pools_reads_the_screen_rows(tmp_path) -> None:
     train, _ = build_prompts(config)
     directory = tmp_path / "screen"
     store = ScreenStore(directory)
-    expected = {"train": 0, "rehearsal": 0, "parked": 0}
+    expected = {"train": 0, "retired": 0, "parked": 0}
     for index, prompt in enumerate(train):
         passed = (0, 8, 16)[index % 3]
         store.append_row(
@@ -895,7 +895,7 @@ def test_build_pools_reads_the_screen_rows(tmp_path) -> None:
                 pass_rate=passed / 16,
             )
         )
-        expected[("parked", "train", "rehearsal")[index % 3]] += 1
+        expected[("parked", "train", "retired")[index % 3]] += 1
 
     pools = build_pools(
         load_config(write_screen_config(tmp_path, directory)), train
@@ -904,7 +904,7 @@ def test_build_pools_reads_the_screen_rows(tmp_path) -> None:
     assert pools is not None
     assert pools.samples == 16
     assert len(pools.train) == expected["train"]
-    assert len(pools.rehearsal) == expected["rehearsal"]
+    assert len(pools.retired) == expected["retired"]
     assert len(pools.parked) == expected["parked"]
 
 
@@ -1100,7 +1100,7 @@ def test_a_small_parked_pool_warns_about_unequal_compute(tmp_path) -> None:
     )
     small = Pools(
         train=("t",),
-        rehearsal=(),
+        retired=(),
         parked=tuple(f"p{index}" for index in range(10)),
         samples=16,
     )
@@ -1113,7 +1113,7 @@ def test_a_small_parked_pool_warns_about_unequal_compute(tmp_path) -> None:
 
     large = Pools(
         train=("t",),
-        rehearsal=(),
+        retired=(),
         parked=tuple(f"p{index}" for index in range(321)),
         samples=16,
     )
@@ -1158,7 +1158,7 @@ def test_training_steps_uses_the_schedule_prompt_count(tmp_path) -> None:
     prompts = [object() for _ in range(200)]
     pools = Pools(
         train=tuple(f"p{index}" for index in range(100)),
-        rehearsal=(),
+        retired=(),
         parked=("p100",),
         samples=16,
     )
