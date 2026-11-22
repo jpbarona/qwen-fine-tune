@@ -12,3 +12,6 @@ judge-cache/
 report.html
 JUDGE_MODEL.md
 screens/
+
+# Task directories shared with the host Docker daemon.
+.runner-tmp

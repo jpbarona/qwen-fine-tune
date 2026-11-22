@@ -42,11 +42,20 @@ if [ "$has_config" = false ]; then
   set -- --config configs/real.toml "$@"
 fi
 
+# The test runner starts containers through the host daemon, so every path it
+# hands to `docker run` is resolved on the host, not inside this container. The
+# task directory must therefore live at a host path that is also mounted here
+# under the same absolute path. `TMPDIR` points the runner at that directory.
+runner_tmp="$repo_root/.runner-tmp"
+mkdir -p "$runner_tmp"
+
 exec docker run --rm --gpus all --ipc=host \
   -v "$repo_root":/app \
+  -v "$repo_root":"$repo_root" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v rlvr-kernel-cache:/root/.cache \
   -e RLVR_VENV=/opt/venv \
+  -e TMPDIR="$runner_tmp" \
   -e OPENROUTER_API_KEY \
   -e OPENCODE_GO_API_KEY \
   -w /app \
