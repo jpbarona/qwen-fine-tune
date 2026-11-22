@@ -1577,6 +1577,8 @@ TWO_STEP_CONFIG = ONE_STEP_CONFIG.replace("steps = 1", "steps = 2")
 
 TEN_STEP_CONFIG = ONE_STEP_CONFIG.replace("steps = 1", "steps = 10")
 
+THREE_STEP_CONFIG = ONE_STEP_CONFIG.replace("steps = 1", "steps = 3")
+
 
 def test_a_spread_step_puts_train_and_parked_groups_in_one_update(tmp_path) -> None:
     from rlvr.pools import Pools
@@ -1727,7 +1729,7 @@ def test_promotion_at_two_passes_writes_a_label_and_moves_the_prompt(tmp_path) -
     assert generator.batch_calls[1] == ("mbpp-0000", "mbpp-0001")
 
 
-def test_demotion_after_ten_full_failure_groups(tmp_path) -> None:
+def test_demotion_after_three_full_failure_groups(tmp_path) -> None:
     from rlvr.pools import Pools
     from rlvr.schedule import Spread
 
@@ -1744,13 +1746,13 @@ def test_demotion_after_ten_full_failure_groups(tmp_path) -> None:
         prompts=prompts,
         pools=pools,
         schedule=schedule,
-        config_text=TEN_STEP_CONFIG,
+        config_text=THREE_STEP_CONFIG,
     ).run()
 
     demotions = [row for row in store.labels if row.get("reason") == "demoted"]
     assert demotions == [
         {
-            "step": 10,
+            "step": 3,
             "prompt_id": "mbpp-0000",
             "label": "parked",
             "reason": "demoted",
@@ -1758,11 +1760,11 @@ def test_demotion_after_ten_full_failure_groups(tmp_path) -> None:
             "samples": 16,
         }
     ]
-    assert {"step": 10, "prompt_id": "mbpp-0000", "streak": 0} in store.labels
+    assert {"step": 3, "prompt_id": "mbpp-0000", "streak": 0} in store.labels
     assert {
-        "step": 9,
+        "step": 2,
         "prompt_id": "mbpp-0000",
-        "streak": 9,
+        "streak": 2,
     } in store.labels
 
 
@@ -1922,7 +1924,7 @@ def test_a_saved_streak_below_the_bar_does_not_demote(tmp_path) -> None:
     prompts = make_prompts(1)
     pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
     store = RecordingStore()
-    store.labels = [{"step": 9, "prompt_id": "mbpp-0000", "streak": 4}]
+    store.labels = [{"step": 9, "prompt_id": "mbpp-0000", "streak": 1}]
 
     build(
         "code-score",

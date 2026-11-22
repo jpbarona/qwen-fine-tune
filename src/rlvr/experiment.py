@@ -828,7 +828,7 @@ class Experiment:
     def _observe_step(self, step: int, result: StepResult) -> None:
         """Ask the schedule for label changes, then apply and record them.
 
-        Every train group's failure streak is saved after the label changes,
+        Every train group's zero-pass count is saved after the label changes,
         so a resume continues counting instead of starting again at zero.
         """
         if self._schedule is None or not result.outcomes:
@@ -862,7 +862,12 @@ class Experiment:
     def _record_streaks(
         self, step: int, outcomes: Sequence[GroupOutcome]
     ) -> None:
-        """Append a train failure streak when it differs from the saved one."""
+        """Append a train count row when the count changes.
+
+        A passing train group leaves the count alone, so it writes no row. A
+        zero-pass group adds one and a demotion resets the count, so each writes
+        one row. An unchanged count is already saved, so a resume restores it.
+        """
         streak_for = getattr(self._schedule, "failure_streak", None)
         if streak_for is None:
             return

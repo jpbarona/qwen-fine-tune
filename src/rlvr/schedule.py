@@ -11,6 +11,8 @@ Two rules move a prompt between the pools after a step:
     promote   a parked group with at least `promotion_bar` passing rollouts
     demote    a train prompt after `demote_after` groups with no passing rollout
 
+A passing train group does not clear the zero-pass count. A demotion resets it.
+
 `Spread` is the first policy. It runs a parked block and a train block every
 step. Each pool has a queue of prompt ids, saved after each step. A queue covers
 every prompt once before any prompt repeats, and a resume continues the same
@@ -64,9 +66,9 @@ __all__ = [
 #: the pool module's promotion bar, so the screen and the schedule cannot drift.
 #: (Imported above and re-exported here.)
 
-#: A train prompt is demoted after ten consecutive groups with no passing
-#: rollout.
-DEFAULT_DEMOTE_AFTER = 10
+#: A train prompt is demoted after three groups with no passing rollout. A
+#: passing group does not clear the count.
+DEFAULT_DEMOTE_AFTER = 3
 
 #: The gap between sweeps is this many times the sweep length. Three is the
 #: default, so a cycle spends about a quarter of its steps on parked work.
@@ -215,9 +217,10 @@ def _observe_outcome(
     """Apply the pool rules to one group and return its update, if any.
 
     A parked group promotes at `promotion_bar` passing rollouts. A train group
-    with no passing rollout extends its full-failure streak, and `demote_after`
-    consecutive groups demote it. A train group with any passing rollout clears
-    the streak. A parked group never changes a train streak.
+    with no passing rollout adds one to its count, and a count of
+    `demote_after` demotes it. A passing train group leaves the count alone. A
+    demotion resets the count to zero. A parked group never changes a train
+    count.
     """
     if outcome.parked:
         if outcome.passed >= promotion_bar:
@@ -232,10 +235,9 @@ def _observe_outcome(
             )
         return None
 
+    streak = failure_streak.get(outcome.prompt_id, 0)
     if outcome.passed == 0:
-        streak = failure_streak.get(outcome.prompt_id, 0) + 1
-    else:
-        streak = 0
+        streak += 1
 
     update: LabelUpdate | None = None
     if streak >= demote_after:
@@ -253,7 +255,7 @@ def _observe_outcome(
 
 
 def _saved_streak(failure_streak: dict[str, int], prompt_id: str) -> int:
-    """The current full-failure streak for one prompt."""
+    """The current zero-pass count for one prompt."""
     return failure_streak.get(prompt_id, 0)
 
 
@@ -370,9 +372,9 @@ class Spread:
         """Apply the promotion and demotion rules to one step's groups.
 
         A parked group promotes at `promotion_bar` passing rollouts. A train
-        group with no passing rollout extends that prompt's streak, and ten
-        consecutive groups demote it. A train group with any passing rollout
-        clears the streak. Parked groups never change a train streak.
+        group with no passing rollout adds one to that prompt's count, and
+        `demote_after` counts demote it. A passing train group leaves the count
+        alone. Parked groups never change a train count.
 
         A promoted id leaves the parked queue and joins the back of the train
         queue. A demoted id leaves the train queue and joins the back of the
@@ -432,7 +434,7 @@ class Spread:
         self._queues_built = True
 
     def failure_streak(self, prompt_id: str) -> int:
-        """The current full-failure streak for a train prompt."""
+        """The current zero-pass count for a train prompt."""
         return _saved_streak(self._failure_streak, prompt_id)
 
     def restore_streak(self, prompt_id: str, streak: int) -> None:
@@ -738,7 +740,7 @@ class Sweep:
         self._position = position
 
     def failure_streak(self, prompt_id: str) -> int:
-        """The current full-failure streak for a train prompt."""
+        """The current zero-pass count for a train prompt."""
         return _saved_streak(self._failure_streak, prompt_id)
 
     def restore_streak(self, prompt_id: str, streak: int) -> None:

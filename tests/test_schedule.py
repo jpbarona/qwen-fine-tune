@@ -311,12 +311,13 @@ def test_a_parked_full_failure_does_not_demote() -> None:
         assert policy.observe(step, [outcome]) == ()
 
 
-def test_demotion_needs_ten_consecutive_full_failure_groups() -> None:
+def test_demotion_needs_three_zero_pass_groups() -> None:
     policy = spread()
     outcome = GroupOutcome(prompt_id="p", passed=0, samples=16, parked=False)
 
     for step in range(1, DEFAULT_DEMOTE_AFTER):
         assert policy.observe(step, [outcome]) == ()
+    assert DEFAULT_DEMOTE_AFTER == 3
     assert policy.failure_streak("p") == DEFAULT_DEMOTE_AFTER - 1
 
     updates = policy.observe(DEFAULT_DEMOTE_AFTER, [outcome])
@@ -325,38 +326,39 @@ def test_demotion_needs_ten_consecutive_full_failure_groups() -> None:
     assert policy.failure_streak("p") == 0
 
 
-def test_one_passing_rollout_resets_the_failure_streak() -> None:
+def test_a_pass_does_not_clear_the_zero_pass_count() -> None:
     policy = spread()
     failing = GroupOutcome(prompt_id="p", passed=0, samples=16, parked=False)
     passing = GroupOutcome(prompt_id="p", passed=1, samples=16, parked=False)
 
-    for step in range(1, 10):
-        policy.observe(step, [failing])
-    policy.observe(10, [passing])
+    assert policy.observe(1, [failing]) == ()
+    assert policy.observe(2, [failing]) == ()
+    assert policy.observe(3, [passing]) == ()
+    assert policy.failure_streak("p") == 2
+
+    updates = policy.observe(4, [failing])
+    assert [update.reason for update in updates] == ["demoted"]
     assert policy.failure_streak("p") == 0
 
-    for step in range(11, 20):
-        assert policy.observe(step, [failing]) == ()
 
-
-def test_separate_prompts_keep_separate_streaks() -> None:
-    policy = spread()
+def test_separate_prompts_keep_separate_counts() -> None:
+    policy = spread(demote_after=10)
     first = GroupOutcome(prompt_id="a", passed=0, samples=16, parked=False)
     second = GroupOutcome(prompt_id="b", passed=0, samples=16, parked=False)
 
-    for step in range(1, 10):
+    for step in range(1, 4):
         policy.observe(step, [first])
-    assert policy.failure_streak("a") == 9
+    assert policy.failure_streak("a") == 3
     assert policy.failure_streak("b") == 0
 
-    policy.observe(10, [first, second])
-    assert policy.failure_streak("a") == 0
+    policy.observe(4, [first, second])
+    assert policy.failure_streak("a") == 4
     assert policy.failure_streak("b") == 1
 
 
 def test_the_defaults_match_the_binding_values() -> None:
     assert DEFAULT_PROMOTION_BAR == 2
-    assert DEFAULT_DEMOTE_AFTER == 10
+    assert DEFAULT_DEMOTE_AFTER == 3
 
 
 def test_a_label_update_dict_has_the_run_file_fields() -> None:
