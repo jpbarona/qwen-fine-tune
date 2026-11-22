@@ -1081,14 +1081,14 @@ def test_a_fake_run_uses_the_measured_pool_and_the_spread_schedule(
     assert meta["pool_policy"] == "spread"
     assert meta["screen_rows"] == directory.as_posix()
     assert metric["pool_policy"] == "spread"
-    assert metric["train_prompts"] == 3
-    assert metric["parked_prompts"] == 1
+    assert metric["train_prompts"] == 1
+    assert metric["parked_prompts"] == 3
 
 
-def test_a_small_parked_pool_warns_about_unequal_compute(tmp_path) -> None:
+def test_a_small_parked_pool_warns_about_the_short_block(tmp_path) -> None:
     from dataclasses import replace
 
-    from rlvr.cli import spread_parked_warning
+    from rlvr.cli import spread_share_warning
     from rlvr.pools import Pools
 
     config = replace(
@@ -1104,20 +1104,20 @@ def test_a_small_parked_pool_warns_about_unequal_compute(tmp_path) -> None:
         parked=tuple(f"p{index}" for index in range(10)),
         samples=16,
     )
-    message = spread_parked_warning(config, small)
+    message = spread_share_warning(config, small)
 
     assert message is not None
-    assert "10 parked prompts" in message
-    assert "slice of 1 prompts" in message
-    assert "cap of 9" in message
+    assert "holds 10 prompts" in message
+    assert "block of 19" in message
+    assert "19/38" in message
 
-    large = Pools(
+    enough = Pools(
         train=("t",),
         retired=(),
-        parked=tuple(f"p{index}" for index in range(321)),
+        parked=tuple(f"p{index}" for index in range(19)),
         samples=16,
     )
-    assert spread_parked_warning(config, large) is None
+    assert spread_share_warning(config, enough) is None
 
 
 def test_a_partial_screen_fails_loudly(tmp_path) -> None:

@@ -139,8 +139,8 @@ GPU, network, or Docker. It exercises the same writer, summary, and resume path.
 
 ## The two parked-pool arms
 
-The study compares two ways to re-screen parked prompts at equal compute.
-`configs/lfm-spread.toml` joins a parked slice to every step.
+The study compares two ways to re-screen parked prompts.
+`configs/lfm-spread.toml` joins a parked block to every step.
 `configs/lfm-sweep.toml` covers the parked pool in consecutive steps, then
 trains for a gap. The two configs are identical except the policy keys. Both
 run 100 steps from base weights at group size 16, a 304 sequence rollout budget,
@@ -238,8 +238,9 @@ The four measurements are read from those files:
    `eval.json`. The base score on the same cohort is 0.51.
 
 A sweep run spends part of its 100 step budget on parked steps. Its train
-passes are therefore fewer than a spread run at the same step count, even though
-both spend the same share of rollouts on parked work.
+passes are therefore fewer than a spread run at the same step count. The spread
+run keeps a train block in every step, so its parked share is the block size
+over the step size.
 
 ## Real training
 
@@ -483,13 +484,12 @@ prompt selected for a low pass count regresses upward on the next measurement.
 A parked prompt is promoted at two passes of sixteen or more.
 
 Two schedules put parked prompts back into training. The spread policy joins a
-slice to every step. The sweep policy covers the whole parked pool in
+parked block to every step. The block is half of the step, with a minimum of
+four prompts, and it is never the whole step. So a step of 19 prompts runs 9
+parked and 10 train. The sweep policy covers the whole parked pool in
 consecutive steps, then trains for a gap. Both use the same rollout budget per
-step. The sweep spends about a quarter of its steps on parked work. The spread
-slice is capped at a quarter of the step, and it reaches that cap only when the
-parked pool holds 321 prompts or more. Below that the two arms are not equal
-compute, and the run prints a warning with the parked count. The arm runbook
-above runs one arm per policy.
+step. The run prints a warning when the parked pool holds fewer prompts than
+the planned parked block. The arm runbook above runs one arm per policy.
 
 There is one pool and no stage ladder. Every record keeps the `stage` field at
 `unstaged` so older readers still find it. Older runs also wrote a per-stage

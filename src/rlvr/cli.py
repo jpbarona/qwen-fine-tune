@@ -91,6 +91,7 @@ from .resume import (
     validate_resume,
 )
 from .runs import RunStore
+from .schedule import Spread
 from .screening import DEFAULT_SCREEN_SAMPLES, ROWS_NAME, ScreenError, ScreenStore
 from .screening import screen as run_screen
 from .stages import BANDS
@@ -109,7 +110,7 @@ __all__ = [
     "load_synthetic_rows",
     "main",
     "screen_command",
-    "spread_parked_warning",
+    "spread_share_warning",
     "training_steps",
 ]
 
@@ -466,30 +467,26 @@ def build_pools(config: Config, prompts: Sequence[Prompt]) -> Pools | None:
     return pools
 
 
-def spread_parked_warning(config: Config, pools: Pools | None) -> str | None:
-    """A warning when the spread slice is below the quarter-budget cap.
+def spread_share_warning(config: Config, pools: Pools | None) -> str | None:
+    """A warning when the parked pool cannot fill the planned parked block.
 
-    The two arms only have equal compute when the spread slice reaches the cap.
-    That needs 321 parked prompts at a refresh interval of 40 and a cap of 9.
-    Below that the spread arm spends less of its step on parked work than the
-    sweep arm does on average. This is a warning, not a failure.
+    The spread policy plans half of the step for parked prompts, with a minimum
+    of four and at most one fewer than the step. A smaller parked pool leaves
+    the block short, so the step spends less on parked work than planned. This
+    is a warning, not a failure.
     """
     if config.pool_policy != "spread" or pools is None:
         return None
-    parked = len(pools.parked)
-    if parked == 0:
-        return None
     group = config.generations_per_prompt
-    step_prompts = max(1, config.rollouts_per_step // group)
-    cap = config.rollouts_per_step // 4 // group
-    slice_size = min(cap, -(-parked // config.refresh_steps))
-    if slice_size >= cap:
+    prompts_per_step = max(1, config.rollouts_per_step // group)
+    planned = Spread(prompts_per_step=prompts_per_step).parked_count()
+    parked = len(pools.parked)
+    if parked >= planned:
         return None
     return (
-        f"rlvr: warning: {parked} parked prompts give a spread slice of "
-        f"{slice_size} prompts, below the cap of {cap}. The planned parked share "
-        f"is {slice_size}/{step_prompts}, so the two arms do not have equal "
-        "compute."
+        f"rlvr: warning: the parked pool holds {parked} prompts, below the "
+        f"planned parked block of {planned}. The planned parked share is "
+        f"{planned}/{prompts_per_step} of each step."
     )
 
 
@@ -642,7 +639,7 @@ def run_command(args: argparse.Namespace) -> int:
     # prompts. Without them the run keeps the placeholder path: every prompt is
     # train and the run record says the pool was not measured.
     pools = build_pools(config, train_prompts)
-    warning = spread_parked_warning(config, pools)
+    warning = spread_share_warning(config, pools)
     if warning is not None:
         print(warning, file=sys.stderr)
     labels_path = None if args.fake else DEFAULT_LABELS_PATH

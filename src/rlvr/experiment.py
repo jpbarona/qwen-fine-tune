@@ -736,20 +736,17 @@ class Experiment:
 
         A schedule needs a measured pool, because parked prompts come from the
         screen. The prompt count is the rollout budget divided by the group
-        size. The spread parked cap is a quarter of that budget, divided by the
-        group size. The sweep gap is the configured multiple of its own length.
+        size. The spread parked block is half of that count. The sweep gap is
+        the configured multiple of its own length.
         """
         policy = self.config.pool_policy
         if policy is None or self.pools is None:
             return None
         group = self.config.generations_per_prompt
         prompts_per_step = max(1, self.config.rollouts_per_step // group)
-        cap = self.config.rollouts_per_step // 4 // group
         if policy == "spread":
             return Spread(
                 prompts_per_step=prompts_per_step,
-                cap=cap,
-                refresh_steps=self.config.refresh_steps,
                 seed=self.config.seed,
                 promotion_bar=DEFAULT_PROMOTION_BAR,
             )

@@ -11,15 +11,13 @@ Two rules move a prompt between the pools after a step:
     promote   a parked group with at least `promotion_bar` passing rollouts
     demote    a train prompt after `demote_after` groups with no passing rollout
 
-The rotation is deterministic. The parked order comes from the run seed and the
-slice position comes from the step number, so a resume at step N plans the same
-slice as the original run at step N. No process state, clock or hash order is
-an input.
+`Spread` is the first policy. It runs a parked block and a train block every
+step. Each pool has a queue of prompt ids, saved after each step. A queue covers
+every prompt once before any prompt repeats, and a resume continues the same
+order. No process state, clock or hash order is an input.
 
-`Spread` is the first policy. It takes a fixed slice of parked prompts every
-step. The slice is the smaller of the cap and the count that visits the whole
-parked pool once every `refresh_steps` steps. Train prompts fill the rest of
-the step.
+A prompt that changes pool leaves its queue and joins the back of the other
+queue. So the new member waits one tour of its new pool.
 
 `Sweep` is the second policy. It covers the whole parked pool in `m` consecutive
 all-parked steps, then trains for `gap_ratio * m` steps with no parked prompts.
@@ -36,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence
 
 from .pools import DEFAULT_PROMOTION_BAR
+from .queues import PromptQueue
 
 if TYPE_CHECKING:  # pragma: no cover - import used only by type checkers
     from .experiment import Prompt
@@ -43,7 +42,6 @@ if TYPE_CHECKING:  # pragma: no cover - import used only by type checkers
 __all__ = [
     "DEFAULT_DEMOTE_AFTER",
     "DEFAULT_PROMOTION_BAR",
-    "DEFAULT_REFRESH_STEPS",
     "DEFAULT_SWEEP_GAP_RATIO",
     "MAX_SWEEP_GAP_RATIO",
     "MIN_SWEEP_GAP_RATIO",
@@ -66,9 +64,6 @@ __all__ = [
 #: A train prompt is demoted after ten consecutive groups with no passing
 #: rollout.
 DEFAULT_DEMOTE_AFTER = 10
-
-#: The parked pool is meant to be visited once per this many steps.
-DEFAULT_REFRESH_STEPS = 40
 
 #: The gap between sweeps is this many times the sweep length. Three is the
 #: default, so a cycle spends about a quarter of its steps on parked work.
@@ -260,17 +255,21 @@ def _restore_saved_streak(
 
 @dataclass
 class Spread:
-    """A fixed parked slice every step, in a seeded rotation.
+    """A parked block and a train block every step, in saved queues.
 
-    `prompts_per_step` is the full step size. `cap` is the largest parked
-    slice. `refresh_steps` is the target number of steps to visit the whole
-    parked pool once. The slice is the smaller of the cap and
-    `ceil(parked_count / refresh_steps)`.
+    `prompts_per_step` is the full step size. The parked block is half of it,
+    with a minimum of four prompts, and it is never the whole step. So a step of
+    19 prompts runs 9 parked and 10 train. A step of one prompt runs no parked
+    prompts, because the rule keeps at least one train prompt.
+
+    Each pool has a queue of prompt ids. `plan` takes the parked block from the
+    parked queue and the rest of the step from the train queue. A queue covers
+    every prompt once before any prompt repeats. A prompt that changes pool
+    leaves its queue and joins the back of the other queue. The queues are
+    saved after each step and restored on a resume.
     """
 
     prompts_per_step: int
-    cap: int
-    refresh_steps: int
     seed: int = 0
     promotion_bar: int = DEFAULT_PROMOTION_BAR
     demote_after: int = DEFAULT_DEMOTE_AFTER
@@ -278,33 +277,62 @@ class Spread:
     _failure_streak: dict[str, int] = field(
         default_factory=dict, init=False, repr=False
     )
+    _parked_queue: PromptQueue = field(
+        default_factory=PromptQueue, init=False, repr=False
+    )
+    _train_queue: PromptQueue = field(
+        default_factory=PromptQueue, init=False, repr=False
+    )
+    _queues_built: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         _positive_int("prompts_per_step", self.prompts_per_step)
-        _positive_int("refresh_steps", self.refresh_steps)
         _positive_int("promotion_bar", self.promotion_bar)
         _positive_int("demote_after", self.demote_after)
-        if isinstance(self.cap, bool) or not isinstance(self.cap, int) or self.cap < 0:
-            raise ValueError(f"cap must be an integer of at least 0, got {self.cap!r}")
-        if self.cap > self.prompts_per_step:
-            raise ValueError(
-                f"cap must not exceed prompts_per_step, got {self.cap} and "
-                f"{self.prompts_per_step}"
-            )
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise ValueError(f"seed must be an integer, got {self.seed!r}")
 
-    def parked_count(self, parked: int) -> int:
-        """The parked slice for a pool of `parked` prompts."""
-        if parked < 0:
-            raise ValueError(f"parked count must not be negative, got {parked}")
-        if parked == 0:
-            return 0
-        return min(self.cap, math.ceil(parked / self.refresh_steps))
+    def parked_count(self) -> int:
+        """The planned parked block for one step.
 
-    def planned_parked_share(self, parked: int) -> float:
-        """The share of one step's prompts that the parked slice takes."""
-        return self.parked_count(parked) / self.prompts_per_step
+        Half the step, with a minimum of four, capped at one less than the step
+        so at least one train prompt remains.
+        """
+        half = max(4, self.prompts_per_step // 2)
+        return min(half, self.prompts_per_step - 1)
+
+    def planned_parked_share(self, parked: int | None = None) -> float:
+        """The share of one step's prompts that the parked block takes.
+
+        `parked` keeps the call shape shared with `Sweep`. The spread share is a
+        feature of the step size, not of the parked pool size.
+        """
+        return self.parked_count() / self.prompts_per_step
+
+    def _ensure_queues(
+        self, train_ids: Sequence[str], parked_ids: Sequence[str]
+    ) -> None:
+        """Build both queues from the pools on the first step."""
+        if self._queues_built:
+            return
+        self._parked_queue.build(parked_ids, self.seed)
+        self._train_queue.build(train_ids, self.seed)
+        self._queues_built = True
+
+    @staticmethod
+    def _keep_and_fill(queue: PromptQueue, pool_ids: Sequence[str]) -> None:
+        """Drop ids that left the pool and append ids that joined it.
+
+        This runs every step against the live pool. A crash between a label row
+        and a queues row leaves the saved queue one move behind. The label
+        replay moves the pool, so the next plan must repair the queue from the
+        pool. A new id joins at the back, as a live move would put it.
+        """
+        queue.keep(pool_ids)
+        held = set(queue.as_list())
+        for prompt_id in sorted(set(pool_ids)):
+            if prompt_id not in held:
+                queue.append(prompt_id)
 
     def plan(
         self,
@@ -312,43 +340,26 @@ class Spread:
         train_pool: Sequence["Prompt"],
         parked_pool: Sequence["Prompt"],
     ) -> StepPlan:
-        """The train prompts and parked slice for one step.
-
-        The parked order is a fixed shuffle by `seed`. The window moves by the
-        slice size each step, so the slice position is `(step - 1) * k` modulo
-        the parked count. That position depends only on the step number, not on
-        how many steps this process has run.
-        """
+        """The train and parked blocks for one step, from the queues."""
         _positive_int("step", step)
-        parked = sorted(parked_pool, key=_prompt_id)
-        train = sorted(train_pool, key=_prompt_id)
+        parked_by_id = {_prompt_id(prompt): prompt for prompt in parked_pool}
+        train_by_id = {_prompt_id(prompt): prompt for prompt in train_pool}
 
-        slice_size = self.parked_count(len(parked))
-        train_size = self.prompts_per_step - slice_size
+        self._ensure_queues(
+            list(train_by_id),
+            list(parked_by_id),
+        )
+        self._keep_and_fill(self._parked_queue, list(parked_by_id))
+        self._keep_and_fill(self._train_queue, list(train_by_id))
 
-        order = [_prompt_id(prompt) for prompt in parked]
-        random.Random(self.seed).shuffle(order)
-        by_id = {_prompt_id(prompt): prompt for prompt in parked}
+        parked_block = self._parked_queue.take(self.parked_count())
+        train_size = self.prompts_per_step - len(parked_block)
+        train_block = self._train_queue.take(train_size)
 
-        if slice_size:
-            start = ((step - 1) * slice_size) % len(order)
-            parked_slice = tuple(
-                by_id[order[(start + index) % len(order)]]
-                for index in range(slice_size)
-            )
-        else:
-            parked_slice = ()
-
-        if train:
-            train_start = ((step - 1) * train_size) % len(train)
-            train_block = tuple(
-                train[(train_start + index) % len(train)]
-                for index in range(train_size)
-            )
-        else:
-            train_block = ()
-
-        return StepPlan(train=train_block, parked=parked_slice)
+        return StepPlan(
+            train=tuple(train_by_id[prompt_id] for prompt_id in train_block),
+            parked=tuple(parked_by_id[prompt_id] for prompt_id in parked_block),
+        )
 
     def observe(
         self, step: int, outcomes: Sequence[GroupOutcome]
@@ -359,6 +370,10 @@ class Spread:
         group with no passing rollout extends that prompt's streak, and ten
         consecutive groups demote it. A train group with any passing rollout
         clears the streak. Parked groups never change a train streak.
+
+        A promoted id leaves the parked queue and joins the back of the train
+        queue. A demoted id leaves the train queue and joins the back of the
+        parked queue.
         """
         _positive_int("step", step)
         updates: list[LabelUpdate] = []
@@ -373,8 +388,45 @@ class Spread:
             )
             if update is not None:
                 updates.append(update)
+                self._move_in_queues(update)
 
         return tuple(updates)
+
+    def _move_in_queues(self, update: LabelUpdate) -> None:
+        """Move one changed id to the back of its new queue."""
+        if not self._queues_built:
+            return
+        if update.label == TRAIN_LABEL:
+            self._parked_queue.remove(update.prompt_id)
+            self._train_queue.append(update.prompt_id)
+        else:
+            self._train_queue.remove(update.prompt_id)
+            self._parked_queue.append(update.prompt_id)
+
+    def state_row(self, step: int) -> dict[str, Any]:
+        """The saved queues after this step, for the label file."""
+        return {
+            "step": step,
+            "parked_queue": self._parked_queue.as_list(),
+            "train_queue": self._train_queue.as_list(),
+        }
+
+    def restore_state(
+        self, parked_queue: PromptQueue, train_queue: PromptQueue
+    ) -> None:
+        """Set both queues from a saved `queues` row.
+
+        The queues arrive reconciled with the current pools. The next plan
+        reconciles them again, because a label row can follow the queues row and
+        move a prompt after the restore.
+        """
+        if not isinstance(parked_queue, PromptQueue) or not isinstance(
+            train_queue, PromptQueue
+        ):
+            raise TypeError("restore_state needs two PromptQueue objects")
+        self._parked_queue = parked_queue
+        self._train_queue = train_queue
+        self._queues_built = True
 
     def failure_streak(self, prompt_id: str) -> int:
         """The current full-failure streak for a train prompt."""

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from rlvr.experiment import Prompt
+from rlvr.queues import queues_from_row, restore_queue
 from rlvr.schedule import (
     DEFAULT_DEMOTE_AFTER,
     DEFAULT_PROMOTION_BAR,
@@ -19,8 +18,6 @@ from rlvr.schedule import (
 )
 
 STEP = 38
-CAP = 9
-REFRESH = 40
 
 
 def prompts(prefix: str, count: int) -> list[Prompt]:
@@ -31,116 +28,231 @@ def prompts(prefix: str, count: int) -> list[Prompt]:
 
 
 def spread(**overrides) -> Spread:
-    values = {
-        "prompts_per_step": STEP,
-        "cap": CAP,
-        "refresh_steps": REFRESH,
-        "seed": 11,
-    }
+    values = {"prompts_per_step": 19, "seed": 11}
     values.update(overrides)
     return Spread(**values)
 
 
 @pytest.mark.parametrize(
-    "parked_count, expected_slice",
+    "prompts_per_step, expected",
     [
-        (0, 0),
-        (9, 1),
-        (300, 8),
-        (1000, 9),
+        (1, 0),
+        (2, 1),
+        (5, 4),
+        (8, 4),
+        (10, 5),
+        (19, 9),
+        (38, 19),
     ],
 )
-def test_the_parked_slice_is_the_cap_or_the_refresh_count(
-    parked_count: int, expected_slice: int
+def test_the_parked_block_is_half_the_step_with_a_minimum_of_four(
+    prompts_per_step: int, expected: int
 ) -> None:
+    policy = Spread(prompts_per_step=prompts_per_step)
+
+    assert policy.parked_count() == expected
+    assert policy.parked_count() <= prompts_per_step - 1
+
+
+def test_a_step_of_nineteen_prompts_has_nine_parked_and_ten_train() -> None:
     policy = spread()
-    plan = policy.plan(
-        1,
-        prompts("train", 50),
-        prompts("parked", parked_count),
-    )
+    plan = policy.plan(1, prompts("train", 40), prompts("parked", 40))
 
-    expected = min(CAP, math.ceil(parked_count / REFRESH))
-    assert expected == expected_slice
-    assert len(plan.parked) == expected
-    assert len(plan.train) == STEP - expected
-    assert len(plan) == STEP
+    assert len(plan.parked) == 9
+    assert len(plan.train) == 10
+    assert len(plan) == 19
 
 
-def test_the_cap_binds_when_the_refresh_count_is_larger() -> None:
-    policy = spread(cap=3)
-    plan = policy.plan(1, prompts("train", 50), prompts("parked", 1000))
-
-    assert len(plan.parked) == 3
+def test_the_planned_share_is_the_parked_block_over_the_step() -> None:
+    assert spread().planned_parked_share() == pytest.approx(9 / 19)
 
 
-def test_a_parked_pool_smaller_than_one_step_still_takes_one_prompt() -> None:
+@pytest.mark.parametrize(
+    "prompts_per_step, parked, train",
+    [(5, 4, 1), (2, 1, 1), (1, 0, 1)],
+)
+def test_a_small_step_keeps_one_train_prompt(
+    prompts_per_step: int, parked: int, train: int
+) -> None:
+    policy = Spread(prompts_per_step=prompts_per_step)
+
+    plan = policy.plan(1, prompts("train", 5), prompts("parked", 5))
+
+    assert len(plan.parked) == parked
+    assert len(plan.train) == train
+
+
+def test_the_parked_queue_shows_every_prompt_before_a_repeat() -> None:
     policy = spread()
-    plan = policy.plan(1, prompts("train", 10), prompts("parked", 1))
+    parked = prompts("parked", 18)
 
-    assert len(plan.parked) == 1
-    assert len(plan.train) == STEP - 1
+    seen: list[str] = []
+    for step in range(1, 3):
+        seen.extend(
+            prompt.prompt_id for prompt in policy.plan(step, [], parked).parked
+        )
+
+    assert len(seen) == 18
+    assert len(set(seen)) == 18
+    assert set(seen) == {prompt.prompt_id for prompt in parked}
 
 
-def test_train_prompts_cycle_when_the_pool_is_smaller_than_the_step() -> None:
-    policy = spread(prompts_per_step=5, cap=1, refresh_steps=1)
-    plan = policy.plan(1, prompts("train", 2), prompts("parked", 3))
+def test_a_parked_pool_smaller_than_the_block_does_not_repeat() -> None:
+    policy = spread()
+    parked = prompts("parked", 3)
 
-    assert [prompt.prompt_id for prompt in plan.train] == [
-        "train-0000",
-        "train-0001",
-        "train-0000",
-        "train-0001",
-    ]
-    assert len(plan.parked) == 1
+    block = policy.plan(1, prompts("train", 10), parked).parked
+
+    assert len(block) == 3
+    assert len({prompt.prompt_id for prompt in block}) == 3
+
+
+def test_the_train_queue_shows_every_prompt_before_a_repeat() -> None:
+    policy = spread()
+    train = prompts("train", 20)
+    parked = prompts("parked", 9)
+
+    seen: list[str] = []
+    for step in range(1, 3):
+        seen.extend(
+            prompt.prompt_id for prompt in policy.plan(step, train, parked).train
+        )
+
+    assert len(seen) == 20
+    assert len(set(seen)) == 20
+    assert set(seen) == {prompt.prompt_id for prompt in train}
 
 
 def test_an_empty_parked_pool_leaves_the_whole_step_to_train() -> None:
     policy = spread()
-    plan = policy.plan(7, prompts("train", 50), [])
+    plan = policy.plan(1, prompts("train", 40), [])
 
     assert plan.parked == ()
-    assert len(plan.train) == STEP
+    assert len(plan.train) == 19
 
 
-def test_the_rotation_visits_every_parked_prompt_once_per_cycle() -> None:
-    policy = spread(prompts_per_step=5, cap=2, refresh_steps=9)
-    parked = prompts("parked", 9)
+def test_a_promotion_leaves_the_parked_queue_and_joins_the_back_of_train() -> None:
+    policy = spread(prompts_per_step=5, seed=1)
+    train = prompts("train", 3)
+    parked = prompts("parked", 6)
 
-    seen: list[str] = []
-    for step in range(1, 10):
-        seen.extend(prompt.prompt_id for prompt in policy.plan(step, [], parked).parked)
+    plan = policy.plan(1, train, parked)
+    promoted = plan.parked[0].prompt_id
 
-    assert sorted(seen) == [prompt.prompt_id for prompt in parked]
+    updates = policy.observe(
+        1, [GroupOutcome(prompt_id=promoted, passed=2, samples=16, parked=True)]
+    )
+    after = policy.state_row(1)
+
+    assert [update.prompt_id for update in updates] == [promoted]
+    assert promoted not in after["parked_queue"]
+    assert after["train_queue"][-1] == promoted
 
 
-def test_the_rotation_is_stable_across_a_resume() -> None:
-    parked = prompts("parked", 300)
-    train = prompts("train", 60)
+def test_a_demotion_leaves_the_train_queue_and_joins_the_back_of_parked() -> None:
+    policy = spread(prompts_per_step=5, seed=1, demote_after=2)
+    train = prompts("train", 3)
+    parked = prompts("parked", 6)
 
-    fresh = spread(seed=5)
+    plan = policy.plan(1, train, parked)
+    demoted = plan.train[0].prompt_id
+    failing = GroupOutcome(prompt_id=demoted, passed=0, samples=16, parked=False)
+
+    assert policy.observe(1, [failing]) == ()
+    updates = policy.observe(2, [failing])
+    after = policy.state_row(2)
+
+    assert [update.reason for update in updates] == ["demoted"]
+    assert demoted not in after["train_queue"]
+    assert after["parked_queue"][-1] == demoted
+
+
+def test_a_resume_continues_the_same_queue_order() -> None:
+    train = prompts("train", 40)
+    parked = prompts("parked", 40)
     original = spread(seed=5)
-    for step in range(1, 42):
+
+    for step in range(1, 4):
         original.plan(step, train, parked)
+    saved = queues_from_row(original.state_row(3))
+    assert saved is not None
+    parked_ids, train_ids = saved
 
-    assert original.plan(41, train, parked) == fresh.plan(41, train, parked)
+    resumed = spread(seed=5)
+    resumed.restore_state(
+        restore_queue(parked_ids, (prompt.prompt_id for prompt in parked)),
+        restore_queue(train_ids, (prompt.prompt_id for prompt in train)),
+    )
+
+    assert resumed.plan(4, train, parked) == original.plan(4, train, parked)
 
 
-def test_the_seed_changes_the_rotation() -> None:
+def test_a_queue_repairs_a_move_that_followed_the_saved_row() -> None:
+    train = prompts("train", 3)
+    parked = prompts("parked", 6)
+    original = spread(prompts_per_step=5, seed=1)
+
+    original.plan(1, train, parked)
+    saved = queues_from_row(original.state_row(1))
+    assert saved is not None
+    parked_ids, train_ids = saved
+    promoted = parked_ids[0]
+
+    resumed = spread(prompts_per_step=5, seed=1)
+    resumed.restore_state(
+        restore_queue(parked_ids, (prompt.prompt_id for prompt in parked)),
+        restore_queue(train_ids, (prompt.prompt_id for prompt in train)),
+    )
+    # A label row after the queues row moved the prompt in the live pool, but
+    # the restored queue still holds the old order.
+    moved = next(prompt for prompt in parked if prompt.prompt_id == promoted)
+    new_train = train + [moved]
+    new_parked = [prompt for prompt in parked if prompt.prompt_id != promoted]
+
+    resumed.plan(2, new_train, new_parked)
+    row = resumed.state_row(2)
+
+    assert promoted not in row["parked_queue"]
+    assert promoted in row["train_queue"]
+
+
+def test_the_state_row_saves_both_queues() -> None:
+    policy = spread()
+    train = prompts("train", 12)
+    parked = prompts("parked", 12)
+
+    policy.plan(1, train, parked)
+    row = policy.state_row(1)
+
+    assert row["step"] == 1
+    assert sorted(row["parked_queue"]) == [prompt.prompt_id for prompt in parked]
+    assert sorted(row["train_queue"]) == [prompt.prompt_id for prompt in train]
+    assert queues_from_row(row) is not None
+
+
+def test_restore_state_needs_two_queues() -> None:
+    with pytest.raises(TypeError, match="PromptQueue"):
+        spread().restore_state([], [])
+
+
+def test_the_seed_changes_the_queue_order() -> None:
     parked = prompts("parked", 100)
-    first = spread(seed=1).plan(1, [], parked)
-    second = spread(seed=2).plan(1, [], parked)
+    train = prompts("train", 100)
+
+    first = spread(seed=1).plan(1, train, parked)
+    second = spread(seed=2).plan(1, train, parked)
 
     assert first != second
 
 
 def test_the_prompt_order_does_not_change_the_plan() -> None:
     parked = prompts("parked", 40)
-    train = prompts("train", 10)
-    policy = spread(seed=5)
+    train = prompts("train", 40)
 
-    forward = policy.plan(9, train, parked)
-    backward = policy.plan(9, list(reversed(train)), list(reversed(parked)))
+    forward = spread(seed=5).plan(1, train, parked)
+    backward = spread(seed=5).plan(
+        1, list(reversed(train)), list(reversed(parked))
+    )
 
     assert forward == backward
 
@@ -149,11 +261,9 @@ def test_the_prompt_order_does_not_change_the_plan() -> None:
     "field, value",
     [
         ("prompts_per_step", 0),
-        ("refresh_steps", 0),
-        ("cap", -1),
         ("promotion_bar", 0),
         ("demote_after", 0),
-        ("cap", 100),
+        ("seed", False),
     ],
 )
 def test_bad_constructor_values_are_rejected(field: str, value: int) -> None:
@@ -563,30 +673,17 @@ def test_a_gap_step_demotes_a_full_failure_train_prompt() -> None:
     assert [update.reason for update in updates] == ["demoted"]
 
 
-def test_both_policies_spend_the_same_parked_share_within_one_prompt() -> None:
-    # At the binding values the spread cap is nine prompts and the sweep gap is
-    # three sweep lengths. Over one cycle the two shares differ by less than one
-    # prompt's worth of a step.
-    parked_count = 380
-    parked = prompts("parked", parked_count)
-    train = prompts("train", 50)
-    spread = Spread(prompts_per_step=STEP, cap=CAP, refresh_steps=REFRESH, seed=0)
-    sweep_policy = Sweep(prompts_per_step=STEP, gap_ratio=3, seed=0)
+def test_the_spread_share_holds_while_the_parked_pool_fills_the_block() -> None:
+    # At 38 prompts a step the parked block is 19 and the train block is 19.
+    policy = Spread(prompts_per_step=STEP, seed=0)
+    parked = prompts("parked", 100)
+    train = prompts("train", 100)
 
-    cycle = sweep_policy.cycle_length(parked_count)
-    spread_parked = sum(
-        len(spread.plan(step, train, parked).parked) for step in range(1, cycle + 1)
-    )
-    sweep_parked = sum(
-        len(sweep_policy.plan(step, train, parked).parked)
-        for step in range(1, cycle + 1)
-    )
+    plans = [policy.plan(step, train, parked) for step in range(1, 5)]
 
-    spread_share = spread_parked / (cycle * STEP)
-    sweep_share = sweep_parked / (cycle * STEP)
-
-    assert sweep_share == 1 / (1 + 3)
-    assert abs(spread_share - sweep_share) <= 1 / STEP
+    assert [len(plan.parked) for plan in plans] == [19, 19, 19, 19]
+    assert [len(plan.train) for plan in plans] == [19, 19, 19, 19]
+    assert policy.planned_parked_share() == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize(

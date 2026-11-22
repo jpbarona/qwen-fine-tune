@@ -1589,7 +1589,7 @@ def test_a_spread_step_puts_train_and_parked_groups_in_one_update(tmp_path) -> N
         parked=("mbpp-0001",),
         samples=16,
     )
-    schedule = Spread(prompts_per_step=2, cap=1, refresh_steps=1, seed=3)
+    schedule = Spread(prompts_per_step=2, seed=3)
     generator = StubGenerator()
     store = RecordingStore()
 
@@ -1618,7 +1618,7 @@ def test_a_step_row_records_the_counts_and_the_advantage_share(tmp_path) -> None
 
     prompts = make_prompts(2)
     pools = Pools(train=("mbpp-0000", "mbpp-0001"), retired=(), parked=(), samples=16)
-    schedule = Spread(prompts_per_step=2, cap=0, refresh_steps=1, seed=0)
+    schedule = Spread(prompts_per_step=2, seed=0)
     store = RecordingStore()
 
     build(
@@ -1668,7 +1668,7 @@ def test_a_group_with_one_reward_counts_zero_advantage(tmp_path) -> None:
 
     prompts = make_prompts(1)
     pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
-    schedule = Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0)
+    schedule = Spread(prompts_per_step=1, seed=0)
     store = RecordingStore()
 
     build(
@@ -1695,7 +1695,7 @@ def test_promotion_at_two_passes_writes_a_label_and_moves_the_prompt(tmp_path) -
         parked=("mbpp-0001",),
         samples=16,
     )
-    schedule = Spread(prompts_per_step=2, cap=1, refresh_steps=1, seed=0)
+    schedule = Spread(prompts_per_step=2, seed=0)
     generator = TwoPassGenerator("mbpp-0001", group_size=16)
     store = RecordingStore()
 
@@ -1733,7 +1733,7 @@ def test_demotion_after_ten_full_failure_groups(tmp_path) -> None:
 
     prompts = make_prompts(1)
     pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
-    schedule = Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0)
+    schedule = Spread(prompts_per_step=1, seed=0)
     store = RecordingStore()
 
     build(
@@ -1777,7 +1777,7 @@ def test_a_resume_replays_the_label_file(tmp_path) -> None:
         parked=("mbpp-0001",),
         samples=16,
     )
-    schedule = Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0)
+    schedule = Spread(prompts_per_step=2, seed=0)
     generator = StubGenerator()
     store = RecordingStore()
     store.labels = [
@@ -1803,10 +1803,11 @@ def test_a_resume_replays_the_label_file(tmp_path) -> None:
         resume_step=1,
     ).run()
 
-    # Step 2 rotates to the second train prompt. Without the label replay the
-    # second prompt would still be parked and never drawn.
-    assert generator.batch_calls[0] == ("mbpp-0001",)
-    assert len(store.labels) == 1
+    # The replay moved the promoted prompt to the train pool, so the step draws
+    # both train prompts. Without the replay the second prompt is still parked
+    # and never drawn.
+    assert set(generator.batch_calls[0]) == {"mbpp-0000", "mbpp-0001"}
+    assert len(store.labels) == 2
 
 
 def test_the_config_builds_the_spread_schedule(tmp_path) -> None:
@@ -1835,8 +1836,8 @@ def test_the_config_builds_the_spread_schedule(tmp_path) -> None:
         config_text=schedule_config,
     ).run()
 
-    # 16 rollouts at group size 16 is one prompt, and the cap is zero, so the
-    # step is the train prompt alone.
+    # 16 rollouts at group size 16 is one prompt. The parked block keeps one
+    # train prompt, so the block is zero and the step is the train prompt alone.
     assert store.metrics[0]["pool_policy"] == "spread"
     assert store.meta["schedule"] == {
         "policy": "spread",
@@ -1866,7 +1867,7 @@ def test_a_schedule_run_writes_the_label_file_in_the_run_folder(tmp_path) -> Non
         store=store,
         prompts=prompts,
         pools=pools,
-        schedule=Spread(prompts_per_step=2, cap=1, refresh_steps=1, seed=0),
+        schedule=Spread(prompts_per_step=2, seed=0),
         config_text=TWO_STEP_CONFIG,
     ).run()
 
@@ -1874,6 +1875,10 @@ def test_a_schedule_run_writes_the_label_file_in_the_run_folder(tmp_path) -> Non
     assert rows[0]["prompt_id"] == "mbpp-0001"
     assert rows[0]["label"] == "train"
     assert (store.run_dir / "labels.jsonl").is_file()
+    queues = [row for row in rows if "parked_queue" in row]
+    assert len(queues) == 2
+    assert queues[-1]["parked_queue"] == []
+    assert sorted(queues[-1]["train_queue"]) == ["mbpp-0000", "mbpp-0001"]
 
 
 def test_a_resume_continues_the_demotion_streak(tmp_path) -> None:
@@ -1892,7 +1897,7 @@ def test_a_resume_continues_the_demotion_streak(tmp_path) -> None:
         store=store,
         prompts=prompts,
         pools=pools,
-        schedule=Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0),
+        schedule=Spread(prompts_per_step=1, seed=0),
         config_text=TEN_STEP_CONFIG,
         resume_step=9,
     ).run()
@@ -1926,7 +1931,7 @@ def test_a_saved_streak_below_the_bar_does_not_demote(tmp_path) -> None:
         store=store,
         prompts=prompts,
         pools=pools,
-        schedule=Spread(prompts_per_step=1, cap=0, refresh_steps=1, seed=0),
+        schedule=Spread(prompts_per_step=1, seed=0),
         config_text=TEN_STEP_CONFIG,
         resume_step=9,
     ).run()

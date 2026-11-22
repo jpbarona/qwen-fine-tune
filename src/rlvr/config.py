@@ -43,7 +43,6 @@ Optional keys, with the defaults shown:
     [training] prefetch_scoring = true
     [training] seed = 0
     [training] pool_policy = (unset: no schedule, train the pool as it is)
-    [training] refresh_steps = 40
     [training] sweep_gap_ratio = 3
     [training] screen_rows = (unset: no measured pool)
     [training] rollouts_per_step = 608
@@ -86,11 +85,6 @@ schedule, so the run trains the measured train pool and leaves parked prompts
 alone. A set policy requires `screen_rows`, because the parked prompts come
 from the measured screen.
 
-`refresh_steps` is the number of steps the spread policy aims to take to visit
-the whole parked pool. The slice is `ceil(parked / refresh_steps)` prompts,
-capped by the quarter-budget cap. It is a positive integer and defaults to 40.
-Only the spread policy reads it.
-
 `sweep_gap_ratio` is the number of training steps after a sweep, as a multiple
 of the sweep length. It is an integer from 3 to 10 and defaults to 3. The value
 is validated whether or not the sweep policy is selected, so a bad arm config
@@ -101,14 +95,16 @@ are built from it before the run. An absent key means no measured pool, which
 is the placeholder used by unit tests and the fake path.
 
 `rollouts_per_step` is the sequence budget for one step. Prompts per step is
-this value divided by `generations_per_prompt`. The parked cap is a quarter of
-this value divided by the group size. The 608 default comes from the measured
-19 November run, where 608 sequences at group size 8 took 236 seconds.
+this value divided by `generations_per_prompt`. The spread parked block is
+`max(4, prompts_per_step // 2)`, never the whole step. The 608 default comes
+from the measured 19 November run, where 608 sequences at group size 8 took 236
+seconds.
 
 The removed curriculum keys are ignored when a config still sets them, because
-extra keys and tables are kept and ignored. The removed engine keys are the
-exception: `training.engine` and its `training.inference_engine` spelling raise
-an error that names the key, because sampling always uses vLLM now.
+extra keys and tables are kept and ignored. `training.refresh_steps` is ignored
+the same way. The removed engine keys are the exception: `training.engine` and
+its `training.inference_engine` spelling raise an error that names the key,
+because sampling always uses vLLM now.
 
 The judge API key is never part of the config. It comes from the environment
 named by `[judge] api_key_env`, which defaults per provider. The loader keeps
@@ -133,7 +129,6 @@ from .reward import (
 from .budget import DEFAULT_THINKING_BUDGET
 from .model_profiles import LORA_TARGETS
 from .schedule import (
-    DEFAULT_REFRESH_STEPS,
     DEFAULT_SWEEP_GAP_RATIO,
     MAX_SWEEP_GAP_RATIO,
     MIN_SWEEP_GAP_RATIO,
@@ -219,7 +214,6 @@ class Config:
     prefetch_scoring: bool = True
     seed: int = DEFAULT_SEED
     pool_policy: str | None = None
-    refresh_steps: int = DEFAULT_REFRESH_STEPS
     sweep_gap_ratio: int = DEFAULT_SWEEP_GAP_RATIO
     screen_rows: str | None = None
     rollouts_per_step: int = DEFAULT_ROLLOUTS_PER_STEP
@@ -537,9 +531,6 @@ def load_config(path: str | Path) -> Config:
         prefetch_scoring=_optional_bool(raw, "training.prefetch_scoring", True),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
         pool_policy=pool_policy,
-        refresh_steps=_optional_positive_int(
-            raw, "training.refresh_steps", DEFAULT_REFRESH_STEPS
-        ),
         sweep_gap_ratio=_sweep_gap_ratio(
             raw, "training.sweep_gap_ratio", DEFAULT_SWEEP_GAP_RATIO
         ),

@@ -69,8 +69,8 @@ seed = 0
 # The measured screen. The folder holds rows.jsonl and summary.json.
 screen_rows = "screens/mbpp-base/rows.jsonl"
 # This arm sweeps the parked pool. A sweep length is ceil(parked / 19) steps,
-# and the gap after it is 3 times the sweep length. Both arms spend about a
-# quarter of their rollouts on parked work. A pool of 267 parked prompts is
+# and the gap after it is 3 times the sweep length. The spread arm spends half
+# of each step on parked work. A pool of 267 parked prompts is
 # ceil(267 / 19) = 15 steps, followed by a gap of 45 steps.
 pool_policy = "sweep"
 sweep_gap_ratio = 3

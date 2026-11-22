@@ -86,9 +86,6 @@ prefetch_scoring = true
 # all-parked steps, then trains for a gap. Unset means no schedule: the run
 # trains the train pool and leaves parked prompts alone.
 # pool_policy = "spread"
-# Steps the spread policy aims to take to visit the whole parked pool. The
-# slice is ceil(parked / refresh_steps), capped by the quarter-budget cap.
-# refresh_steps = 40
 # Training steps after a sweep, as a multiple of the sweep length. An integer
 # from 3 to 10. Only the sweep policy reads it.
 # sweep_gap_ratio = 3
@@ -96,7 +93,7 @@ prefetch_scoring = true
 # the unmeasured placeholder pool.
 # screen_rows = "screens/latest/rows.jsonl"
 # Sequence budget for one step. Prompts per step is this value divided by the
-# group size, and the parked cap is a quarter of it divided by the group size.
+# group size, and the spread parked block is half of the prompt count.
 rollouts_per_step = 608
 
 [budget]

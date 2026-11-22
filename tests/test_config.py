@@ -599,9 +599,9 @@ def test_a_pool_policy_needs_screen_rows(tmp_path) -> None:
     assert "training.screen_rows" in message
 
 
-def test_refresh_steps_is_read_and_defaults_to_forty(tmp_path) -> None:
-    configured = tmp_path / "configured.toml"
-    configured.write_text(
+def test_an_old_refresh_steps_key_is_kept_and_ignored(tmp_path) -> None:
+    path = tmp_path / "old.toml"
+    path.write_text(
         GOOD
         + "\n[training]\n"
         'pool_policy = "spread"\n'
@@ -609,17 +609,10 @@ def test_refresh_steps_is_read_and_defaults_to_forty(tmp_path) -> None:
         "refresh_steps = 25\n",
         encoding="utf-8",
     )
-    default = tmp_path / "default.toml"
-    default.write_text(
-        GOOD
-        + "\n[training]\n"
-        'pool_policy = "spread"\n'
-        'screen_rows = "rows.jsonl"\n',
-        encoding="utf-8",
-    )
+    config = load_config(path)
 
-    assert load_config(configured).refresh_steps == 25
-    assert load_config(default).refresh_steps == 40
+    assert not hasattr(config, "refresh_steps")
+    assert config.raw["training"]["refresh_steps"] == 25
 
     bad = tmp_path / "bad.toml"
     bad.write_text(
@@ -630,8 +623,8 @@ def test_refresh_steps_is_read_and_defaults_to_forty(tmp_path) -> None:
         "refresh_steps = 0\n",
         encoding="utf-8",
     )
-    with pytest.raises(ConfigError, match="refresh_steps"):
-        load_config(bad)
+
+    assert load_config(bad).raw["training"]["refresh_steps"] == 0
 
 
 @pytest.mark.parametrize(
@@ -674,15 +667,7 @@ def test_the_half_size_step_keeps_the_planned_parked_arithmetic() -> None:
     prompts_per_step = spread.rollouts_per_step // group
 
     assert prompts_per_step == 19
-    assert spread.rollouts_per_step // 4 // group == 4
-    assert (
-        Spread(
-            prompts_per_step=prompts_per_step,
-            cap=4,
-            refresh_steps=spread.refresh_steps,
-        ).parked_count(267)
-        == 4
-    )
+    assert Spread(prompts_per_step=prompts_per_step).parked_count() == 9
     sweep_schedule = Sweep(prompts_per_step=sweep.rollouts_per_step // group)
     assert sweep_schedule.sweep_length(267) == 15
     assert sweep_schedule.gap_length(267) == 45
@@ -733,7 +718,7 @@ def test_the_parked_pool_arm_configs_differ_only_in_policy_keys() -> None:
     sweep = read("lfm-sweep.toml")
     assert spread["training"].pop("pool_policy") == "spread"
     assert sweep["training"].pop("pool_policy") == "sweep"
-    assert spread["training"].pop("refresh_steps") == 30
+    assert "refresh_steps" not in spread["training"]
     assert "refresh_steps" not in sweep["training"]
     assert sweep["training"].pop("sweep_gap_ratio") == 3
     assert "sweep_gap_ratio" not in spread["training"]
