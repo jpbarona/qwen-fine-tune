@@ -7,10 +7,41 @@ the current choices.
 
 ## Install
 
-One environment installs the trainer and the vLLM sampler:
+One environment installs the trainer and the vLLM sampler. On a fresh GPU host,
+run the preflight first. It reports the things that otherwise fail late, after
+the model has downloaded:
 
 ```bash
-python3 -m venv .venv
+./scripts/setup-env.sh --check
+```
+
+Then install:
+
+```bash
+./scripts/setup-env.sh
+```
+
+The script needs Python 3.12 or newer, the Python development headers, ninja,
+and the CUDA toolkit for the fast kernels. It installs the headers, ninja and
+the build tools itself when passwordless sudo is available. If a check fails it
+prints the exact command to fix it.
+
+Without `nvcc` the run still works. FlashInfer and `causal_conv1d` fall back to
+slow reference kernels, so each step takes longer.
+
+The two arm configs also need the screen. `screens/` is in `.gitignore`, so a
+fresh clone has none and each arm fails at load with `screen_rows path not
+found`. Restore it once:
+
+```bash
+rclone copy hetzner-dumps:opencodeagent1/dumps/vm/rl-grpo-data/2026-11-21-lfm-screen \
+  screens/mbpp-base
+```
+
+A manual install is the same as the script does:
+
+```bash
+python3.12 -m venv .venv
 .venv/bin/pip install -e ".[vllm]" "pytest>=9,<10"
 ```
 
