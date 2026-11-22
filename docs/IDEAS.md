@@ -247,3 +247,56 @@ The idea. Rewrite the run's config block on every resume, or append a
 Cost. A small change in the run store and one test.
 
 Where. `src/rlvr/runs.py` and the resume path in `src/rlvr/cli.py`.
+
+## Weight each group gradient by its signal
+
+The problem. A step averages the gradient over every group equally. A group with
+a wide reward spread carries a strong advantage signal. A group with one reward
+value carries none. Equal weighting spends the same update budget on both.
+
+The idea. Weight each group's contribution by its reward standard deviation
+instead of dividing by the group count. High-spread groups add their gradient
+with a larger weight. Flat groups add nothing.
+
+Why it might work. The step would spend its update on the prompts that can still
+teach the policy. The metrics already record `group_sd` and `group_spread` per
+step, so the signal is measured and could drive the weight.
+
+Open detail. Advantages are already divided by the group standard deviation in
+`group_advantages`. Weighting the gradient by the same value partly cancels that
+normalization. Options are to weight by the number of distinct rewards, by the
+mean absolute deviation, or to drop the per-group normalization and use the raw
+advantage. Pick one before building.
+
+Cost. A weighting term in the update path, a config key, and tests. About half a
+day.
+
+Where. `src/rlvr/qwen.py` in `accumulate` and `apply_update`, plus
+`src/rlvr/experiment.py` where group rewards are collected.
+
+## Replace low-signal groups until the step carries enough signal
+
+The problem. A step with many flat groups spends generation and update time on
+groups that cannot move the policy. A fixed batch size makes the step cost
+predictable and the signal unpredictable.
+
+The idea. Set a minimum signal for a step, for example the mean group spread or
+the share of groups with a nonzero advantage. Draw groups as usual. When a group
+falls under a threshold, replace it with a fresh group and sample again. In the
+soft version, keep drawing until the running average signal passes the
+threshold. A step then takes a variable number of prompts and a variable amount
+of time.
+
+Why it might work. Every step would meet a minimum signal, so the update is spent
+on prompts the model can learn from. It also adapts to the pool without a fixed
+parked slice.
+
+Risk. The step cost becomes unpredictable, and a hard threshold can stall on a
+pool with no signal, so extra draws need a cap. Replacement also biases the mix
+toward hard prompts, which is the direction the 22 November collapse took. The
+build should cap replacements and record the resulting pool composition.
+
+Cost. A draw loop with a cap, per-step signal tracking, and tests. About a day.
+
+Where. The prompt draw and step loop in `src/rlvr/experiment.py`, plus
+`src/rlvr/schedule.py` if the pool policy owns the replacement.
