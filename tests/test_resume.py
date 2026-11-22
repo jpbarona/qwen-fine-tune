@@ -277,3 +277,65 @@ def test_resume_rejects_a_changed_pool_policy_or_screen(
         validate_resume(
             meta_path, load_config(changed_path), arm="code-score", fake=True
         )
+
+
+def _step_size_resume(tmp_path: Path):
+    text = (
+        CONFIG_TEXT
+        + "\n[training]\n"
+        + 'pool_policy = "spread"\n'
+        + 'screen_rows = "screens/a"\n'
+        + "generations_per_prompt = 8\n"
+        + "rollouts_per_step = 608\n"
+    )
+    config_path = tmp_path / "step-size.toml"
+    config_path.write_text(text, encoding="utf-8")
+    meta = {
+        "arm": "code-score",
+        "mode": "fake",
+        "split_seed": 1,
+        "config": tomllib.loads(text),
+        "pool_policy": "spread",
+        "screen_rows": "screens/a",
+    }
+    meta_path = tmp_path / "step-size-meta.json"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    return load_config(config_path), text, meta_path, meta
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "field"),
+    (
+        ("rollouts_per_step = 608", "rollouts_per_step = 304", "rollouts_per_step"),
+        (
+            "generations_per_prompt = 8",
+            "generations_per_prompt = 16",
+            "generations_per_prompt",
+        ),
+    ),
+)
+def test_resume_rejects_a_changed_step_size(
+    tmp_path: Path, old: str, new: str, field: str
+) -> None:
+    config, text, meta_path, _ = _step_size_resume(tmp_path)
+    validate_resume(meta_path, config, arm="code-score", fake=True)
+
+    changed = text.replace(old, new)
+    assert changed != text
+    changed_path = tmp_path / "changed.toml"
+    changed_path.write_text(changed, encoding="utf-8")
+
+    with pytest.raises(ResumeError, match=field):
+        validate_resume(
+            meta_path, load_config(changed_path), arm="code-score", fake=True
+        )
+
+
+def test_older_metadata_without_step_size_still_resumes(tmp_path: Path) -> None:
+    config, _, meta_path, meta = _step_size_resume(tmp_path)
+    training = meta["config"]["training"]
+    del training["rollouts_per_step"]
+    del training["generations_per_prompt"]
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    validate_resume(meta_path, config, arm="code-score", fake=True)

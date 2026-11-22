@@ -78,6 +78,8 @@ def validate_resume(meta_path: Path, config: Config, *, arm: str, fake: bool) ->
     saved_config = saved_config if isinstance(saved_config, dict) else {}
     model = saved_config.get("model")
     model = model if isinstance(model, dict) else {}
+    training = saved_config.get("training")
+    training = training if isinstance(training, dict) else {}
     trainer = meta.get("trainer")
     trainer = trainer if isinstance(trainer, dict) else {}
     saved = {
@@ -102,5 +104,19 @@ def validate_resume(meta_path: Path, config: Config, *, arm: str, fake: bool) ->
         if value is not None and value != requested[key]:
             raise ResumeError(
                 f"resume {key} mismatch: saved {value!r}, requested {requested[key]!r}. "
+                "Use the original config or a separate --runs-root for a new run."
+            )
+    step_size = {
+        "rollouts_per_step": config.rollouts_per_step,
+        "generations_per_prompt": config.generations_per_prompt,
+    }
+    for key, value in step_size.items():
+        saved_value = training.get(key)
+        if isinstance(saved_value, bool) or not isinstance(saved_value, int):
+            continue
+        if saved_value != value:
+            raise ResumeError(
+                f"resume training.{key} mismatch: saved {saved_value!r}, "
+                f"requested {value!r}. "
                 "Use the original config or a separate --runs-root for a new run."
             )
