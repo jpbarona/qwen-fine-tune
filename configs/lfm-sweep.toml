@@ -68,15 +68,15 @@ prefetch_scoring = true
 seed = 0
 # The measured screen. The folder holds rows.jsonl and summary.json.
 screen_rows = "screens/mbpp-base/rows.jsonl"
-# This arm sweeps the parked pool. A sweep length is ceil(parked / 10) steps,
-# and the gap after it is 3 times the sweep length. At 10 prompts the spread
-# arm spends 5 of them on parked work. A pool of 267 parked prompts is
-# ceil(267 / 10) = 27 steps, followed by a gap of 81 steps.
+# This arm sweeps the parked pool. A sweep length is ceil(parked / 19) steps,
+# and the gap after it is 3 times the sweep length. At 19 prompts the spread
+# arm spends 9 of them on parked work. A pool of 267 parked prompts is
+# ceil(267 / 19) = 15 steps, followed by a gap of 45 steps.
 pool_policy = "sweep"
 sweep_gap_ratio = 3
-# 160 sequences per step. At 16 rollouts per prompt this is 10 prompts, half
-# the previous 19. A step is expected to take about 125 seconds.
-rollouts_per_step = 160
+# 304 sequences per step. At 16 rollouts per prompt this is 19 prompts, the
+# same step size as the 22 November run.
+rollouts_per_step = 304
 
 [run]
 checkpoint_every_steps = 10
