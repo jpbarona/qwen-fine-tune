@@ -14,7 +14,7 @@ Docs, all in this folder:
 - [superpowers/plans/2026-11-21-parked-pools.md](superpowers/plans/2026-11-21-parked-pools.md) — task breakdown with the binding values.
 - `../issues/20` to `../issues/26` — the seven tickets for that change.
 - [superpowers/plans/2026-11-21-parked-pools.md](superpowers/plans/2026-11-21-parked-pools.md): the task breakdown for measured pools and the two parked re-screen arms.
-- [IDEAS.md](IDEAS.md) — proposals that are not built, with their cost and the file they would touch.
+- [IDEAS.md](IDEAS.md): one or two chunk proposals, newest first, with dates. The long version is in `/home/opencode/Work/Garbage/ideas-old.md`.
 - `journal.md` — running problem and fix chunks, 10 to 12 words each.
 - `SPEC.md` — the deferred four-arm study design.
 - `PLAN.md` — the original ticket breakdown.
