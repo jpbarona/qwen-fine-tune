@@ -857,3 +857,42 @@ norm. With no KL anchor, a small weight move was enough to break the format.
 The operator's read is that 1e-4 is too high once the pool produces dense
 advantage. The next arm uses 3e-5. Data is in
 `/home/opencode/Work/rl-grpo-data/2026-11-22-lfm-spread-collapse/`.
+
+## D39. The capped run collapsed, and the box went away
+
+Status: observed 22 November 2026. The box became unreachable during this entry.
+
+The capped spread arm resumed from step 20 with the 1,024 completion cap.
+
+| Eval step | pass@1 |
+| --- | --- |
+| 20 | 0.36 |
+| 30 | 0.57 |
+| 40 | 0.23 |
+| 50 | 0.00 |
+
+The step rows show the mechanism. Truncation climbed until step 47, where 0.98 of
+rollouts hit the 1,024 cap and every group scored -1. From step 51 the model
+flipped to the other corner.
+
+| Step | Reward | Pass | Tokens | Truncation | Update norm |
+| --- | --- | --- | --- | --- | --- |
+| 47 | -0.985 | 0 | 1,009 | 0.98 | 0.177 |
+| 48 | -0.975 | 0 | 997 | 0.967 | 0.167 |
+| 49 | -0.935 | 0 | 958 | 0.911 | 0.163 |
+| 50 | -0.365 | 0 | 375 | 0.217 | 0.197 |
+| 51 | -0.009 | 0 | 4 | 0 | 0.325 |
+| 52 | -0.180 | 0 | 94 | 0.003 | 0.301 |
+| 53 | -0.066 | 0 | 59 | 0.039 | 0.309 |
+| 54 | -0.003 | 0 | 5 | 0.003 | 0.285 |
+
+So the cap traded long rambling for empty answers. With no enforceable thinking
+budget the policy could not shorten the reasoning while keeping the code, so it
+learned to emit almost nothing.
+
+The process ended at step 54 with no error in the log. Shortly after, the box
+stopped answering on port 22 at all, so the cause may be the instance rather than
+the trainer. Steps 35 to 54 were never pulled and are lost if the box is gone.
+
+Next settings, when a box returns: cap 1,536, length term soft limit 600 at
+0.002 per token with a floor of 1.0, and rate 3e-5 from the step-30 checkpoint.
