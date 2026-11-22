@@ -7,6 +7,38 @@ the current choices.
 
 ## Install
 
+### Container, the fast path
+
+One image holds Python 3.12, torch, vLLM, CUDA 13.0 and the compiled kernels. A
+new box pulls it and starts training. The repository mounts over it at run time,
+so a code change needs no rebuild.
+
+```bash
+./scripts/docker-setup.sh
+./scripts/docker-run.sh code-score --config configs/lfm-spread.toml --runs-root runs
+```
+
+`docker-setup.sh` installs Docker and the NVIDIA container runtime if they are
+missing, logs in if `GHCR_TOKEN` is set, and pulls the image plus the small
+Python image the test runner uses. It takes about two minutes on a host with a
+fast link.
+
+The run needs three mounts, and `docker-run.sh` sets them: the repository at
+`/app`, the host Docker socket for the sandboxed test runner, and a cache volume
+so the kernels compile once. It also passes `--gpus all` and `--ipc=host`.
+
+The training user on the host must be in the `docker` group. Without it every
+test fails with `runner_error`, because the test runner cannot start containers.
+
+Build and publish the image when a dependency changes:
+
+```bash
+docker build -f docker/Dockerfile -t ghcr.io/jpbarona/rlvr:latest .
+docker push ghcr.io/jpbarona/rlvr:latest
+```
+
+### Bare metal
+
 Two commands on a fresh GPU host:
 
 ```bash

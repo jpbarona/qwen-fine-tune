@@ -1,0 +1,14 @@
+# Keep the build context small and keep local state out of the image.
+.git
+.venv
+runs
+runs-lfm
+screens
+data
+dashboard/node_modules
+docs
+issues
+tests
+.superpowers
+__pycache__
+*.pyc
