@@ -6,6 +6,7 @@ Layout, from SPEC.md:
         meta.json
         metrics.jsonl
         rollouts.jsonl
+        labels.jsonl
         eval.json
         checkpoints/
 
@@ -32,6 +33,7 @@ META_NAME = "meta.json"
 CONTROL_EVENTS_NAME = "control-events.jsonl"
 METRICS_NAME = "metrics.jsonl"
 ROLLOUTS_NAME = "rollouts.jsonl"
+LABELS_NAME = "labels.jsonl"
 EVAL_NAME = "eval.json"
 CHECKPOINTS_NAME = "checkpoints"
 
@@ -96,6 +98,7 @@ class RunStore:
         """
         self._truncate_rollouts(step)
         self._truncate_metrics(step)
+        self._truncate_labels(step)
         self._truncate_eval(step)
 
     def read_evaluations(self) -> list[dict[str, Any]]:
@@ -145,6 +148,24 @@ class RunStore:
             self.metrics_path, "\n".join(kept) + ("\n" if kept else "")
         )
 
+    def _truncate_labels(self, step: int) -> None:
+        """Drop label, streak and schedule rows past `step` so a replay is clean."""
+        if not self.labels_path.exists():
+            return
+        kept: list[str] = []
+        for line in self.labels_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row_step = json.loads(line).get("step")
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row_step, int) and not isinstance(row_step, bool) and row_step <= step:
+                kept.append(line)
+        self._write_atomic(
+            self.labels_path, "\n".join(kept) + ("\n" if kept else "")
+        )
+
     def _truncate_eval(self, step: int) -> None:
         if not self.eval_path.exists():
             return
@@ -191,6 +212,10 @@ class RunStore:
         return self.run_dir / ROLLOUTS_NAME
 
     @property
+    def labels_path(self) -> Path:
+        return self.run_dir / LABELS_NAME
+
+    @property
     def eval_path(self) -> Path:
         return self.run_dir / EVAL_NAME
 
@@ -223,6 +248,65 @@ class RunStore:
             self.control_events_path,
             json.dumps(dict(event), ensure_ascii=False, allow_nan=False),
         )
+
+    def append_label(self, row: Mapping[str, Any]) -> None:
+        """Append one pool label change, saved failure streak, or schedule state."""
+        self._append_line(
+            self.labels_path,
+            json.dumps(dict(row), ensure_ascii=False, allow_nan=False),
+        )
+
+    def read_labels(self) -> list[dict[str, Any]]:
+        """Every label change and saved streak in file order, for a resume.
+
+        A final line that is not terminated is always rewritten with a newline,
+        so the next append starts on a clean line. A final line that is not
+        valid JSON is dropped in that rewrite, which is the same rule the
+        screen store uses. A bad line anywhere else is an error, because the
+        label file decides pool membership and a silent skip would resume with
+        the wrong pools.
+        """
+        if not self.labels_path.exists():
+            return []
+        try:
+            text = self.labels_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise ValueError(f"cannot read the label file: {error}") from error
+        if not text:
+            return []
+
+        lines = text.splitlines()
+        terminated = text.endswith("\n")
+        rows: list[dict[str, Any]] = []
+        rewrite = not terminated
+        for line_number, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as error:
+                is_torn_tail = line_number == len(lines) and not terminated
+                if is_torn_tail:
+                    rewrite = True
+                    break
+                raise ValueError(
+                    f"label file line {line_number}: not valid JSON: {error}"
+                ) from error
+            if not isinstance(payload, dict):
+                raise ValueError(
+                    f"label file line {line_number}: row must be an object"
+                )
+            rows.append(payload)
+
+        if rewrite:
+            self._write_atomic(
+                self.labels_path,
+                "".join(
+                    json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n"
+                    for row in rows
+                ),
+            )
+        return rows
 
     def write_eval(self, payload: Mapping[str, Any]) -> None:
         """Replace eval.json atomically.

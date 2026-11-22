@@ -172,8 +172,9 @@ def _step_number(row: Mapping[str, Any], source: str) -> int:
 def _checkpoint_pass_at_1(payload: Mapping[str, Any], source: str) -> dict[int, float]:
     """Map step to the last checkpoint or final evaluation pass@1 at that step.
 
-    A stage evaluation carries its own band name and is shown separately. It
-    never replaces a checkpoint value for the per-step pass@1 line.
+    A stage evaluation from an older run carries its own band name and is shown
+    separately. It never replaces a checkpoint value for the per-step pass@1
+    line.
     """
     points = payload.get("evaluations")
     if points is None:

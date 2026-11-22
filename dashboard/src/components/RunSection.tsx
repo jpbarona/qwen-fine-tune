@@ -48,7 +48,20 @@ function percentTick(value: number): string {
   const percent = value * 100
   if (percent === 0) return '0%'
   const digits = Math.abs(percent) < 1 ? 2 : 1
-  return `${percent.toFixed(digits)}%`
+  return `${Number(percent.toFixed(digits))}%`
+}
+
+function shareTick(value: number): string {
+  return `${Math.round(value * 100)}%`
+}
+
+function decimalTick(value: number): string {
+  if (value === 0) return '0'
+  return Number(value.toFixed(2)).toString()
+}
+
+function countTick(value: number): string {
+  return String(Math.round(value))
 }
 
 function StepProgress({ run }: { run: Run }) {
@@ -197,6 +210,8 @@ export default function RunSection({ run }: { run: Run }) {
   const hasTiming = hasValues(pairs(steps, run.series.step_seconds))
   const stageDone = run.stage_progress.percent
   const entropyPoints = pairs(steps, run.series.mean_entropy)
+  const rewardPoints = pairs(steps, run.series.mean_reward)
+  const rewardHasNegative = rewardPoints.some(([, value]) => value !== null && value < 0)
   const checkpointPoints = pairs(run.pass_at_1.checkpoint.steps, run.pass_at_1.checkpoint.values)
   const finalPoints = pairs(run.pass_at_1.final.steps, run.pass_at_1.final.values)
   const hasPassAtOne = hasValues(checkpointPoints) || hasValues(finalPoints)
@@ -218,8 +233,13 @@ export default function RunSection({ run }: { run: Run }) {
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px] tabular-nums text-[#7b7b84]">
           <Status status={run.status} />
+          {run.pool_policy ? (
+            <span>
+              pool <span className="text-[#d9d9de]">{run.pool_policy}</span>
+            </span>
+          ) : null}
           <span>
-            stage <span className="text-[#d9d9de]">{run.stage ?? '-'}</span>
+            stage <span className="text-[#d9d9de]">{run.stage ?? 'unstaged'}</span>
           </span>
           <span className={slow ? 'text-[#e9b153]' : undefined}>last write {age(ageSeconds)}</span>
           <span>started {run.started_utc ?? '-'}</span>
@@ -281,10 +301,14 @@ export default function RunSection({ run }: { run: Run }) {
           </Panel>
         ) : null}
         <Panel title="reward per step" right={num(latest.mean_reward)}>
-          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.mean_reward) }]} />
+          <LineChart
+            series={[{ color: ACCENT, points: rewardPoints }]}
+            yMin={rewardHasNegative ? -1 : 0}
+            yMax={1}
+          />
         </Panel>
         <Panel title="pass rate per step" right={rate(latest.pass_rate)}>
-          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.pass_rate) }]} format={percentTick} />
+          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.pass_rate) }]} yMin={0} yMax={1} format={percentTick} />
         </Panel>
         {hasPassAtOne ? (
           <Panel
@@ -301,6 +325,8 @@ export default function RunSection({ run }: { run: Run }) {
                 { color: MUTED, dots: true, points: checkpointPoints },
                 { color: ACCENT, dots: true, points: finalPoints },
               ]}
+              yMin={0}
+              yMax={1}
               format={percentTick}
             />
           </Panel>
@@ -324,7 +350,7 @@ export default function RunSection({ run }: { run: Run }) {
           />
         </Panel>
         <Panel title="truncation rate per step" right={rate(latest.truncation_rate)}>
-          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.truncation_rate) }]} format={percentTick} />
+          <LineChart series={[{ color: ACCENT, points: pairs(steps, run.series.truncation_rate) }]} yMin={0} yMax={1} format={percentTick} />
         </Panel>
         <Panel
           title="prompts and sequences per step"
@@ -337,14 +363,90 @@ export default function RunSection({ run }: { run: Run }) {
         >
           <LineChart
             series={[
-              { color: ACCENT, points: pairs(steps, run.series.prompts) },
-              { color: MUTED, points: pairs(steps, run.series.sequences) },
+              { color: ACCENT, points: pairs(steps, run.series.prompts), format: countTick },
+              { color: MUTED, points: pairs(steps, run.series.sequences), axis: 'right', format: countTick },
             ]}
             yMin={0}
-            format={(value) => String(Math.round(value))}
+            format={countTick}
           />
         </Panel>
-        <Panel title="stage completion per step (%)" right={run.stage_progress.band ?? undefined}>
+        <Panel
+          title="pool composition"
+          legend={
+            <>
+              <Swatch color={ACCENT} label="train prompts" />
+              <Swatch color={MUTED} label="parked prompts" />
+            </>
+          }
+        >
+          <LineChart
+            series={[
+              { color: ACCENT, points: pairs(steps, run.series.train_prompts), format: countTick },
+              { color: MUTED, points: pairs(steps, run.series.parked_prompts), axis: 'right', format: countTick },
+            ]}
+            yMin={0}
+            height={70}
+            format={countTick}
+            empty="no pool data"
+          />
+        </Panel>
+        <Panel title="Group signal">
+          <div>
+            <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] text-[#6b6b73]">
+              <span className="whitespace-nowrap">
+                <Swatch color={ACCENT} label="group spread" />
+              </span>
+              <span className="shrink-0 tabular-nums text-[#8b8b94]">{num(latest.group_spread)}</span>
+            </div>
+            <LineChart
+              series={[{ color: ACCENT, points: pairs(steps, run.series.group_spread) }]}
+              yMin={0}
+              yMax={1}
+              height={150}
+              tickCount={6}
+              format={decimalTick}
+              empty="no group signal"
+            />
+          </div>
+          <div className="mt-1 border-t border-white/[0.06] pt-1">
+            <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] text-[#6b6b73]">
+              <span className="whitespace-nowrap">
+                <Swatch color={MUTED} label="group sd" />
+              </span>
+              <span className="shrink-0 tabular-nums text-[#8b8b94]">{num(latest.group_sd)}</span>
+            </div>
+            <LineChart
+              series={[{ color: MUTED, points: pairs(steps, run.series.group_sd) }]}
+              yMin={0}
+              yMax={1}
+              height={150}
+              tickCount={6}
+              format={decimalTick}
+              empty="no group signal"
+            />
+          </div>
+          <div className="mt-1 border-t border-white/[0.06] pt-1">
+            <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] text-[#6b6b73]">
+              <span className="whitespace-nowrap">
+                <Swatch color={DIM} label="advantage share" />
+              </span>
+              <span className="shrink-0 tabular-nums text-[#8b8b94]">{num(latest.advantage_share)}</span>
+            </div>
+            <LineChart
+              series={[{ color: DIM, points: pairs(steps, run.series.advantage_share) }]}
+              yMin={0}
+              yMax={1}
+              height={150}
+              tickCount={6}
+              format={shareTick}
+              empty="no group signal"
+            />
+          </div>
+        </Panel>
+        <Panel
+          title={run.stage && run.stage !== 'unstaged' ? 'stage completion per step (%)' : 'pool solved share'}
+          right={run.stage_progress.band ?? undefined}
+        >
           <LineChart series={stageSegments(run.stage_progress.points)} format={(value) => `${value.toFixed(0)}%`} />
         </Panel>
         <Panel

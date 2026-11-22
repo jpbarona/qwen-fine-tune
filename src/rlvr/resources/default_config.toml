@@ -50,9 +50,9 @@ lora_rank = 32
 lora_alpha = 64
 max_prompt_tokens = 512
 max_completion_tokens = 2048
-# Thinking budget at the first stage, doubling per stage up to the completion
-# cap. A rollout that hits it without closing is ended as truncated.
-thinking_budget_start = 768
+# One thinking budget for every step. Not enforced under vLLM, which has no
+# per-request logits processors. The value is recorded but does not end a rollout.
+thinking_budget = 1024
 # Entropy is measured on the update pass every N training steps. Zero disables it.
 entropy_every_steps = 500
 # Code-arm length term. 0.001 per completion token above 900, capped at 0.2,
@@ -80,6 +80,22 @@ test_workers = 4
 eval_batch_size = 8
 # Score the next generated prompt group while the current group backpropagates.
 prefetch_scoring = true
+
+# Pool policy for the parked prompts. "spread" sends a fixed block of parked
+# prompts with every step. "sweep" covers the whole parked pool in consecutive
+# all-parked steps, then trains for a gap. Unset means no schedule: the run
+# trains the train pool and leaves parked prompts alone.
+# pool_policy = "spread"
+# Training steps after a sweep, as a multiple of the sweep length. An integer
+# from 3 to 10. Only the sweep policy reads it.
+# sweep_gap_ratio = 3
+# The measured screen output, as a folder or its rows.jsonl file. Unset keeps
+# the unmeasured placeholder pool.
+# screen_rows = "screens/latest/rows.jsonl"
+# Sequence budget for one step. Prompts per step is this value divided by the
+# group size. The spread parked block is max(4, half the prompt count), capped
+# at one fewer than the step.
+rollouts_per_step = 608
 
 [budget]
 # Hard caps. Unset means the run trains every planned step. These stop the loop

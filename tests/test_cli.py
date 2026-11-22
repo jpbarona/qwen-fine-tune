@@ -40,6 +40,19 @@ def config_path(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.fixture
+def judge_config_path(tmp_path: Path) -> Path:
+    """A fake run long enough to reach a prompt the fake runner fully passes.
+
+    With no curriculum the pool starts at the split order, and the first fully
+    passing prompt is the seventh one. Two-prompt steps need four steps to reach
+    it, which is what the judge arms need for a judge call.
+    """
+    path = tmp_path / "judge_config.toml"
+    path.write_text(CONFIG.replace("steps = 2", "steps = 4"), encoding="utf-8")
+    return path
+
+
 def test_run_fake_exits_zero_for_the_code_score_arm(config_path, tmp_path, capsys) -> None:
     runs_root = tmp_path / "runs"
     assert main(["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]) == 0
@@ -91,10 +104,10 @@ def test_a_fake_run_writes_zero_memory_on_every_metric_row(config_path, tmp_path
 
 
 @pytest.mark.parametrize("arm", ["hybrid", "gated-judge"])
-def test_judge_arms_run_fake_and_populate_judge_scores(arm, config_path, tmp_path) -> None:
+def test_judge_arms_run_fake_and_populate_judge_scores(arm, judge_config_path, tmp_path) -> None:
     runs_root = tmp_path / "runs"
     assert main(
-        ["run", "--arm", arm, "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+        ["run", "--arm", arm, "--fake", "--config", str(judge_config_path), "--runs-root", str(runs_root)]
     ) == 0
     run_dir = next((runs_root / arm).iterdir())
     records = [
@@ -112,7 +125,7 @@ def test_judge_arms_run_fake_and_populate_judge_scores(arm, config_path, tmp_pat
 
 
 def test_gated_process_runs_fake_and_populates_both_scores(
-    config_path, tmp_path
+    judge_config_path, tmp_path
 ) -> None:
     runs_root = tmp_path / "runs"
     assert main(
@@ -122,7 +135,7 @@ def test_gated_process_runs_fake_and_populates_both_scores(
             "gated-process",
             "--fake",
             "--config",
-            str(config_path),
+            str(judge_config_path),
             "--runs-root",
             str(runs_root),
         ]
@@ -256,18 +269,27 @@ def test_without_fake_the_command_asks_for_the_train_extra(
     config_path, tmp_path, capsys, monkeypatch
 ) -> None:
     import rlvr.qwen
+    import rlvr.vllm_backend as backend
 
     def missing(*args, **kwargs):
         raise ImportError("simulated missing torch")
 
+    class StubEngine:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
     monkeypatch.setattr(rlvr.qwen, "QwenGenerator", missing)
+    monkeypatch.setattr(backend, "VLLMEngine", StubEngine)
     runs_root = tmp_path / "runs"
     code = main(
         ["run", "--arm", "code-score", "--config", str(config_path), "--runs-root", str(runs_root)]
     )
     captured = capsys.readouterr()
     assert code != 0
-    assert "train extra" in captured.err
+    assert "pip install -e '.[vllm]'" in captured.err
     assert "--fake" in captured.err
     # The generator fails before the run folder is made, so nothing is left behind.
     assert not (runs_root / "code-score").exists()
@@ -624,13 +646,13 @@ def test_resume_continues_from_the_last_checkpoint_without_duplicates(
     run_dir = next((runs_root / "code-score").iterdir())
     before = _rollout_steps(run_dir)
     before_lines = (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
-    # Step 1 has one very easy prompt. Steps 2 and 3 take the two prompt batch.
-    assert before.count(1) == 8
+    # Every step takes the two prompt batch, so each step has sixteen records.
+    assert before.count(1) == 16
     assert before.count(2) == 16
     assert before.count(3) == 16
 
-    # The checkpoint carries the batch boundary and the curriculum position,
-    # so a resume can pick them up.
+    # The checkpoint carries the batch boundary and the prompt cursor, so a
+    # resume can pick them up. There is no stage position.
     manifest = json.loads(
         (run_dir / "checkpoints" / "step-00000002" / "checkpoint.json").read_text(
             encoding="utf-8"
@@ -638,8 +660,7 @@ def test_resume_continues_from_the_last_checkpoint_without_duplicates(
     )
     assert manifest["batch"]["current"] == 2
     assert "prompt_cursor" in manifest
-    assert manifest["stage"]["index"] == 1
-    assert manifest["stage"]["pool"]
+    assert "stage" not in manifest
 
     assert main(
         ["run", "--arm", "code-score", "--fake", "--resume", "--config", str(config_path), "--runs-root", str(runs_root)]
@@ -707,7 +728,7 @@ def test_eval_final_questions_caps_the_final_eval_pool(tmp_path, capsys) -> None
     assert payload["evaluations"][-1]["count"] == 10
 
 
-def test_the_fake_run_moves_from_the_first_stage_to_the_second(
+def test_the_fake_run_carries_the_unstaged_value(
     config_path, tmp_path, capsys
 ) -> None:
     runs_root = tmp_path / "runs"
@@ -725,107 +746,17 @@ def test_the_fake_run_moves_from_the_first_stage_to_the_second(
         json.loads(line)
         for line in (run_dir / "rollouts.jsonl").read_text(encoding="utf-8").splitlines()
     ]
+    payload = json.loads((run_dir / "eval.json").read_text(encoding="utf-8"))
+    meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
 
-    assert [row["stage"] for row in metrics] == ["very easy", "medium"]
-    assert {record["stage"] for record in records} <= {row["stage"] for row in metrics}
-    assert {record["stage"] for record in records} == {"very easy", "medium"}
-
-
-def test_build_curriculum_puts_the_synthetic_rows_in_the_very_easy_band(
-    write_config,
-) -> None:
-    from rlvr import cli
-    from rlvr.data import load_difficulty_labels
-
-    config = load_config(write_config())
-    prompts, _ = build_prompts(config)
-    stages = cli.build_curriculum(config, prompts, fake=False)
-    by_name = {stage.name: stage for stage in stages}
-
-    synthetic_ids = {
-        question.prompt_id for question in load_synthetic_questions()
-    }
-    very_easy = {
-        prompt.prompt_id
-        for prompt in by_name["very easy"].train + by_name["very easy"].held_out
-    }
-    assert synthetic_ids <= very_easy
-    # Carry over takes a share of the very easy training pool into medium, so a
-    # synthetic id may appear there. It never reaches a held-out slice or a
-    # later band.
-    medium_held = {
-        prompt.prompt_id for prompt in by_name["medium"].held_out
-    }
-    assert synthetic_ids.isdisjoint(medium_held)
-    for name in ("hard", "very hard"):
-        band_ids = {
-            prompt.prompt_id
-            for prompt in by_name[name].train + by_name[name].held_out
-        }
-        assert synthetic_ids.isdisjoint(band_ids)
-
-    # The MBPP rows keep the band from the validated label file.
-    labels = load_difficulty_labels(load_split(seed=config.split_seed))
-    mbpp = next(prompt for prompt in prompts if prompt.prompt_id in labels)
-    placed = next(
-        stage
-        for stage in stages
-        if mbpp.prompt_id
-        in {item.prompt_id for item in stage.train + stage.held_out}
-    )
-    assert placed.name == labels[mbpp.prompt_id]
-
-
-def test_build_curriculum_rejects_a_prompt_with_no_label(
-    write_config, monkeypatch
-) -> None:
-    from rlvr import cli
-    from rlvr.data import DatasetSplit
-    from rlvr.experiment import Prompt
-
-    config = load_config(write_config())
-    prompts = [Prompt("mbpp-0000", "p"), Prompt("mbpp-0001", "p")]
-    monkeypatch.setattr(
-        cli, "load_split", lambda **kwargs: DatasetSplit(train=(), test=())
-    )
-    monkeypatch.setattr(
-        cli, "load_difficulty_labels", lambda split: {"mbpp-0000": "very easy"}
-    )
-    monkeypatch.setattr(cli, "load_synthetic_rows", lambda: ())
-
-    with pytest.raises(cli.UsageError, match="has no difficulty label"):
-        cli.build_curriculum(config, prompts, fake=False)
-
-
-def test_build_curriculum_rejects_labels_for_a_different_split_seed(
-    tmp_path,
-) -> None:
-    from rlvr import cli
-
-    config_path = write_split_config(tmp_path)
-    config = load_config(config_path)
-    prompts, _ = build_prompts(config)
-
-    with pytest.raises(cli.UsageError, match="cannot load difficulty labels"):
-        cli.build_curriculum(config, prompts, fake=False)
-
-
-def test_build_curriculum_reports_a_missing_label_file(write_config, monkeypatch) -> None:
-    from rlvr import cli
-    from rlvr.data import DatasetError, DatasetSplit
-
-    config = load_config(write_config())
-    monkeypatch.setattr(
-        cli, "load_split", lambda **kwargs: DatasetSplit(train=(), test=())
-    )
-
-    def missing(split):
-        raise DatasetError("difficulty label file not found: /nowhere/labels.jsonl")
-
-    monkeypatch.setattr(cli, "load_difficulty_labels", missing)
-
-    with pytest.raises(cli.UsageError, match="difficulty label file not found"):
-        cli.build_curriculum(config, [], fake=False)
+    assert {row["stage"] for row in metrics} == {"unstaged"}
+    assert {record["stage"] for record in records} == {"unstaged"}
+    assert {point["stage"] for point in payload["evaluations"]} == {"unstaged"}
+    assert meta["pools"]["train"] > 0
+    assert meta["pools"]["parked"] == 0
+    assert meta["pools"]["samples"] is None
+    assert meta["pools"]["measured"] is False
+    assert "curriculum" not in meta
 
 
 def test_build_test_runner_uses_fakes_or_docker(write_config) -> None:
@@ -922,3 +853,327 @@ def test_failed_checkpoint_load_preserves_existing_records(tmp_path, monkeypatch
     assert main(args + ["--resume"]) == 2
     assert "incomplete checkpoint" in capsys.readouterr().err
     assert before == {p.name: p.read_bytes() for p in run_dir.iterdir() if p.is_file()}
+
+
+def write_screen_config(tmp_path, screen_rows) -> Path:
+    path = tmp_path / "screen-config.toml"
+    path.write_text(
+        SPLIT_CONFIG
+        + "\n[training]\n"
+        + "generations_per_prompt = 16\n"
+        + f'screen_rows = "{screen_rows.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_build_pools_returns_none_without_screen_rows(tmp_path) -> None:
+    from rlvr.cli import build_pools
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+
+    assert build_pools(config, train) is None
+
+
+def test_build_pools_reads_the_screen_rows(tmp_path) -> None:
+    from rlvr.cli import build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    expected = {"train": 0, "retired": 0, "parked": 0}
+    for index, prompt in enumerate(train):
+        passed = (0, 8, 16)[index % 3]
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=16,
+                passed=passed,
+                pass_rate=passed / 16,
+            )
+        )
+        expected[("parked", "train", "retired")[index % 3]] += 1
+
+    pools = build_pools(
+        load_config(write_screen_config(tmp_path, directory)), train
+    )
+
+    assert pools is not None
+    assert pools.samples == 16
+    assert len(pools.train) == expected["train"]
+    assert len(pools.retired) == expected["retired"]
+    assert len(pools.parked) == expected["parked"]
+
+
+def test_build_pools_rejects_a_screen_at_another_group_size(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    config = load_config(write_screen_config(tmp_path, directory))
+    train, _ = build_prompts(config)
+    for prompt in train:
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=8,
+                passed=4,
+                pass_rate=0.5,
+            )
+        )
+
+    with pytest.raises(UsageError) as error:
+        build_pools(config, train)
+
+    message = str(error.value)
+    assert "8 samples per prompt" in message
+    assert "training.generations_per_prompt" in message
+    assert "16" in message
+
+
+def test_build_pools_accepts_the_rows_file(tmp_path) -> None:
+    from rlvr.cli import build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    for prompt in train:
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=16,
+                passed=8,
+                pass_rate=0.5,
+            )
+        )
+
+    pools = build_pools(
+        load_config(write_screen_config(tmp_path, store.rows_path)), train
+    )
+
+    assert pools is not None
+    assert len(pools.train) == len(train)
+
+
+def test_an_empty_screen_fails_loudly(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    empty = tmp_path / "screen"
+    empty.mkdir()
+
+    with pytest.raises(UsageError, match="screen rows are empty"):
+        build_pools(load_config(write_screen_config(tmp_path, empty)), train)
+
+
+def test_a_screen_row_outside_the_training_split_fails_loudly(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    store.append_row(
+        ScreenRow(prompt_id="not-in-split", samples=16, passed=8, pass_rate=0.5)
+    )
+
+    with pytest.raises(UsageError, match="not in the training split"):
+        build_pools(load_config(write_screen_config(tmp_path, directory)), train)
+
+
+def test_two_sample_counts_in_one_screen_fail_loudly(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    store.append_row(
+        ScreenRow(
+            prompt_id=train[0].prompt_id, samples=16, passed=8, pass_rate=0.5
+        )
+    )
+    store.append_row(
+        ScreenRow(
+            prompt_id=train[1].prompt_id, samples=8, passed=4, pass_rate=0.5
+        )
+    )
+
+    with pytest.raises(UsageError, match="cannot build the pools"):
+        build_pools(load_config(write_screen_config(tmp_path, directory)), train)
+
+
+def test_a_screen_path_must_be_a_folder_or_rows_file(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    other = tmp_path / "scores.json"
+    other.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(UsageError, match="screen folder or a rows.jsonl file"):
+        build_pools(load_config(write_screen_config(tmp_path, other)), train)
+
+
+def test_a_fake_run_uses_the_measured_pool_and_the_spread_schedule(
+    tmp_path, capsys
+) -> None:
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    directory = tmp_path / "screen"
+    path = tmp_path / "measured.toml"
+    path.write_text(
+        SPLIT_CONFIG
+        + f'\n[training]\nscreen_rows = "{directory.as_posix()}"\n'
+        + 'pool_policy = "spread"\ngenerations_per_prompt = 16\n'
+        + "rollouts_per_step = 64\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    train, _ = build_prompts(config)
+    store = ScreenStore(directory)
+    for index, prompt in enumerate(train):
+        passed = 0 if index < 10 else 8
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=16,
+                passed=passed,
+                pass_rate=passed / 16,
+            )
+        )
+
+    runs_root = tmp_path / "runs"
+
+    assert (
+        main(
+            [
+                "run",
+                "--arm",
+                "code-score",
+                "--fake",
+                "--config",
+                str(path),
+                "--runs-root",
+                str(runs_root),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    run_dir = next((runs_root / "code-score").iterdir())
+    meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
+    metric = json.loads((run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines()[0])
+
+    assert meta["pools"]["measured"] is True
+    assert meta["pools"]["samples"] == 16
+    assert meta["pools"]["parked"] == 10
+    assert meta["pool_policy"] == "spread"
+    assert meta["screen_rows"] == directory.as_posix()
+    assert metric["pool_policy"] == "spread"
+    assert metric["train_prompts"] == 1
+    assert metric["parked_prompts"] == 3
+
+
+def test_a_small_parked_pool_warns_about_the_short_block(tmp_path) -> None:
+    from dataclasses import replace
+
+    from rlvr.cli import spread_share_warning
+    from rlvr.pools import Pools
+
+    config = replace(
+        load_config(write_split_config(tmp_path)),
+        pool_policy="spread",
+        screen_rows="screens/a",
+        generations_per_prompt=16,
+        rollouts_per_step=608,
+    )
+    small = Pools(
+        train=("t",),
+        retired=(),
+        parked=tuple(f"p{index}" for index in range(10)),
+        samples=16,
+    )
+    message = spread_share_warning(config, small)
+
+    assert message is not None
+    assert "holds 10 prompts" in message
+    assert "block of 19" in message
+    assert "19/38" in message
+
+    enough = Pools(
+        train=("t",),
+        retired=(),
+        parked=tuple(f"p{index}" for index in range(19)),
+        samples=16,
+    )
+    assert spread_share_warning(config, enough) is None
+
+
+def test_a_partial_screen_fails_loudly(tmp_path) -> None:
+    from rlvr.cli import UsageError, build_pools
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(write_split_config(tmp_path))
+    train, _ = build_prompts(config)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    for prompt in train[:-3]:
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=16,
+                passed=8,
+                pass_rate=0.5,
+            )
+        )
+
+    with pytest.raises(UsageError, match="3 missing"):
+        build_pools(load_config(write_screen_config(tmp_path, directory)), train)
+
+
+def test_training_steps_uses_the_schedule_prompt_count(tmp_path) -> None:
+    from rlvr.cli import training_steps
+    from rlvr.pools import Pools
+
+    path = tmp_path / "steps.toml"
+    path.write_text(
+        SPLIT_CONFIG
+        + '\n[training]\npool_policy = "spread"\n'
+        'screen_rows = "rows.jsonl"\ngenerations_per_prompt = 16\n'
+        "rollouts_per_step = 64\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    prompts = [object() for _ in range(200)]
+    pools = Pools(
+        train=tuple(f"p{index}" for index in range(100)),
+        retired=(),
+        parked=("p100",),
+        samples=16,
+    )
+
+    # 64 rollouts at group size 16 is four prompts per step. Five epochs over
+    # 100 train prompts is 25 steps per epoch.
+    assert config.epochs == 5
+    assert training_steps(config, prompts, pools) == 125
+
+
+def test_training_steps_keeps_the_starting_batch_without_a_policy(tmp_path) -> None:
+    from rlvr.cli import training_steps
+
+    config = load_config(write_split_config(tmp_path))
+    prompts = [object() for _ in range(200)]
+
+    # The old path starts at two prompts per step.
+    assert training_steps(config, prompts, None) == config.epochs * 100

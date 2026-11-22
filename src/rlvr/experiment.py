@@ -18,6 +18,8 @@ Interfaces, frozen for later tasks:
     Store.write_meta(meta)
     Store.append_rollout(record)
     Store.append_metric(row)
+    Store.append_label(row)
+    Store.read_labels()
     Store.write_eval(payload)
     Store.timestamp, Store.run_dir, Store.checkpoints_dir
 
@@ -25,18 +27,29 @@ Interfaces, frozen for later tasks:
 training. `n` is the number of generations requested for one prompt.
 
 Training samples several prompt groups per step, in one `generate_batch` call.
-Each prompt keeps its own group of 8 generations, and each group is tested,
+Each prompt keeps its own group of generations, and each group is tested,
 judged only on a full pass per arm, then has its gradient accumulated on its own
 rewards. Advantage is normalised inside one prompt group, never across the step.
 The optimizer steps once at the end of the step, so the step counter is also the
-number of weight updates. The prompt count starts at two and grows while free
-memory stays above the floor, so the card is busy instead of waiting on one
-prompt group.
+number of weight updates. Without a schedule the prompt count starts at two and
+grows while free memory stays above the floor. With a schedule the rollout
+budget sets the prompt count, so the two policies compared later get equal
+compute.
 
-A staged run trains from the active stage pool and drops a question once any
-generation fully passes it. Evaluation stays greedy with n=1. Resume and budget
-guards wrap the same loop. The step counter counts batches and weight updates,
-so a resume starts at the batch after the checkpoint.
+A run trains from one measured pool. The pool is built from pass counts before
+the run. The step draw asks a `Schedule` for a `StepPlan` of train prompts and
+parked prompts. Parked rollouts join the same generator call and the same
+optimizer update, so their groups can still produce a gradient. A schedule
+without a policy trains the train pool alone. There is no curriculum and no
+stage ladder. Every record carries the fixed `unstaged` stage value so older
+readers still find the field. Evaluation stays greedy with n=1.
+
+Pool label changes are appended to `labels.jsonl` in the run folder. A resume
+reads that file before the first step, so a promoted or demoted prompt keeps its
+pool. A scheduled run also writes its saved queues in that file, so a resume
+continues the same rotation. Resume and budget guards wrap the same loop. The
+step counter counts batches and weight updates, so a resume starts at the batch
+after the checkpoint.
 """
 
 from __future__ import annotations
@@ -51,7 +64,6 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from . import repro
 from .control import ControlState, ControlWatcher
 from .batching import START_PROMPTS, BatchSizePolicy, is_cuda_out_of_memory
-from .budget import thinking_budget_for_stage
 from .checkpoint import (
     checkpoint_dir_name,
     parse_checkpoint_step,
@@ -62,6 +74,21 @@ from .checkpoint import (
 from .config import Config
 from .evaluation import pass_at_1, select_eval_subset, subset_selector
 from .memory import MemoryReport
+from .pools import DEFAULT_PROMOTION_BAR, Pools
+from .queues import queues_from_row, restore_queue
+from .schedule import (
+    GroupOutcome,
+    LabelUpdate,
+    Schedule,
+    Spread,
+    StepPlan,
+    Sweep,
+    label_from_row,
+    streak_from_row,
+    sweep_order_from_row,
+    sweep_position_from_row,
+    sweep_steps_from_row,
+)
 from .reward import (
     SYNTAX_ERROR_CLASS,
     all_tests_passed,
@@ -73,7 +100,7 @@ from .reward import (
     uses_process_judge,
 )
 from .schema import RolloutRecord
-from .stages import BANDS, UNSTAGED_STAGE, Stage
+from .stages import UNSTAGED_STAGE
 
 __all__ = [
     "Experiment",
@@ -83,6 +110,8 @@ __all__ = [
     "JudgeResult",
     "Prompt",
     "RunSummary",
+    "Schedule",
+    "StepPlan",
     "Store",
     "Outcome",
     "TestResult",
@@ -98,6 +127,55 @@ def _finite_or_none(value: float | None) -> float | None:
     if value is None:
         return None
     return value if math.isfinite(value) else None
+
+
+def _group_spread_and_sd(
+    rewards: Sequence[float | None],
+) -> tuple[float, float] | None:
+    """The mean absolute deviation and population SD of one prompt group.
+
+    A group of one reward gives zero for both. A group with a missing or
+    non-finite reward is skipped by returning None, so the step mean is taken
+    over the groups that hold a real reward only.
+    """
+    values: list[float] = []
+    for reward in rewards:
+        if reward is None:
+            return None
+        value = float(reward)
+        if not math.isfinite(value):
+            return None
+        values.append(value)
+    if not values:
+        return None
+    mean = sum(values) / len(values)
+    spread = sum(abs(value - mean) for value in values) / len(values)
+    sd = math.sqrt(sum((value - mean) ** 2 for value in values) / len(values))
+    if not math.isfinite(spread) or not math.isfinite(sd):
+        return None
+    return spread, sd
+
+
+def _mean_group_signal(
+    groups: Sequence[Sequence[float | None]],
+) -> tuple[float, float]:
+    """The step mean of the per-group spread and SD.
+
+    Groups that cannot produce a signal are skipped, not counted as zero. A
+    step with no usable group reports zero for both fields.
+    """
+    spreads: list[float] = []
+    sds: list[float] = []
+    for rewards in groups:
+        signal = _group_spread_and_sd(rewards)
+        if signal is None:
+            continue
+        spreads.append(signal[0])
+        sds.append(signal[1])
+    return (
+        sum(spreads) / len(spreads) if spreads else 0.0,
+        sum(sds) / len(sds) if sds else 0.0,
+    )
 
 
 def _empty_cuda_cache() -> None:
@@ -254,6 +332,10 @@ class Store(Protocol):
 
     def append_metric(self, row: Mapping[str, Any]) -> None: ...
 
+    def append_label(self, row: Mapping[str, Any]) -> None: ...
+
+    def read_labels(self) -> list[dict[str, Any]]: ...
+
     def write_eval(self, payload: Mapping[str, Any]) -> None: ...
 
 
@@ -268,16 +350,21 @@ class RunSummary:
     mean_reward: float
     pass_at_1: float
     stop_reason: str = "completed"
-    stage: str | None = None
+    stage: str = UNSTAGED_STAGE
 
 
 @dataclass(frozen=True)
 class StepResult:
     """What one batched training step produced.
 
-    `prompts` is the number of prompt groups and `mastered` lists the prompts
-    that had at least one full test pass. The sequence count is the length of
-    `records`.
+    `prompts` is the number of prompt groups. `train_prompts` and
+    `parked_prompts` split that count by the plan. `advantage_share` is the
+    number of groups whose rewards hold more than one distinct value, divided
+    by the group count. `group_spread` is the mean absolute deviation of each
+    group's rewards from its mean, then averaged over the groups.
+    `group_sd` is the population standard deviation, then averaged the same
+    way. `mastered` lists the prompts that had at least one full test pass. The
+    sequence count is the length of `records`.
     """
 
     records: tuple[RolloutRecord, ...]
@@ -289,6 +376,12 @@ class StepResult:
     update_norm: float | None
     mastered: tuple[Prompt, ...]
     timings: Mapping[str, float] = field(default_factory=dict)
+    train_prompts: int = 0
+    parked_prompts: int = 0
+    advantage_share: float = 0.0
+    group_spread: float = 0.0
+    group_sd: float = 0.0
+    outcomes: tuple[GroupOutcome, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -306,12 +399,21 @@ class Experiment:
     test questions and must be non-empty. The two lists must not overlap. The
     CLI builds both from the fixed MBPP split.
 
-    `stages` is the ordered curriculum built by `stages.build_stages`. When it
-    is empty the loop keeps the old behaviour: prompt groups cycle through
-    `prompts` and no question is removed. When it is present, the loop trains
-    from the active stage pool, removes a question after any full pass, and
-    moves to the next stage once the pool is empty. Exhausting the last stage
-    ends the run with `stop_reason` `"curriculum_complete"`.
+    `pools` is the single pool built from measured pass counts. When it is
+    present, only ids in `pools.train` and `pools.parked` are held by the
+    experiment. The train ids fill the step and the parked ids feed the
+    schedule. Retired prompts are kept in the pool record and never trained.
+    When it is None, every prompt in `prompts` is trained, which keeps unit
+    tests and pre-pool run folders working.
+
+    `schedule` is the step-draw policy. A caller may inject one, which is what
+    the unit tests do. When it is None and `config.pool_policy` is set, the
+    experiment builds the named policy. When neither is set, the step cycles
+    through the train prompts with no parked prompts, which is the placeholder
+    path.
+
+    `labels_path` is the difficulty label file used for reporting only. The
+    training path never reads it, so a missing file does not stop a run.
 
     `memory` is an optional callable that reads the allocator for the current
     step. The CLI passes `read_torch_memory` on a real run and `fake_memory` on
@@ -320,9 +422,8 @@ class Experiment:
 
     `resume_prompt_cursor` is the position in `prompts` where the first resumed
     step starts. The checkpoint manifest records it, and the CLI passes it back.
-    `resume_stage_index`, `resume_stage_step` and `resume_stage_pool` restore
-    the curriculum position, so a staged run continues its pool instead of
-    training the first stage again.
+    Checkpoint stage fields from older runs are ignored, because the run has one
+    pool and no stage position.
 
     `batch_policy` is injectable so a test can pin the prompt count. A run
     without one builds a policy from the configured memory floor.
@@ -335,7 +436,8 @@ class Experiment:
     test_runner: TestRunner
     store: Store
     prompts: Sequence[Prompt]
-    stages: Sequence[Stage[Prompt]] = ()
+    pools: Pools | None = None
+    labels_path: Path | None = None
     control: ControlWatcher | None = None
     eval_prompts: Sequence[Prompt] = ()
     resume_step: int = 0
@@ -343,12 +445,15 @@ class Experiment:
     fake: bool = False
     memory: Callable[[], MemoryReport] | None = None
     resume_prompt_cursor: int = 0
-    resume_stage_index: int | None = None
-    resume_stage_step: int = 0
-    resume_stage_pool: Sequence[str] | None = None
     batch_policy: BatchSizePolicy | None = None
+    schedule: Schedule | None = None
     _prompt_cursor: int = field(init=False, default=0, repr=False)
     _policy: BatchSizePolicy | None = field(init=False, default=None, repr=False)
+    _schedule: Schedule | None = field(init=False, default=None, repr=False)
+    _parked_prompts: list[Prompt] = field(init=False, default_factory=list, repr=False)
+    _saved_streaks: dict[str, int] = field(
+        init=False, default_factory=dict, repr=False
+    )
 
     def run(self) -> RunSummary:
         """Run every training step, evaluate on schedule, and summarize.
@@ -374,8 +479,16 @@ class Experiment:
                 "experiment needs at least one evaluation prompt. "
                 "Pass the held-out test questions as eval_prompts."
             )
-        if self.stages and all(not stage.train for stage in self.stages):
-            raise ValueError("curriculum stages hold no training questions")
+
+        self.prompts, self._parked_prompts = self._pool_prompts()
+        self._schedule = self.schedule or self._build_schedule()
+        if self._schedule is not None:
+            self._load_labels()
+        if not self.prompts:
+            raise ValueError(
+                "the training pool holds no prompts. Every prompt is parked or "
+                "outside the pool."
+            )
 
         resumed = self.resume_step > 0
         if not resumed:
@@ -396,34 +509,6 @@ class Experiment:
         if self.config.max_steps is not None:
             effective_steps = min(effective_steps, self.config.max_steps)
 
-        staged = bool(self.stages)
-        stage_index = self._first_open_stage(0) if staged else 0
-        if (
-            staged
-            and self.resume_stage_index is not None
-            and 0 <= self.resume_stage_index < len(self.stages)
-        ):
-            stage_index = self.resume_stage_index
-        stage_pool: list[Prompt] = (
-            list(self.stages[stage_index].train) if staged else []
-        )
-        if staged and self.resume_stage_pool is not None:
-            by_id = {prompt.prompt_id: prompt for prompt in stage_pool}
-            stage_pool = [
-                by_id[prompt_id]
-                for prompt_id in self.resume_stage_pool
-                if prompt_id in by_id
-            ]
-            if not stage_pool:
-                next_index = self._first_open_stage(stage_index + 1)
-                if next_index < len(self.stages):
-                    stage_index = next_index
-                    stage_pool = list(self.stages[next_index].train)
-        stage_step = self.resume_stage_step if staged else 0
-        active_stage = (
-            self.stages[stage_index].name if staged else UNSTAGED_STAGE
-        )
-
         # A rerun starts from the same place, so a reused Experiment is
         # deterministic. An injected policy is left as the caller set it.
         policy = self.batch_policy or BatchSizePolicy(
@@ -437,43 +522,18 @@ class Experiment:
         reward_sum = 0.0
         judge_calls = 0
         last_step = self.resume_step
-        # A checkpoint written after the last stage emptied means the run has
-        # nothing left to train. The final evaluation still runs.
-        curriculum_done = staged and self.resume_stage_pool is not None and not stage_pool
-        stop_reason = "curriculum_complete" if curriculum_done else "completed"
-        if curriculum_done:
-            effective_steps = min(effective_steps, self.resume_step)
+        stop_reason = "completed"
         evaluations: list[dict[str, Any]] = [dict(e) for e in self.prior_evaluations]
-        stage_evaluated = {
-            point["stage"]
-            for point in evaluations
-            if point.get("kind") == "stage" and isinstance(point.get("stage"), str)
-        }
 
         for step in range(self.resume_step + 1, effective_steps + 1):
             if self.control is not None:
                 state = self.control.poll()
                 self._record_control(step, state)
-                dropped = [
-                    prompt for prompt in stage_pool if prompt.prompt_id in state.drop
-                ]
-                for prompt in dropped:
-                    if prompt in stage_pool:
-                        stage_pool.remove(prompt)
                 for prompt_id, tests in state.tests.items():
                     replace = getattr(self.test_runner, "replace_tests", None)
                     if replace is not None:
                         replace(prompt_id, tests)
-                if staged and not stage_pool:
-                    next_index = self._first_open_stage(stage_index + 1)
-                    if next_index < len(self.stages):
-                        stage_index = next_index
-                        stage_pool = list(self.stages[next_index].train)
-                        stage_step = 0
-                    else:
-                        curriculum_done = True
-                        stop_reason = "curriculum_complete"
-                elif not staged and state.drop:
+                if state.drop:
                     remaining = [
                         prompt
                         for prompt in self.prompts
@@ -481,34 +541,24 @@ class Experiment:
                     ]
                     if remaining:
                         self.prompts = remaining
+                        self._parked_prompts = [
+                            prompt
+                            for prompt in self._parked_prompts
+                            if prompt.prompt_id not in state.drop
+                        ]
                     else:
-                        stop_reason = "completed"
                         break
-                if curriculum_done:
-                    break
-            if staged:
-                active_stage = self.stages[stage_index].name
-            thinking_budget = thinking_budget_for_stage(
-                self.config.thinking_budget_start,
-                stage_index,
-                self.config.max_completion_tokens,
-            )
-            trained = self._train_with_memory_guard(
+            result = self._train_with_memory_guard(
                 step,
                 policy,
-                staged=staged,
-                stage_pool=stage_pool,
-                stage_step=stage_step,
-                stage=active_stage,
-                thinking_budget=thinking_budget,
+                thinking_budget=self.config.thinking_budget,
             )
-            if trained is None:
+            if result is None:
                 # The step was attempted and stopped on memory. Record its
                 # number so the evaluation payload keeps a positive step.
                 last_step = step
                 stop_reason = "out_of_memory"
                 break
-            result, stage_start = trained
             last_step = step
             for record in result.records:
                 self.store.append_rollout(record)
@@ -522,7 +572,6 @@ class Experiment:
                     step,
                     result.records,
                     prompts=result.prompts,
-                    stage=active_stage,
                     truncated=result.truncated,
                     prompt_truncated=result.prompt_truncated,
                     mean_entropy=result.mean_entropy,
@@ -531,40 +580,19 @@ class Experiment:
                     memory=memory,
                     timings=result.timings,
                     max_prompts=policy.max_prompts,
+                    pool_policy=self._pool_policy_name(),
+                    train_prompts=result.train_prompts,
+                    parked_prompts=result.parked_prompts,
+                    advantage_share=result.advantage_share,
+                    group_spread=result.group_spread,
+                    group_sd=result.group_sd,
                 )
             )
             policy.observe(memory, prompts=result.prompts)
-
-            if staged:
-                stage_step = stage_start + result.prompts
-                for prompt in result.mastered:
-                    if prompt in stage_pool:
-                        stage_pool.remove(prompt)
-                if not stage_pool:
-                    next_index = self._first_open_stage(stage_index + 1)
-                    if next_index < len(self.stages):
-                        self._record_stage_evaluation(
-                            step,
-                            stage_index,
-                            evaluations,
-                            stage_evaluated,
-                            checkpoint_subset,
-                            stop_reason,
-                        )
-                        stage_index = next_index
-                        stage_pool = list(self.stages[next_index].train)
-                        stage_step = 0
-                    else:
-                        curriculum_done = True
-                        stop_reason = "curriculum_complete"
-                        self._record_stage_evaluation(
-                            step,
-                            stage_index,
-                            evaluations,
-                            stage_evaluated,
-                            checkpoint_subset,
-                            stop_reason,
-                        )
+            # Label changes land before the checkpoint, so a resume from this
+            # step sees the same pools as the run did.
+            self._observe_step(step, result)
+            self._record_schedule_state(step)
 
             if step % self.config.eval_every_steps == 0:
                 evaluations.append(
@@ -580,12 +608,7 @@ class Experiment:
                 )
 
             if step % self.config.checkpoint_every_steps == 0:
-                self._save_checkpoint(
-                    step,
-                    stage_index=stage_index if staged else None,
-                    stage_step=stage_step,
-                    stage_pool=stage_pool if staged else None,
-                )
+                self._save_checkpoint(step)
 
             if (
                 self.config.max_judge_calls is not None
@@ -594,27 +617,9 @@ class Experiment:
                 stop_reason = "max_judge_calls"
                 break
 
-            if curriculum_done:
-                stop_reason = "curriculum_complete"
-                break
-
         if stop_reason == "completed" and self.config.max_steps is not None:
             if last_step >= self.config.max_steps and self.config.max_steps < self.config.steps:
                 stop_reason = "max_steps"
-
-        # A run can stop inside a stage, on a budget cap or a policy stop. The
-        # held-out slice of that stage is still evaluated, so every band the
-        # run reached has a pass rate.
-        if staged:
-            for index in range(stage_index + 1):
-                self._record_stage_evaluation(
-                    last_step,
-                    index,
-                    evaluations,
-                    stage_evaluated,
-                    checkpoint_subset,
-                    stop_reason,
-                )
 
         final = self._evaluate(last_step, eval_pool, kind="final", subset=None)
         evaluations.append(final)
@@ -630,7 +635,7 @@ class Experiment:
             mean_reward=reward_sum / rollouts if rollouts else 0.0,
             pass_at_1=final["pass_at_1"],
             stop_reason=stop_reason,
-            stage=active_stage if staged else None,
+            stage=UNSTAGED_STAGE,
         )
 
     def build_meta(self) -> dict[str, Any]:
@@ -650,19 +655,11 @@ class Experiment:
             "judge_model": config.judge_model,
             "split_seed": config.split_seed,
             "config": config.raw,
-            "curriculum": {
-                "bands": list(BANDS),
-                "start_stage": self.stages[0].name if self.stages else None,
-                "carry_over_ratio": config.carry_over_ratio,
-                "stages": [
-                    {
-                        "name": stage.name,
-                        "train": len(stage.train),
-                        "held_out": len(stage.held_out),
-                    }
-                    for stage in self.stages
-                ],
-            },
+            "pools": self._pools_meta(),
+            "pool_policy": self._pool_policy_name(),
+            "schedule": self._schedule_meta(),
+            "screen_rows": config.screen_rows,
+            "labels_path": str(self.labels_path) if self.labels_path is not None else None,
             "trainer": {
                 "method": "grpo",
                 "model_name": config.model_name,
@@ -675,6 +672,7 @@ class Experiment:
                 "lora_targets": config.lora_targets,
                 "max_prompt_tokens": config.max_prompt_tokens,
                 "max_completion_tokens": config.max_completion_tokens,
+                "thinking_budget": config.thinking_budget,
                 "entropy_every_steps": config.entropy_every_steps,
                 "clip_epsilon": config.clip_epsilon,
                 "kl_beta": config.kl_beta,
@@ -719,6 +717,273 @@ class Experiment:
         """
         check_arm_implemented(self.arm)
 
+    def _pool_prompts(self) -> tuple[list[Prompt], list[Prompt]]:
+        """The train and parked prompts the run holds.
+
+        With a pool, only the `train` and `parked` ids are kept, in the order
+        the caller gave them. Retired ids are never held. Without a pool,
+        every prompt is train and nothing is parked.
+        """
+        if self.pools is None:
+            return list(self.prompts), []
+        train_ids = set(self.pools.train)
+        parked_ids = set(self.pools.parked)
+        train = [prompt for prompt in self.prompts if prompt.prompt_id in train_ids]
+        parked = [prompt for prompt in self.prompts if prompt.prompt_id in parked_ids]
+        return train, parked
+
+    def _build_schedule(self) -> Schedule | None:
+        """The configured schedule, or None for the placeholder path.
+
+        A schedule needs a measured pool, because parked prompts come from the
+        screen. The prompt count is the rollout budget divided by the group
+        size. The spread parked block is half of that count. The sweep gap is
+        the configured multiple of its own length.
+        """
+        policy = self.config.pool_policy
+        if policy is None or self.pools is None:
+            return None
+        group = self.config.generations_per_prompt
+        prompts_per_step = max(1, self.config.rollouts_per_step // group)
+        if policy == "spread":
+            return Spread(
+                prompts_per_step=prompts_per_step,
+                seed=self.config.seed,
+                promotion_bar=DEFAULT_PROMOTION_BAR,
+            )
+        if policy == "sweep":
+            return Sweep(
+                prompts_per_step=prompts_per_step,
+                gap_ratio=self.config.sweep_gap_ratio,
+                seed=self.config.seed,
+                promotion_bar=DEFAULT_PROMOTION_BAR,
+            )
+        # The config loader rejects an unknown policy, so this is unreachable
+        # unless a caller builds a Config by hand.
+        raise ValueError(f"unknown pool policy {policy!r}")
+
+    def _pool_policy_name(self) -> str | None:
+        """The policy name written to the step row and the run record."""
+        if self._schedule is None:
+            return None
+        return getattr(self._schedule, "name", self.config.pool_policy)
+
+    def _load_labels(self) -> None:
+        """Replay pool changes and failure streaks from the run's label file.
+
+        The file holds one row per change, one row per saved train streak and
+        one row per step that saves both queues, in step order. The last row for
+        a prompt wins. A row with an unknown label or streak is ignored, so a
+        future row name cannot move a prompt by accident. A sweep position row
+        is replayed last, so a resume mid sweep continues at the saved cycle
+        index. The frozen sweep length is replayed too, so a resume keeps the
+        number of sweep steps planned at the sweep start. A queues row is
+        reconciled with the current pool before the schedule sees it.
+        """
+        reader = getattr(self.store, "read_labels", None)
+        if reader is None:
+            raise TypeError(
+                "a scheduled run needs a store with read_labels, so a resume "
+                "keeps the pool labels"
+            )
+        restore = getattr(self._schedule, "restore_streak", None)
+        restore_position = getattr(self._schedule, "restore_position", None)
+        restore_steps = getattr(self._schedule, "restore_sweep_steps", None)
+        restore_order = getattr(self._schedule, "restore_order", None)
+        restore_state = getattr(self._schedule, "restore_state", None)
+        for row in reader():
+            parsed = label_from_row(row)
+            if parsed is not None:
+                prompt_id, label = parsed
+                self._move_prompt(prompt_id, to_train=label == "train")
+                # A pool move starts the prompt with a clean streak. An older
+                # file has no explicit zero row, so clear it here.
+                if restore is not None:
+                    restore(prompt_id, 0)
+                self._saved_streaks[prompt_id] = 0
+                continue
+            saved_streak = streak_from_row(row)
+            if saved_streak is not None and restore is not None:
+                prompt_id, streak = saved_streak
+                restore(prompt_id, streak)
+                self._saved_streaks[prompt_id] = streak
+                continue
+            saved_steps = sweep_steps_from_row(row)
+            if saved_steps is not None and restore_steps is not None:
+                restore_steps(saved_steps)
+            saved_position = sweep_position_from_row(row)
+            if saved_position is not None and restore_position is not None:
+                restore_position(saved_position)
+            saved_order = sweep_order_from_row(row)
+            if saved_order is not None and restore_order is not None:
+                restore_order(saved_order)
+            saved_queues = queues_from_row(row)
+            if saved_queues is not None and restore_state is not None:
+                parked_ids, train_ids = saved_queues
+                restore_state(
+                    restore_queue(
+                        parked_ids,
+                        (prompt.prompt_id for prompt in self._parked_prompts),
+                    ),
+                    restore_queue(
+                        train_ids,
+                        (prompt.prompt_id for prompt in self.prompts),
+                    ),
+                )
+
+    def _observe_step(self, step: int, result: StepResult) -> None:
+        """Ask the schedule for label changes, then apply and record them.
+
+        Every train group's zero-pass count is saved after the label changes,
+        so a resume continues counting instead of starting again at zero.
+        """
+        if self._schedule is None or not result.outcomes:
+            return
+        updates = self._schedule.observe(step, result.outcomes)
+        self._apply_label_updates(updates)
+        self._record_streaks(step, result.outcomes)
+
+    def _record_schedule_state(self, step: int) -> None:
+        """Save a schedule's state beside the label state.
+
+        The row is the schedule's own shape. A schedule with a moving cycle
+        saves its position. A schedule with queues saves both queues as a
+        `queues` row. The row goes to the label file after the step, so a
+        resume at this step's checkpoint replays the state that the next step
+        should use.
+        """
+        if self._schedule is None:
+            return
+        row_for = getattr(self._schedule, "state_row", None)
+        if row_for is None:
+            return
+        writer = getattr(self.store, "append_label", None)
+        if writer is None:
+            raise TypeError(
+                "a scheduled run needs a store with append_label, so a resume "
+                "keeps the schedule position"
+            )
+        writer(row_for(step))
+
+    def _record_streaks(
+        self, step: int, outcomes: Sequence[GroupOutcome]
+    ) -> None:
+        """Append a train count row when the count changes.
+
+        A passing train group leaves the count alone, so it writes no row. A
+        zero-pass group adds one and a demotion resets the count, so each writes
+        one row. An unchanged count is already saved, so a resume restores it.
+        """
+        streak_for = getattr(self._schedule, "failure_streak", None)
+        if streak_for is None:
+            return
+        writer = getattr(self.store, "append_label", None)
+        if writer is None:
+            raise TypeError(
+                "a scheduled run needs a store with append_label, so a resume "
+                "keeps the pool labels"
+            )
+        for outcome in outcomes:
+            if outcome.parked:
+                continue
+            streak = streak_for(outcome.prompt_id)
+            if self._saved_streaks.get(outcome.prompt_id, 0) == streak:
+                continue
+            writer(
+                {
+                    "step": step,
+                    "prompt_id": outcome.prompt_id,
+                    "streak": streak,
+                }
+            )
+            self._saved_streaks[outcome.prompt_id] = streak
+
+    def _apply_label_updates(self, updates: Sequence[LabelUpdate]) -> None:
+        """Write each label change, then move the prompt to its new pool."""
+        writer = getattr(self.store, "append_label", None)
+        if updates and writer is None:
+            raise TypeError(
+                "a scheduled run needs a store with append_label, so a resume "
+                "keeps the pool labels"
+            )
+        tracks_streak = getattr(self._schedule, "failure_streak", None) is not None
+        for update in updates:
+            writer(update.to_dict())
+            self._move_prompt(update.prompt_id, to_train=update.label == "train")
+            # A pool move starts the failure streak again at zero. Write the
+            # zero so a resume does not restore an older streak for this prompt.
+            if tracks_streak:
+                writer(
+                    {
+                        "step": update.step,
+                        "prompt_id": update.prompt_id,
+                        "streak": 0,
+                    }
+                )
+                self._saved_streaks[update.prompt_id] = 0
+
+    def _move_prompt(self, prompt_id: str, *, to_train: bool) -> None:
+        """Move one prompt between the train list and the parked list."""
+        source = self._parked_prompts if to_train else self.prompts
+        target = self.prompts if to_train else self._parked_prompts
+        for index, prompt in enumerate(source):
+            if prompt.prompt_id != prompt_id:
+                continue
+            del source[index]
+            if all(existing.prompt_id != prompt_id for existing in target):
+                target.append(prompt)
+            return
+
+    def _pools_meta(self) -> dict[str, Any]:
+        """The pool counts for the run record.
+
+        A run without a measured pool trains every provided prompt. Its
+        `samples` is null and `measured` is false, because no screen count backs
+        the membership. A real pool records its measured sample count and
+        `measured` true.
+        """
+        pools = self.pools
+        if pools is None:
+            return {
+                "train": len(self.prompts),
+                "retired": 0,
+                "parked": 0,
+                "samples": None,
+                "measured": False,
+            }
+        return {
+            "train": len(pools.train),
+            "retired": len(pools.retired),
+            "parked": len(pools.parked),
+            "samples": pools.samples,
+            "measured": True,
+        }
+
+    def _schedule_meta(self) -> dict[str, Any] | None:
+        """The scheduled step size, parked count and planned parked share.
+
+        Both policies record the same fields. The share is the planned value at
+        the start of the run. It can move when prompts promote or demote, so it
+        is a plan, not a measurement.
+        """
+        schedule = self._schedule
+        if schedule is None:
+            return None
+        parked = len(self._parked_prompts)
+        share_for = getattr(schedule, "planned_parked_share", None)
+        if not callable(share_for):
+            share = None
+        elif isinstance(schedule, Sweep):
+            share = share_for(parked)
+        else:
+            share = share_for()
+        return {
+            "policy": self._pool_policy_name(),
+            "step_prompts": schedule.prompts_per_step,
+            "parked_prompts": parked,
+            "planned_parked_share": share,
+        }
+
     def _prompts_for_step(self, count: int) -> list[Prompt]:
         """The next `count` training prompts, cycling through the list.
 
@@ -731,77 +996,70 @@ class Experiment:
         self._prompt_cursor = start + count
         return block
 
-    def _plan_step(
-        self,
-        policy: BatchSizePolicy,
-        *,
-        staged: bool,
-        stage_pool: Sequence[Prompt],
-        stage_step: int,
-    ) -> tuple[list[Prompt], int]:
-        """The prompts for one step and the active pool offset it starts at.
+    def _plan_step(self, step: int, policy: BatchSizePolicy) -> StepPlan:
+        """The prompts for one step, from the schedule or the batch policy.
 
-        The offset is only used by a staged run, to advance the pool position
-        by what the step actually trained.
+        A configured schedule owns the prompt count, because its block formula
+        depends on the rollout budget. Without one, the batch policy keeps the
+        old adaptive count and only train prompts are drawn.
         """
-        if staged:
-            count = policy.count(len(stage_pool))
-            start = stage_step % len(stage_pool)
-            return [
-                stage_pool[(start + index) % len(stage_pool)]
-                for index in range(count)
-            ], start
+        if self._schedule is not None:
+            return self._schedule.plan(
+                step, tuple(self.prompts), tuple(self._parked_prompts)
+            )
         count = policy.count(len(self.prompts))
-        return self._prompts_for_step(count), 0
+        return StepPlan(train=tuple(self._prompts_for_step(count)))
 
     def _train_with_memory_guard(
         self,
         step: int,
         policy: BatchSizePolicy,
         *,
-        staged: bool,
-        stage_pool: Sequence[Prompt],
-        stage_step: int,
-        stage: str,
         thinking_budget: int | None = None,
-    ) -> tuple[StepResult, int] | None:
+    ) -> StepResult | None:
         """Retry CUDA allocation failures at a strictly smaller prompt count.
 
-        Failed attempts restore the prompt cursor and never advance the stage.
-        A previously successful size may fail on longer completions, so the
-        retry must also shrink when the policy has already settled.
+        Failed attempts restore the prompt cursor. A previously successful size
+        may fail on longer completions, so the retry must also shrink when the
+        policy has already settled.
         """
         cursor = self._prompt_cursor
+        plan: StepPlan | None = None
         while True:
             self._prompt_cursor = cursor
-            prompts, start = self._plan_step(
-                policy, staged=staged, stage_pool=stage_pool, stage_step=stage_step
-            )
+            if plan is None:
+                plan = self._plan_step(step, policy)
             try:
-                result = self._training_step(
-                    step, prompts, stage, thinking_budget=thinking_budget
+                return self._training_step(
+                    step, plan, thinking_budget=thinking_budget
                 )
-                return result, start
             except Exception as error:
                 if not is_cuda_out_of_memory(error):
                     raise
                 self._prompt_cursor = cursor
-                policy.settle(failed_prompts=len(prompts))
+                policy.settle(failed_prompts=len(plan.prompts))
                 _empty_cuda_cache()
-                if len(prompts) == 1:
+                if len(plan.prompts) == 1:
                     return None
+                if self._schedule is not None:
+                    # A schedule owns the step size, so the retry drops one
+                    # prompt from the end instead of asking it again unchanged.
+                    plan = self._shrink_plan(plan)
+                else:
+                    # The batch policy now hands out a smaller count.
+                    plan = None
 
-    def _first_open_stage(self, index: int) -> int:
-        """The first stage at or after `index` that has training questions."""
-        while index < len(self.stages) and not self.stages[index].train:
-            index += 1
-        return index
+    @staticmethod
+    def _shrink_plan(plan: StepPlan) -> StepPlan:
+        """One prompt fewer, parked first, so an out-of-memory retry can fit."""
+        if plan.parked:
+            return StepPlan(train=plan.train, parked=plan.parked[:-1])
+        return StepPlan(train=plan.train[:-1], parked=())
 
     def _training_step(
         self,
         step: int,
-        prompts: Sequence[Prompt],
-        stage: str,
+        plan: StepPlan,
         thinking_budget: int | None = None,
     ) -> StepResult:
         """Sample every prompt group in one call, then apply one update.
@@ -809,12 +1067,17 @@ class Experiment:
         The generator returns one group per prompt, in prompt order. Each group
         is scored and parsed on its own, and its rewards are accumulated on
         their own, so advantages stay inside a prompt group and never cross the
-        step. The optimizer steps once after the last group, which makes this
-        step exactly one weight update.
+        step. Train and parked groups share the call and the optimizer step, so
+        parked rollouts produce gradients too.
 
         The entropy flag is the same for every group in a step. The step value
-        is the mean over the groups that returned one.
+        is the mean over the groups that returned one. The advantage share
+        counts groups whose rewards hold more than one distinct value. The
+        group spread and group SD average the per-group values, and a group
+        with a missing reward is skipped.
         """
+        prompts = list(plan.prompts)
+        parked_ids = {prompt.prompt_id for prompt in plan.parked}
         started = perf_counter()
         measure_entropy = self._measures_entropy(step)
         batches = self.generator.generate_batch(
@@ -827,8 +1090,11 @@ class Experiment:
         self._check_batch_shape(prompts, batches)
 
         records: list[RolloutRecord] = []
+        group_rewards: list[tuple[float | None, ...]] = []
         entropies: list[float] = []
         mastered: list[Prompt] = []
+        outcomes: list[GroupOutcome] = []
+        advantage_groups = 0
         truncated = 0
         prompt_truncated = 0
         scoring_seconds = 0.0
@@ -846,13 +1112,13 @@ class Experiment:
         try:
             if pool is not None:
                 future = pool.submit(
-                    self._score_prompt_group, step, prompts[0], stage, batches[0]
+                    self._score_prompt_group, step, prompts[0], batches[0]
                 )
             for index, (prompt, generations) in enumerate(zip(prompts, batches)):
                 wait_started = perf_counter()
                 scored = (
                     future.result() if future is not None else
-                    self._score_prompt_group(step, prompt, stage, generations)
+                    self._score_prompt_group(step, prompt, generations)
                 )
                 scoring_wait_seconds += perf_counter() - wait_started
                 scoring_seconds += scored.seconds
@@ -861,7 +1127,6 @@ class Experiment:
                         self._score_prompt_group,
                         step,
                         prompts[index + 1],
-                        stage,
                         batches[index + 1],
                     )
                 update_started = perf_counter()
@@ -873,6 +1138,24 @@ class Experiment:
                 )
                 update_seconds += perf_counter() - update_started
                 records.extend(scored.records)
+                passed = sum(
+                    1
+                    for record in scored.records
+                    if all_tests_passed(record.tests_passed, record.tests_total)
+                )
+                outcomes.append(
+                    GroupOutcome(
+                        prompt_id=prompt.prompt_id,
+                        passed=passed,
+                        samples=len(scored.records),
+                        parked=prompt.prompt_id in parked_ids,
+                    )
+                )
+                if len({record.reward for record in scored.records}) > 1:
+                    advantage_groups += 1
+                group_rewards.append(
+                    tuple(record.reward for record in scored.records)
+                )
                 truncated += sum(generation.truncated for generation in generations)
                 prompt_truncated += sum(
                     generation.prompt_truncated for generation in generations
@@ -908,6 +1191,7 @@ class Experiment:
         }
         if self.fake:
             timings = {name: 0.0 for name in timings}
+        group_spread, group_sd = _mean_group_signal(group_rewards)
         return StepResult(
             records=tuple(records),
             prompts=len(prompts),
@@ -918,6 +1202,12 @@ class Experiment:
             update_norm=update_norm,
             mastered=tuple(mastered),
             timings=timings,
+            train_prompts=len(plan.train),
+            parked_prompts=len(plan.parked),
+            advantage_share=advantage_groups / len(prompts) if prompts else 0.0,
+            group_spread=group_spread,
+            group_sd=group_sd,
+            outcomes=tuple(outcomes),
         )
 
     def _check_batch_shape(
@@ -948,12 +1238,11 @@ class Experiment:
         self,
         step: int,
         prompt: Prompt,
-        stage: str,
         generations: Sequence[Generation],
         measure_entropy: bool,
     ) -> tuple[list[RolloutRecord], int, int, float | None, bool]:
         """Score and accumulate one group through the synchronous seam."""
-        scored = self._score_prompt_group(step, prompt, stage, generations)
+        scored = self._score_prompt_group(step, prompt, generations)
         entropy = self.generator.accumulate(
             prompt,
             generations,
@@ -983,7 +1272,6 @@ class Experiment:
         self,
         step: int,
         prompt: Prompt,
-        stage: str,
         generations: Sequence[Generation],
     ) -> _ScoredGroup:
         """Run tests and judges without touching the generator or store."""
@@ -999,8 +1287,7 @@ class Experiment:
 
         # A prompt counts as solved only when every generation passed. One pass
         # in eight says the prompt is winnable by luck, not that the policy
-        # holds the skill, and a prompt removed on one lucky pass shrinks the
-        # stage pool to its unsolvable leftovers.
+        # holds the skill.
         solved = bool(outcomes) and len(passing) == len(outcomes)
 
         judge_scores: list[float | None] = [None] * len(generations)
@@ -1024,7 +1311,6 @@ class Experiment:
                 generation,
                 outcome,
                 step,
-                stage=stage,
                 judge_score=judge_scores[index],
                 process_score=process_scores[index],
                 cache_hit=cache_hits[index],
@@ -1065,7 +1351,6 @@ class Experiment:
         outcome: Outcome,
         step: int,
         *,
-        stage: str,
         judge_score: float | None,
         process_score: float | None,
         cache_hit: bool,
@@ -1107,7 +1392,7 @@ class Experiment:
         return RolloutRecord(
             arm=self.arm,
             step=step,
-            stage=stage,
+            stage=UNSTAGED_STAGE,
             prompt_id=prompt.prompt_id,
             reasoning=generation.reasoning,
             code=generation.code,
@@ -1138,20 +1423,13 @@ class Experiment:
             calls += 1
         return calls
 
-    def _save_checkpoint(
-        self,
-        step: int,
-        *,
-        stage_index: int | None = None,
-        stage_step: int = 0,
-        stage_pool: Sequence[Prompt] | None = None,
-    ) -> None:
+    def _save_checkpoint(self, step: int) -> None:
         """Ask the generator for its state, then write the checkpoint manifest.
 
-        The manifest carries the prompt cursor, the batch policy state, and the
-        curriculum position. A resume therefore continues on the next batch
-        boundary with the same size and the same stage pool, instead of
-        rewinding the prompt list or training the first stage again.
+        The manifest carries the prompt cursor and the batch policy state. A
+        resume therefore continues on the next batch boundary with the same
+        size, instead of rewinding the prompt list. It does not carry a stage
+        position, because the run has one pool.
 
         After the manifest is written, older checkpoints beyond the retained
         set are deleted. This only touches this run folder, never persistent
@@ -1166,13 +1444,6 @@ class Experiment:
                 "largest_fit": self._policy.largest_fit,
                 "settled": self._policy.settled,
             }
-        stage = None
-        if stage_index is not None:
-            stage = {
-                "index": stage_index,
-                "step": stage_step,
-                "pool": [prompt.prompt_id for prompt in stage_pool or ()],
-            }
         write_checkpoint_manifest(
             directory,
             step=step,
@@ -1180,7 +1451,6 @@ class Experiment:
             timestamp=self.store.timestamp,
             prompt_cursor=self._prompt_cursor,
             batch=batch,
-            stage=stage,
         )
         existing: list[int] = []
         for child in self.store.checkpoints_dir.iterdir():
@@ -1200,7 +1470,6 @@ class Experiment:
         records: Sequence[RolloutRecord],
         *,
         prompts: int,
-        stage: str,
         truncated: int = 0,
         prompt_truncated: int = 0,
         mean_entropy: float | None = None,
@@ -1209,12 +1478,23 @@ class Experiment:
         memory: MemoryReport | None = None,
         timings: Mapping[str, float] | None = None,
         max_prompts: int | None = None,
+        pool_policy: str | None = None,
+        train_prompts: int = 0,
+        parked_prompts: int = 0,
+        advantage_share: float = 0.0,
+        group_spread: float = 0.0,
+        group_sd: float = 0.0,
     ) -> dict[str, Any]:
         """One metrics row. Entropy is present only on a measurement step.
 
         `prompts` is the prompt groups in the batch and `sequences` is the
         sampled completions across them. `rollouts` keeps the old name for the
-        sequence count, so an older reader keeps working. `grad_norm` and
+        sequence count, so an older reader keeps working. `train_prompts` and
+        `parked_prompts` split the group count by the plan. `advantage_share`
+        is the share of groups with more than one distinct reward, so a step
+        that teaches nothing is visible in the row. `group_spread` and
+        `group_sd` average the per-group reward spread and population SD, so
+        the row shows how much there is to learn from. `grad_norm` and
         `update_norm` are null when the generator has no gradients, as the fake
         does, or when a diverged step produced a non-finite value.
         """
@@ -1227,13 +1507,19 @@ class Experiment:
         row: dict[str, Any] = {
             "step": step,
             "arm": records[0].arm if records else None,
-            "stage": stage,
+            "stage": UNSTAGED_STAGE,
+            "pool_policy": pool_policy,
             "prompts": prompts,
+            "train_prompts": train_prompts,
+            "parked_prompts": parked_prompts,
             "sequences": count,
             "rollouts": count,
             "max_prompts": max_prompts,
             "mean_reward": sum(record.reward for record in records) / count,
             "pass_rate": passed / count,
+            "advantage_share": advantage_share,
+            "group_spread": group_spread,
+            "group_sd": group_sd,
             "mean_completion_tokens": sum(record.completion_tokens for record in records) / count,
             "cache_hits": sum(1 for record in records if record.cache_hit),
             "truncation_rate": truncated / count,
@@ -1253,38 +1539,6 @@ class Experiment:
             row["mean_entropy"] = mean_entropy
         return row
 
-    def _record_stage_evaluation(
-        self,
-        step: int,
-        index: int,
-        evaluations: list[dict[str, Any]],
-        evaluated: set[str],
-        checkpoint_subset: Mapping[str, Any],
-        stop_reason: str,
-    ) -> None:
-        """Evaluate one stage's held-out slice once, and write `eval.json`.
-
-        The evaluation carries the stage name, so `eval.json` holds the pass
-        rate per band in the same list as the checkpoint and final evaluations.
-        A stage with no held-out questions is skipped.
-        """
-        stage = self.stages[index]
-        if stage.name in evaluated or not stage.held_out:
-            return
-        evaluations.append(
-            self._evaluate(
-                step,
-                stage.held_out,
-                kind="stage",
-                subset=None,
-                stage=stage.name,
-            )
-        )
-        evaluated.add(stage.name)
-        self.store.write_eval(
-            self._eval_payload(evaluations, checkpoint_subset, stop_reason)
-        )
-
     def _evaluate(
         self,
         step: int,
@@ -1292,7 +1546,6 @@ class Experiment:
         *,
         kind: str,
         subset: Mapping[str, Any] | None,
-        stage: str | None = None,
     ) -> dict[str, Any]:
         """Greedy pass@1 in bounded batches, shrinking on CUDA OOM."""
         started = perf_counter()
@@ -1326,14 +1579,13 @@ class Experiment:
         point: dict[str, Any] = {
             "step": step,
             "kind": kind,
+            "stage": UNSTAGED_STAGE,
             "evaluation_seconds": 0.0 if self.fake else perf_counter() - started,
             "pass_at_1": pass_at_1(passed),
             "count": len(prompt_ids),
             "prompt_ids": prompt_ids,
             "subset": dict(subset) if subset is not None else None,
         }
-        if stage is not None:
-            point["stage"] = stage
         return point
 
     def _eval_payload(

@@ -1,8 +1,8 @@
 """Tests for editing a run through the control file, between steps.
 
-The run holds its stage pool and test lists in memory, so these tests check the
-only supported way to change them mid-run: a control file polled at the top of
-every step. No GPU, Docker, or model is involved.
+The run holds its training pool and test lists in memory, so these tests check
+the only supported way to change them mid-run: a control file polled at the top
+of every step. No GPU, Docker, or model is involved.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 from rlvr.batching import BatchSizePolicy
 from rlvr.config import load_config
 from rlvr.control import ControlWatcher
-from rlvr.experiment import Experiment, Outcome, Prompt, Stage
+from rlvr.experiment import Experiment, Outcome, Prompt
 
 CONFIG_TEXT = """\
 [model]
@@ -139,14 +139,12 @@ def write_control(path: Path, payload: dict) -> None:
 
 def build(
     tmp_path: Path,
-    stages,
+    prompts,
     *,
     passing: set[str] | None = None,
     steps: int = 3,
-    unstaged: bool = False,
-    resume_stage_index: int | None = None,
-    resume_stage_pool: list[str] | None = None,
     resume_step: int = 0,
+    control: bool = True,
 ):
     config_path = tmp_path / "config.toml"
     config_path.write_text(
@@ -163,18 +161,11 @@ def build(
         judge=StubJudge(),
         test_runner=runner,
         store=store,
-        prompts=(
-            [item for stage in stages for item in stage.train]
-            if unstaged
-            else [stage.train[0] for stage in stages if stage.train]
-        ),
-        stages=() if unstaged else stages,
+        prompts=list(prompts),
         eval_prompts=[prompt("eval-0000")],
         batch_policy=BatchSizePolicy(current=1, max_prompts=1),
-        control=ControlWatcher(control_path),
+        control=ControlWatcher(control_path) if control else None,
         resume_step=resume_step,
-        resume_stage_index=resume_stage_index,
-        resume_stage_pool=resume_stage_pool,
     )
     return experiment, store, runner, generator, control_path
 
@@ -190,8 +181,9 @@ def prompts_by_step(store: RecordingStore) -> list[str]:
 
 
 def test_a_dropped_prompt_is_not_sampled_again(tmp_path: Path) -> None:
-    stages = (Stage("very easy", (prompt("q0"), prompt("q1"), prompt("q2"))),)
-    experiment, store, _runner, _gen, control = build(tmp_path, stages, steps=3)
+    experiment, store, _runner, _gen, control = build(
+        tmp_path, [prompt("q0"), prompt("q1"), prompt("q2")], steps=3
+    )
     write_control(control, {"drop": ["q1"]})
 
     experiment.run()
@@ -199,50 +191,22 @@ def test_a_dropped_prompt_is_not_sampled_again(tmp_path: Path) -> None:
     assert prompts_by_step(store) == ["q0", "q2", "q0"]
 
 
-def test_dropping_the_whole_pool_advances_the_stage(tmp_path: Path) -> None:
-    stages = (
-        Stage("very easy", (prompt("q0"), prompt("q1"))),
-        Stage("medium", (prompt("q2"),)),
+def test_dropping_the_whole_pool_stops_the_run(tmp_path: Path) -> None:
+    experiment, store, _runner, _gen, control = build(
+        tmp_path, [prompt("q0"), prompt("q1")], steps=2
     )
-    experiment, store, _runner, _gen, control = build(tmp_path, stages, steps=2)
     write_control(control, {"drop": ["q0", "q1"]})
-
-    experiment.run()
-
-    assert [row["stage"] for row in store.metrics][0] == "medium"
-    assert set(prompts_by_step(store)) == {"q2"}
-
-
-def test_a_drop_that_empties_the_last_stage_stops_the_curriculum(
-    tmp_path: Path,
-) -> None:
-    stages = (Stage("very easy", (prompt("q0"),)),)
-    experiment, store, _runner, _gen, control = build(tmp_path, stages, steps=2)
-    write_control(control, {"drop": ["q0"]})
 
     result = experiment.run()
 
-    assert result.stop_reason == "curriculum_complete"
+    assert result.stop_reason == "completed"
     assert store.rollouts == []
 
 
-def test_a_drop_in_an_unstaged_run_removes_the_prompt(tmp_path: Path) -> None:
-    experiment, store, _runner, _gen, control = build(
-        tmp_path,
-        (Stage("very easy", (prompt("q0"), prompt("q1"))),),
-        steps=2,
-        unstaged=True,
-    )
-    write_control(control, {"drop": ["q0"]})
-
-    experiment.run()
-
-    assert set(prompts_by_step(store)) == {"q1"}
-
-
 def test_unknown_prompt_ids_are_ignored(tmp_path: Path) -> None:
-    stages = (Stage("very easy", (prompt("q0"),)),)
-    experiment, store, _runner, _gen, control = build(tmp_path, stages, steps=2)
+    experiment, store, _runner, _gen, control = build(
+        tmp_path, [prompt("q0")], steps=2
+    )
     write_control(control, {"drop": ["not-a-prompt"]})
 
     experiment.run()
@@ -251,8 +215,9 @@ def test_unknown_prompt_ids_are_ignored(tmp_path: Path) -> None:
 
 
 def test_a_test_replacement_reaches_the_runner(tmp_path: Path) -> None:
-    stages = (Stage("very easy", (prompt("q0"),)),)
-    experiment, _store, runner, _gen, control = build(tmp_path, stages, steps=2)
+    experiment, _store, runner, _gen, control = build(
+        tmp_path, [prompt("q0")], steps=2
+    )
     write_control(control, {"tests": {"q0": ["assert f() == 1"]}})
 
     experiment.run()
@@ -261,8 +226,9 @@ def test_a_test_replacement_reaches_the_runner(tmp_path: Path) -> None:
 
 
 def test_one_event_is_written_per_change_not_per_step(tmp_path: Path) -> None:
-    stages = (Stage("very easy", (prompt("q0"), prompt("q1"))),)
-    experiment, store, _runner, _gen, control = build(tmp_path, stages, steps=4)
+    experiment, store, _runner, _gen, control = build(
+        tmp_path, [prompt("q0"), prompt("q1")], steps=4
+    )
     write_control(control, {"drop": ["q1"]})
 
     experiment.run()
@@ -275,20 +241,22 @@ def test_one_event_is_written_per_change_not_per_step(tmp_path: Path) -> None:
 
 
 def test_a_broken_file_is_reported_and_the_run_continues(tmp_path: Path) -> None:
-    stages = (Stage("very easy", (prompt("q0"), prompt("q1"))),)
-    experiment, store, _runner, _gen, control = build(tmp_path, stages, steps=2)
+    experiment, store, _runner, _gen, control = build(
+        tmp_path, [prompt("q0"), prompt("q1")], steps=2
+    )
     control.write_text("{not json", encoding="utf-8")
 
     result = experiment.run()
 
-    assert result.stop_reason in {"completed", "curriculum_complete"}
+    assert result.stop_reason == "completed"
     assert any(event["action"] == "error" for event in store.control_events)
     assert store.rollouts
 
 
 def test_a_file_written_mid_run_is_seen_on_the_next_step(tmp_path: Path) -> None:
-    stages = (Stage("very easy", (prompt("q0"), prompt("q1"), prompt("q2"))),)
-    experiment, store, _runner, generator, control = build(tmp_path, stages, steps=2)
+    experiment, store, _runner, generator, control = build(
+        tmp_path, [prompt("q0"), prompt("q1"), prompt("q2")], steps=2
+    )
     generator.on_accumulate = lambda: write_control(control, {"drop": ["q1", "q2"]})
 
     experiment.run()
@@ -298,54 +266,34 @@ def test_a_file_written_mid_run_is_seen_on_the_next_step(tmp_path: Path) -> None
 
 
 def test_a_resume_applies_the_drop_before_the_first_step(tmp_path: Path) -> None:
-    stages = (
-        Stage("very easy", (prompt("q0"), prompt("q1"))),
-        Stage("medium", (prompt("q2"),)),
-    )
     experiment, store, _runner, _gen, control = build(
         tmp_path,
-        stages,
+        [prompt("q0"), prompt("q1"), prompt("q2")],
         steps=8,
         resume_step=5,
-        resume_stage_index=0,
-        resume_stage_pool=["q0", "q1"],
     )
     write_control(control, {"drop": ["q0", "q1"]})
 
     experiment.run()
 
-    assert [row["stage"] for row in store.metrics][0] == "medium"
+    assert {row["stage"] for row in store.metrics} == {"unstaged"}
+    assert set(prompts_by_step(store)) == {"q2"}
 
 
 def test_no_control_file_means_no_events(tmp_path: Path) -> None:
-    stages = (Stage("very easy", (prompt("q0"),)),)
-    experiment, store, _runner, _gen, _control = build(tmp_path, stages, steps=2)
+    experiment, store, _runner, _gen, _control = build(
+        tmp_path, [prompt("q0")], steps=2, control=False
+    )
 
     experiment.run()
 
     assert store.control_events == []
 
 
-def test_a_drop_reaches_the_next_stage_after_an_advance(tmp_path: Path) -> None:
-    """A drop naming a prompt in a later stage still applies when it arrives."""
-    stages = (
-        Stage("very easy", (prompt("q0"), prompt("q1"))),
-        Stage("medium", (prompt("q2"),)),
-        Stage("hard", (prompt("q3"),)),
-    )
-    experiment, store, _runner, _gen, control = build(
-        tmp_path, stages, steps=2, passing={"q0", "q1"}
-    )
-    write_control(control, {"drop": ["q0", "q2"]})
-
-    experiment.run()
-
-    assert prompts_by_step(store) == ["q1", "q3"]
-
-
 def test_a_test_edit_is_applied_once_and_not_every_step(tmp_path: Path) -> None:
-    stages = (Stage("very easy", (prompt("q0"),)),)
-    experiment, store, runner, _gen, control = build(tmp_path, stages, steps=3)
+    experiment, store, runner, _gen, control = build(
+        tmp_path, [prompt("q0")], steps=3
+    )
     write_control(control, {"tests": {"q0": ["assert f() == 1"]}})
 
     experiment.run()

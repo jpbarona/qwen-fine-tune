@@ -24,7 +24,6 @@ from rlvr.qwen import (
     mean_token_loss,
     pad_prompts,
     seed_rngs,
-    split_generated_rows,
     split_thinking_and_code,
     thinking_marker_index,
     truncate_prompt,
@@ -466,36 +465,6 @@ def test_check_attention_mask_rejects_a_bad_flag_and_a_length_mismatch() -> None
         check_attention_mask([[9]], [[1, 1]], pad_token_id=0)
 
 
-def test_split_generated_rows_cuts_the_prompt_and_groups_by_prompt() -> None:
-    # Padded prompt width 3, two prompts, two samples each.
-    rows = [
-        [0, 1, 2, 10, 11],
-        [0, 1, 2, 12, 13],
-        [4, 5, 6, 20, 21],
-        [4, 5, 6, 22, 23],
-    ]
-    groups = split_generated_rows(
-        rows, prompt_count=2, per_prompt=2, prompt_length=3
-    )
-    assert groups == [[[10, 11], [12, 13]], [[20, 21], [22, 23]]]
-
-
-def test_split_generated_rows_rejects_the_wrong_row_count() -> None:
-    with pytest.raises(ValueError, match="expected 4"):
-        split_generated_rows(
-            [[0, 1]], prompt_count=2, per_prompt=2, prompt_length=1
-        )
-
-
-def test_split_generated_rows_rejects_bad_arguments() -> None:
-    with pytest.raises(ValueError, match="prompt_count"):
-        split_generated_rows([], prompt_count=0, per_prompt=1, prompt_length=0)
-    with pytest.raises(ValueError, match="per_prompt"):
-        split_generated_rows([], prompt_count=1, per_prompt=0, prompt_length=0)
-    with pytest.raises(ValueError, match="prompt_length"):
-        split_generated_rows([], prompt_count=1, per_prompt=1, prompt_length=-1)
-
-
 def test_seed_rngs_seeds_the_python_rng() -> None:
     import random
 
@@ -544,7 +513,7 @@ def test_lfm_requires_its_transformers_5_tokenizer_runtime() -> None:
 
     validate_transformers_version(QWEN3, "4.57.1")
     validate_transformers_version(LFM2, "5.0.0")
-    with pytest.raises(ValueError, match="pip install -e.*lfm"):
+    with pytest.raises(ValueError, match="pip install -e.*vllm"):
         validate_transformers_version(LFM2, "4.57.1")
 
 
@@ -646,7 +615,7 @@ def test_checkpoint_guard_rejects_a_mismatched_lora_placement() -> None:
     )
 
 
-def test_shipped_lfm_profiles_use_pinned_model_and_hf() -> None:
+def test_shipped_lfm_profiles_use_the_pinned_model() -> None:
     from pathlib import Path
     from rlvr.config import load_config
 
@@ -655,7 +624,7 @@ def test_shipped_lfm_profiles_use_pinned_model_and_hf() -> None:
         config = load_config(root / "configs" / name)
         assert config.model_name == "LiquidAI/LFM2.5-2.6B"
         assert len(config.model_revision) == 40
-        assert config.engine == "hf"
+        assert "engine" not in config.raw.get("training", {})
 
 
 def test_all_linear_targets_adapt_the_lfm_convolution_and_mlp(tmp_path) -> None:
@@ -807,7 +776,7 @@ def test_cached_logprobs_match_masked_rollout_batch(monkeypatch, family) -> None
 
 
 @pytest.mark.parametrize("family", ["lfm2", "qwen3"])
-def test_tiny_model_generate_update_and_resume(tmp_path, family) -> None:
+def test_tiny_model_update_and_resume(tmp_path, family) -> None:
     """Exercise the actual optional runtime without downloading model weights."""
     torch = pytest.importorskip("torch")
     transformers = pytest.importorskip("transformers")
@@ -819,7 +788,7 @@ def test_tiny_model_generate_update_and_resume(tmp_path, family) -> None:
     from tokenizers.pre_tokenizers import Whitespace
     from transformers import AutoModelForCausalLM, PreTrainedTokenizerFast
     from rlvr.experiment import Prompt
-    from rlvr.qwen import CausalLMGenerator, _ThinkingBudgetProcessor
+    from rlvr.qwen import CausalLMGenerator
 
     vocabulary = {
         "<pad>": 0, "<eos>": 1, "<unk>": 2, "<bos>": 3,
@@ -870,10 +839,16 @@ def test_tiny_model_generate_update_and_resume(tmp_path, family) -> None:
     parameter = next(p for p in trainer.model.parameters() if p.requires_grad)
     parameter.grad = torch.ones_like(parameter)
     assert trainer._accumulated_groups == 0
-    group = trainer.generate(prompt, n=2, temperature=0.9)
+    prompt_ids, prompt_truncated = trainer.encode_prompt(prompt)
+    completions = [[6, 5, 7, 1], [6, 4, 7, 1]]
+    group = trainer.build_generation_batch(
+        [prompt], [prompt_ids], [prompt_truncated], [completions], cache=True
+    )[0]
     assert parameter.grad is None
     pending = trainer._pending_groups
-    trainer.generate(prompt, n=1, temperature=0.0)
+    trainer.build_generation_batch(
+        [prompt], [prompt_ids], [prompt_truncated], [completions[:1]], cache=False
+    )
     assert trainer._pending_groups is pending
     before = [p.detach().clone() for p in trainer.model.parameters() if p.requires_grad]
     trainer.update(prompt, group, [0.0, 1.0], measure_entropy=True)
@@ -895,7 +870,9 @@ def test_tiny_model_generate_update_and_resume(tmp_path, family) -> None:
     assert all(torch.equal(a, b) for a, b in zip(after, [
         p.detach() for p in trainer.model.parameters() if p.requires_grad
     ]))
-    group = trainer.generate(prompt, n=2, temperature=0.9)
+    group = trainer.build_generation_batch(
+        [prompt], [prompt_ids], [prompt_truncated], [completions], cache=True
+    )[0]
     trainer.update(prompt, group, [1.0, 0.0])
     assert trainer.step == 2
 
@@ -931,12 +908,12 @@ def test_tiny_model_generate_update_and_resume(tmp_path, family) -> None:
     save_file(saved_weights, adapter_file)
 
     shorter = Prompt(prompt_id="shorter", problem="write")
-    assert len(trainer.generate_batch([prompt, shorter], n=1, temperature=0.0)) == 2
-
-    processor = _ThinkingBudgetProcessor(
-        prompt_length=1, budget=2, marker_id=5, eos_token_id=1
+    shorter_ids, shorter_truncated = trainer.encode_prompt(shorter)
+    groups = trainer.build_generation_batch(
+        [prompt, shorter],
+        [prompt_ids, shorter_ids],
+        [prompt_truncated, shorter_truncated],
+        [[completions[0]], [completions[0]]],
+        cache=False,
     )
-    scores = processor(torch.tensor([[6, 4, 7], [6, 5, 7]]), torch.zeros(2, 8))
-    assert scores[0, 1] == 0
-    assert torch.isneginf(scores[0]).sum() == 7
-    assert torch.equal(scores[1], torch.zeros(8))
+    assert len(groups) == 2

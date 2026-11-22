@@ -453,10 +453,119 @@ def test_target_steps_capped_by_budget_max_steps(tmp_path) -> None:
     assert data["runs"][0]["target_steps"] == 100
 
 
+def test_a_pooled_run_uses_the_scheduled_step_size(tmp_path) -> None:
+    run_dir = write_run(
+        tmp_path / "runs",
+        "code-score",
+        meta_extra={
+            "mode": "real",
+            "pool_policy": "spread",
+            "schedule": {
+                "policy": "spread",
+                "step_prompts": 38,
+                "parked_prompts": 300,
+                "planned_parked_share": 9 / 38,
+            },
+            "pools": {
+                "train": 411,
+                "retired": 0,
+                "parked": 300,
+                "samples": 16,
+                "measured": True,
+            },
+            "trainer": {"epochs": 100, "batch_start_prompts": 2},
+            "config": {
+                "training": {"epochs": 100},
+                "data": {"train_size": 711},
+                "budget": {"max_steps": 100},
+            },
+        },
+    )
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["target_steps"] == 100
+    assert run["start_batch_prompts"] == 38
+    assert run["prompt_sample_target"] == 3800
+
+
 def test_target_steps_absent_when_unknown(tmp_path) -> None:
     run_dir = write_run(tmp_path / "runs", "code-score")
     data = collect_dashboard([run_dir])
     assert data["runs"][0]["target_steps"] is None
+
+
+def test_a_pooled_run_reports_the_policy_and_the_step_series(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "train_prompts": 30,
+            "parked_prompts": 8,
+            "advantage_share": 0.25,
+            "group_spread": 0.1,
+            "group_sd": 0.2,
+            "pool_policy": "sweep",
+            "mean_reward": 0.5,
+        },
+        {
+            "step": 2,
+            "arm": "code-score",
+            "train_prompts": 34,
+            "parked_prompts": 4,
+            "advantage_share": 0.75,
+            "group_spread": 0.3,
+            "group_sd": 0.4,
+            "pool_policy": "sweep",
+            "mean_reward": 0.6,
+        },
+    ]
+    run_dir = write_run(
+        tmp_path / "runs",
+        rows=rows,
+        meta_extra={"pool_policy": "sweep", "mode": "real"},
+    )
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["pool_policy"] == "sweep"
+    assert run["series"]["train_prompts"] == [30, 34]
+    assert run["series"]["parked_prompts"] == [8, 4]
+    assert run["series"]["advantage_share"] == [
+        pytest.approx(0.25),
+        pytest.approx(0.75),
+    ]
+    assert run["latest"]["train_prompts"] == 34
+    assert run["latest"]["parked_prompts"] == 4
+    assert run["latest"]["advantage_share"] == pytest.approx(0.75)
+    assert run["series"]["group_spread"] == [pytest.approx(0.1), pytest.approx(0.3)]
+    assert run["series"]["group_sd"] == [pytest.approx(0.2), pytest.approx(0.4)]
+    assert run["latest"]["group_spread"] == pytest.approx(0.3)
+    assert run["latest"]["group_sd"] == pytest.approx(0.4)
+
+
+def test_the_policy_falls_back_to_the_schedule_record(tmp_path) -> None:
+    run_dir = write_run(
+        tmp_path / "runs",
+        meta_extra={"schedule": {"policy": "spread", "step_prompts": 38}},
+    )
+    assert collect_dashboard([run_dir])["runs"][0]["pool_policy"] == "spread"
+
+
+def test_an_old_run_has_empty_pool_series_and_no_policy(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs", "code-score")
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["pool_policy"] is None
+    assert run["series"]["train_prompts"] == [None, None]
+    assert run["series"]["parked_prompts"] == [None, None]
+    assert run["series"]["advantage_share"] == [None, None]
+    assert run["series"]["group_spread"] == [None, None]
+    assert run["series"]["group_sd"] == [None, None]
+    assert run["latest"]["train_prompts"] is None
+    assert run["latest"]["advantage_share"] is None
+    assert run["latest"]["group_spread"] is None
+    assert run["latest"]["group_sd"] is None
+    assert "pool composition" in render_html(collect_dashboard([run_dir]))
+    assert "group signal" in render_html(collect_dashboard([run_dir])).lower()
 
 
 def test_started_is_shown_as_a_readable_utc_timestamp(tmp_path) -> None:
@@ -698,6 +807,37 @@ def test_the_data_route_samples_the_gpu(monkeypatch) -> None:
 
     assert calls == [1]
     assert sent and sent[0][0] == 200
+
+
+def test_the_page_and_data_routes_forbid_caching(monkeypatch) -> None:
+    from io import BytesIO
+
+    from rlvr import dashboard as dashboard_module
+
+    monkeypatch.setattr(dashboard_module, "sample_gpu", lambda: None)
+
+    for path in ("/", "/data.json"):
+        handler = dashboard_module._DashboardHandler.__new__(
+            dashboard_module._DashboardHandler
+        )
+        handler.path = path
+        handler.paths = []
+        handler.wfile = BytesIO()
+        sent: list[tuple] = []
+        monkeypatch.setattr(
+            handler, "send_response", lambda code: sent.append(("status", code))
+        )
+        monkeypatch.setattr(
+            handler,
+            "send_header",
+            lambda key, value: sent.append((key.lower(), value)),
+        )
+        monkeypatch.setattr(handler, "end_headers", lambda: sent.append(("end", None)))
+
+        handler._route()
+
+        assert ("cache-control", "no-store, max-age=0") in sent, path
+        assert ("pragma", "no-cache") in sent, path
 
 
 def test_render_html_escapes_an_arm_name_with_a_script_tag() -> None:
@@ -1434,3 +1574,55 @@ def test_dashboard_tolerates_invalid_utf8_during_file_writes(tmp_path):
     with (run_dir / "metrics.jsonl").open("ab") as handle:
         handle.write(b'{"step":3,"message":"\xff')
     assert collect_dashboard([run_dir])["runs"][0]["steps_done"] == 2
+
+
+def test_an_unstaged_run_renders_without_a_curriculum(tmp_path) -> None:
+    rows = [
+        {
+            "step": 1,
+            "arm": "code-score",
+            "stage": "unstaged",
+            "rollouts": 8,
+            "mean_reward": 0.5,
+            "pass_rate": 0.5,
+            "mean_entropy": 0.8,
+            "mean_completion_tokens": 80.0,
+            "cache_hits": 1,
+            "truncation_rate": 0.1,
+        }
+    ]
+    rollouts = stage_rollouts(1, "p1", passes=8)
+    for record in rollouts:
+        record["stage"] = "unstaged"
+    run_dir = write_run(
+        tmp_path / "runs",
+        rows=rows,
+        rollouts=rollouts,
+        meta_extra={"pools": {"train": 2, "retired": 0, "parked": 0, "samples": 16}},
+    )
+
+    data = collect_dashboard([run_dir])
+    run = data["runs"][0]
+
+    assert run["stage"] == "unstaged"
+    assert run["bands"] == [
+        {"band": "unstaged", "rollouts": 8, "pass_rate": pytest.approx(1.0)}
+    ]
+    assert run["stage_progress"]["band"] == "unstaged"
+    assert run["stage_progress"]["total"] == 2
+    assert run["stage_progress"]["solved"] == 1
+    assert "unstaged" in render_html(data)
+
+
+def test_a_metric_row_without_a_stage_key_does_not_break_the_dashboard(tmp_path) -> None:
+    run_dir = write_run(tmp_path / "runs")
+    lines = (run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines()
+    stripped = [
+        json.dumps({k: v for k, v in json.loads(line).items() if k != "stage"})
+        for line in lines
+    ]
+    (run_dir / "metrics.jsonl").write_text("\n".join(stripped) + "\n", encoding="utf-8")
+
+    run = collect_dashboard([run_dir])["runs"][0]
+
+    assert run["stage"] is None

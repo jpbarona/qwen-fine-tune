@@ -16,8 +16,7 @@
 #
 #   ./run.sh code-score --resume
 #
-# Select an isolated model environment with RLVR_VENV, for example
-# RLVR_VENV=.venv-lfm ./run.sh code-score --config configs/lfm.toml
+# Select another interpreter with RLVR_VENV. The default is .venv.
 
 set -euo pipefail
 

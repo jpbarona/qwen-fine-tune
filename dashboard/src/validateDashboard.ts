@@ -53,7 +53,7 @@ function isQuestion(value: unknown): boolean {
 
 function isRun(value: unknown): boolean {
   if (!isRecord(value) || typeof value.arm !== 'string' || typeof value.status !== 'string') return false
-  if (!hasStrings(value, ['run_name', 'run_dir', 'started', 'started_utc', 'stage'])
+  if (!hasStrings(value, ['run_name', 'run_dir', 'started', 'started_utc', 'stage', 'pool_policy'])
     || !hasNumbers(value, ['elapsed_seconds', 'steps_done', 'target_steps', 'start_batch_prompts',
       'prompt_samples', 'prompt_sample_target', 'entropy_every_steps', 'metrics_age_seconds'])) return false
   if (!isRecord(value.latest) || !Object.values(value.latest).every(isOptionalNumber)) return false

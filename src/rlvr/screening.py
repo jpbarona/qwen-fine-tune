@@ -9,13 +9,20 @@ The output is a caller-supplied directory with two files:
     rows.jsonl     one row per question: id, samples, passed, pass rate
     summary.json   the pass rate histogram and the zero, partial, full counts
 
-Rows are appended and flushed as each question finishes, so a crash costs at
-most one question. A restart reads the rows already written and skips those
-question ids. A torn final line, left by a write that did not finish, is dropped
-and removed, so the restart appends on a clean line.
+Questions are sampled in chunks, so a generator with a batch method makes one
+call per chunk rather than one call per question. The rows are appended and
+flushed as each question in the chunk finishes scoring, so a crash during
+scoring costs at most one question. A crash during an unfinished generation
+call costs the rest of that chunk. A restart reads the rows already written and
+skips those question ids. A final line without a newline is rewritten with one,
+so the next append starts on a clean line. A torn final line, left by a write
+that did not finish, is dropped in that rewrite.
 
-The screen samples with thinking off, at the completion cap the trainer uses.
-The point is to measure the same regime the curriculum will train in.
+The screen asks for thinking off, at the completion cap the trainer uses. Qwen
+honors that toggle. The LFM template always opens a reasoning block, so the
+toggle is ignored for LFM and it samples thinking at the completion cap. The
+point is to measure the same regime training will use. It takes sixteen samples
+per question unless the caller asks for another count.
 """
 
 from __future__ import annotations
@@ -32,9 +39,12 @@ from .experiment import Prompt
 from .reward import all_tests_passed
 
 __all__ = [
+    "DEFAULT_SCREEN_SAMPLES",
     "DEFAULT_SCREEN_THINKING",
     "HISTOGRAM_LABELS",
     "ROWS_NAME",
+    "SCREEN_CHUNK_PROMPTS",
+    "SCREEN_CHUNK_SEQUENCES",
     "SUMMARY_NAME",
     "ScreenError",
     "ScreenResult",
@@ -50,8 +60,23 @@ ROWS_NAME = "rows.jsonl"
 #: Name of the summary file inside the output directory.
 SUMMARY_NAME = "summary.json"
 
-#: The screen measures the regime the trainer will use, so thinking is off.
+#: The screen asks for thinking off. Qwen honors the toggle. LFM ignores it,
+#: because its template always opens a reasoning block.
 DEFAULT_SCREEN_THINKING = False
+
+#: Samples per question. Sixteen is the group size of the two parked-pool arm
+#: configs, so a screen and a training step see the same number of rollouts for
+#: one prompt.
+DEFAULT_SCREEN_SAMPLES = 16
+
+#: Most questions in one `generate_batch` call. Thirty two questions at sixteen
+#: samples is 512 sequences, close to one training step, and keeps the call well
+#: under the sequence cap below.
+SCREEN_CHUNK_PROMPTS = 32
+
+#: Most sequences in one `generate_batch` call. A chunk is smaller than the
+#: prompt cap when the caller asks for many samples per question.
+SCREEN_CHUNK_SEQUENCES = 640
 
 #: Histogram bucket labels, lowest first. One bucket per tenth of pass rate.
 HISTOGRAM_LABELS: tuple[str, ...] = tuple(
@@ -66,8 +91,14 @@ class ScreenError(ValueError):
 class ScreenGenerator(Protocol):
     """The part of the generator seam the screen uses.
 
-    `thinking` is explicit because the screen runs with it off while training
-    runs with it on. The fake and Qwen generators both accept the flag.
+    `thinking` is explicit because the screen asks for it off. Qwen honors the
+    flag and LFM ignores it, because its template always opens a reasoning
+    block. The fake and vLLM generators both accept the flag.
+
+    `generate_batch` is the fast path: one call for a whole chunk of questions,
+    with one group of `n` samples per question in prompt order. It is optional
+    at runtime. A generator without it is asked one question at a time through
+    `generate`, which gives the same rows more slowly.
     """
 
     def generate(
@@ -78,6 +109,15 @@ class ScreenGenerator(Protocol):
         temperature: float,
         thinking: bool = True,
     ) -> list[Any]: ...
+
+    def generate_batch(
+        self,
+        prompts: Sequence[Prompt],
+        *,
+        n: int,
+        temperature: float,
+        thinking: bool = True,
+    ) -> list[list[Any]]: ...
 
 
 @dataclass(frozen=True)
@@ -240,8 +280,9 @@ class ScreenStore:
     def read_rows(self) -> list[ScreenRow]:
         """Rows already written, in file order.
 
-        A torn final line is dropped and the file is rewritten without it, so
-        the next append starts on a clean line. A bad line anywhere else, or a
+        A final line that is not terminated is always rewritten with a newline,
+        so the next append starts on a clean line. A final line that is not
+        valid JSON is dropped in that rewrite. A bad line anywhere else, or a
         bad final line that was terminated with a newline, raises `ScreenError`
         because that is corruption, not an interrupted write.
         """
@@ -258,7 +299,7 @@ class ScreenStore:
         terminated = text.endswith("\n")
         rows: list[ScreenRow] = []
         seen: set[str] = set()
-        torn = False
+        rewrite = not terminated
         for line_number, line in enumerate(lines, start=1):
             if not line.strip():
                 continue
@@ -267,7 +308,7 @@ class ScreenStore:
             except json.JSONDecodeError as error:
                 is_torn_tail = line_number == len(lines) and not terminated
                 if is_torn_tail:
-                    torn = True
+                    rewrite = True
                     break
                 raise ScreenError(
                     f"screen rows line {line_number}: not valid JSON: {error}"
@@ -282,7 +323,7 @@ class ScreenStore:
             seen.add(row.prompt_id)
             rows.append(row)
 
-        if torn:
+        if rewrite:
             self._rewrite_rows(rows)
         return rows
 
@@ -345,10 +386,48 @@ def _checked_prompts(prompts: Sequence[Prompt]) -> list[Prompt]:
     return checked
 
 
+def _score_generations(
+    test_runner: Any,
+    prompt: Prompt,
+    generations: Sequence[Any],
+) -> list[Any]:
+    """Score every sample for one question, in one batch when possible.
+
+    A runner with a `run_batch` seam gets all of the question's candidates in
+    one call so its worker pool can overlap container starts. A runner without
+    that seam is asked one candidate at a time, which is the older behaviour.
+    The outcomes keep the candidate order.
+    """
+    items = [(prompt, generation.code) for generation in generations]
+    run_batch = getattr(test_runner, "run_batch", None)
+    outcomes = (
+        list(run_batch(items))
+        if run_batch is not None
+        else [test_runner.run(item_prompt, code) for item_prompt, code in items]
+    )
+    if len(outcomes) != len(items):
+        raise ScreenError(
+            f"test runner returned {len(outcomes)} outcomes for "
+            f"{prompt.prompt_id!r}, expected {len(items)}"
+        )
+    return outcomes
+
+
+def _chunk_prompts(samples: int) -> int:
+    """Questions per batch call, capped by the sequence budget.
+
+    At the default sixteen samples this is thirty two questions. A caller that
+    asks for more samples gets fewer questions, so one call still stays near
+    the sequence cap. A single question is always allowed, even when its own
+    samples exceed the cap.
+    """
+    return max(1, min(SCREEN_CHUNK_PROMPTS, SCREEN_CHUNK_SEQUENCES // samples))
+
+
 def screen(
     prompts: Sequence[Prompt],
     *,
-    samples: int,
+    samples: int = DEFAULT_SCREEN_SAMPLES,
     directory: str | Path,
     generator: ScreenGenerator,
     test_runner: Any,
@@ -356,6 +435,13 @@ def screen(
     thinking: bool = DEFAULT_SCREEN_THINKING,
 ) -> ScreenResult:
     """Sample every question and write the row table and summary.
+
+    Every question gets `samples` generations, sixteen unless the caller asks
+    for another count. Pending questions are split into chunks. When the
+    generator has a `generate_batch` method, each chunk is one call with every
+    question in the chunk and every sample for each question. Otherwise each
+    question is generated on its own. Either path scores each question with the
+    same batched test call and writes the rows in question order.
 
     Questions already present in `rows.jsonl` are skipped, so an interrupted
     screen continues where it stopped. Existing rows must use the same sample
@@ -394,33 +480,56 @@ def screen(
             )
         done[row.prompt_id] = row
 
-    for prompt in checked:
-        if prompt.prompt_id in done:
-            continue
-        generations = generator.generate(
-            prompt,
-            n=samples,
-            temperature=temperature,
-            thinking=thinking,
-        )
-        if len(generations) != samples:
-            raise ScreenError(
-                f"generator returned {len(generations)} samples for "
-                f"{prompt.prompt_id!r}, expected {samples}"
+    pending = [prompt for prompt in checked if prompt.prompt_id not in done]
+    batch_generate = getattr(generator, "generate_batch", None)
+    chunk_size = _chunk_prompts(samples)
+
+    for start in range(0, len(pending), chunk_size):
+        chunk = pending[start : start + chunk_size]
+        if batch_generate is None:
+            groups = [
+                generator.generate(
+                    prompt,
+                    n=samples,
+                    temperature=temperature,
+                    thinking=thinking,
+                )
+                for prompt in chunk
+            ]
+        else:
+            groups = list(
+                batch_generate(
+                    chunk,
+                    n=samples,
+                    temperature=temperature,
+                    thinking=thinking,
+                )
             )
-        passed = 0
-        for generation in generations:
-            outcome = test_runner.run(prompt, generation.code)
-            if all_tests_passed(outcome.tests_passed, outcome.tests_total):
-                passed += 1
-        row = ScreenRow(
-            prompt_id=prompt.prompt_id,
-            samples=samples,
-            passed=passed,
-            pass_rate=passed / samples,
-        )
-        store.append_row(row)
-        done[row.prompt_id] = row
+            if len(groups) != len(chunk):
+                raise ScreenError(
+                    f"generate_batch returned {len(groups)} groups for "
+                    f"{len(chunk)} questions"
+                )
+
+        for prompt, generations in zip(chunk, groups):
+            generations = list(generations)
+            if len(generations) != samples:
+                raise ScreenError(
+                    f"generator returned {len(generations)} samples for "
+                    f"{prompt.prompt_id!r}, expected {samples}"
+                )
+            passed = 0
+            for outcome in _score_generations(test_runner, prompt, generations):
+                if all_tests_passed(outcome.tests_passed, outcome.tests_total):
+                    passed += 1
+            row = ScreenRow(
+                prompt_id=prompt.prompt_id,
+                samples=samples,
+                passed=passed,
+                pass_rate=passed / samples,
+            )
+            store.append_row(row)
+            done[row.prompt_id] = row
 
     rows = tuple(done[prompt.prompt_id] for prompt in checked)
     summary = summarize(rows, samples_per_question=samples)

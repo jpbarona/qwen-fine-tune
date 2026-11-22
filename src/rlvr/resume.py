@@ -1,4 +1,8 @@
-"""Checkpoint resume state and compatibility checks, without model imports."""
+"""Checkpoint resume state and compatibility checks, without model imports.
+
+A manifest written before the pool change may carry a `stage` table. It is
+ignored on read, because a run now has one pool and no stage position.
+"""
 
 from __future__ import annotations
 
@@ -45,27 +49,6 @@ def resume_batch_policy(config: Config, manifest: dict) -> BatchSizePolicy | Non
     )
 
 
-def resume_stage(manifest: dict) -> tuple[int | None, int, list[str] | None]:
-    """The saved curriculum position, or defaults for an older manifest.
-
-    `None` for the index and the pool means "start the curriculum from the
-    beginning", which is what a pre-batching manifest gets.
-    """
-    stage = manifest.get("stage")
-    if not isinstance(stage, dict):
-        return None, 0, None
-    index = stage.get("index")
-    step = stage.get("step", 0)
-    pool = stage.get("pool")
-    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
-        return None, 0, None
-    if isinstance(step, bool) or not isinstance(step, int) or step < 0:
-        return None, 0, None
-    if not isinstance(pool, list) or not all(isinstance(item, str) for item in pool):
-        return index, step, None
-    return index, step, list(pool)
-
-
 def manifest_count(manifest: dict, name: str, default: int) -> int:
     """A non-negative checkpoint manifest field, or the default.
 
@@ -95,6 +78,8 @@ def validate_resume(meta_path: Path, config: Config, *, arm: str, fake: bool) ->
     saved_config = saved_config if isinstance(saved_config, dict) else {}
     model = saved_config.get("model")
     model = model if isinstance(model, dict) else {}
+    training = saved_config.get("training")
+    training = training if isinstance(training, dict) else {}
     trainer = meta.get("trainer")
     trainer = trainer if isinstance(trainer, dict) else {}
     saved = {
@@ -103,6 +88,8 @@ def validate_resume(meta_path: Path, config: Config, *, arm: str, fake: bool) ->
         "model.name": model.get("name", trainer.get("model_name")),
         "model.revision": model.get("revision", meta.get("model_revision")),
         "data.split_seed": meta.get("split_seed"),
+        "pool_policy": meta.get("pool_policy"),
+        "screen_rows": meta.get("screen_rows"),
     }
     requested = {
         "arm": arm,
@@ -110,10 +97,26 @@ def validate_resume(meta_path: Path, config: Config, *, arm: str, fake: bool) ->
         "model.name": config.model_name,
         "model.revision": config.model_revision,
         "data.split_seed": config.split_seed,
+        "pool_policy": config.pool_policy,
+        "screen_rows": config.screen_rows,
     }
     for key, value in saved.items():
         if value is not None and value != requested[key]:
             raise ResumeError(
                 f"resume {key} mismatch: saved {value!r}, requested {requested[key]!r}. "
-                "Use the original config or a separate --runs-root for a new model."
+                "Use the original config or a separate --runs-root for a new run."
+            )
+    step_size = {
+        "rollouts_per_step": config.rollouts_per_step,
+        "generations_per_prompt": config.generations_per_prompt,
+    }
+    for key, value in step_size.items():
+        saved_value = training.get(key)
+        if isinstance(saved_value, bool) or not isinstance(saved_value, int):
+            continue
+        if saved_value != value:
+            raise ResumeError(
+                f"resume training.{key} mismatch: saved {saved_value!r}, "
+                f"requested {value!r}. "
+                "Use the original config or a separate --runs-root for a new run."
             )

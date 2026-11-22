@@ -1,4 +1,4 @@
-"""Tests for the packaging: the pinned train extra and the shipped configs."""
+"""Tests for the packaging: the one runtime extra and the shipped configs."""
 
 from __future__ import annotations
 
@@ -8,30 +8,35 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_train_extra_pins_the_gpu_stack() -> None:
+def test_the_vllm_extra_pins_the_whole_gpu_stack() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     extras = pyproject["project"]["optional-dependencies"]
-    assert "train" in extras
+    expected = {
+        "vllm": "0.34.0",
+        "torch": "2.14.0",
+        "transformers": "5.22.2",
+        "peft": "0.18.1",
+        "accelerate": "1.8.1",
+    }
     pins = {}
-    for requirement in extras["train"]:
+    for requirement in extras["vllm"]:
         name, _, version = requirement.partition("==")
         assert version, f"{requirement!r} must pin an exact version"
         pins[name] = version
-    for name in ("torch", "transformers", "peft", "accelerate", "safetensors"):
-        assert name in pins, f"{name} must be pinned in the train extra"
+    assert pins == expected
 
 
-def test_train_extra_does_not_pin_torch_via_a_range() -> None:
-    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    train = pyproject["project"]["optional-dependencies"]["train"]
-    assert all(">=" not in requirement and "<" not in requirement for requirement in train)
-
-
-def test_lfm_vllm_extra_has_its_own_version_floor() -> None:
+def test_the_old_environment_extras_are_gone() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     extras = pyproject["project"]["optional-dependencies"]
-    assert extras["vllm"] == ["vllm==0.10.1"]
-    assert extras["vllm-lfm"] == ["vllm>=0.17,<0.35"]
+
+    assert set(extras) == {"dev", "vllm"}
+
+
+def test_no_extra_pins_torch_via_a_range() -> None:
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    vllm = pyproject["project"]["optional-dependencies"]["vllm"]
+    assert all(">=" not in requirement and "<" not in requirement for requirement in vllm)
 
 
 def test_requires_python_is_3_12_or_newer() -> None:

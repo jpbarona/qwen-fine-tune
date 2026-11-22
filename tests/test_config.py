@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
 
 from rlvr.config import Config, ConfigError, default_config_path, load_config
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 GOOD = """\
 [model]
@@ -267,18 +270,18 @@ def test_length_settings_are_read_from_the_training_table(tmp_path) -> None:
 def test_the_thinking_budget_is_read_from_the_training_table(tmp_path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
-        GOOD + "\n[training]\nthinking_budget_start = 512\n", encoding="utf-8"
+        GOOD + "\n[training]\nthinking_budget = 512\n", encoding="utf-8"
     )
     config = load_config(path)
-    assert config.thinking_budget_start == 512
+    assert config.thinking_budget == 512
 
 
 def test_a_zero_thinking_budget_is_named(tmp_path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
-        GOOD + "\n[training]\nthinking_budget_start = 0\n", encoding="utf-8"
+        GOOD + "\n[training]\nthinking_budget = 0\n", encoding="utf-8"
     )
-    with pytest.raises(ConfigError, match="training.thinking_budget_start"):
+    with pytest.raises(ConfigError, match="training.thinking_budget"):
         load_config(path)
 
 
@@ -424,31 +427,35 @@ def test_seed_defaults_to_zero_and_is_read(write_config) -> None:
     assert load_config(path).seed == 7
 
 
-def test_curriculum_defaults(write_config) -> None:
+def test_thinking_budget_defaults_to_one_value(write_config) -> None:
     config = load_config(write_config(GOOD))
-    assert config.stage == "very easy"
-    assert config.carry_over_ratio == 0.2
+    assert config.thinking_budget == 1024
 
 
-def test_curriculum_settings_are_read(write_config) -> None:
+def test_the_thinking_budget_is_read_from_the_training_table(write_config) -> None:
+    path = write_config(
+        GOOD + "\n[training]\nthinking_budget = 512\n", name="budget.toml"
+    )
+    assert load_config(path).thinking_budget == 512
+
+
+def test_a_zero_thinking_budget_is_named(write_config) -> None:
+    path = write_config(
+        GOOD + "\n[training]\nthinking_budget = 0\n", name="zero-budget.toml"
+    )
+    with pytest.raises(ConfigError, match="training.thinking_budget"):
+        load_config(path)
+
+
+def test_the_removed_curriculum_keys_are_ignored(write_config) -> None:
     path = write_config(
         GOOD + '\n[curriculum]\nstage = "hard"\ncarry_over_ratio = 0.35\n',
         name="curriculum.toml",
     )
     config = load_config(path)
-    assert config.stage == "hard"
-    assert config.carry_over_ratio == 0.35
-
-
-@pytest.mark.parametrize(
-    "line",
-    ['stage = "easy"', "stage = 3", "carry_over_ratio = 1.0", "carry_over_ratio = -0.1"],
-)
-def test_a_bad_curriculum_setting_is_named(tmp_path, line: str) -> None:
-    path = tmp_path / "config.toml"
-    path.write_text(GOOD + f"\n[curriculum]\n{line}\n", encoding="utf-8")
-    with pytest.raises(ConfigError, match="curriculum"):
-        load_config(path)
+    assert "curriculum" in config.raw
+    assert not hasattr(config, "stage")
+    assert not hasattr(config, "carry_over_ratio")
 
 
 def test_throughput_settings_have_bounded_defaults(write_config) -> None:
@@ -473,3 +480,247 @@ def test_throughput_settings_can_be_overridden(write_config) -> None:
         GOOD + "\n[training]\ntest_workers = 2\neval_batch_size = 3\nprefetch_scoring = false\n"
     ))
     assert (config.test_workers, config.eval_batch_size, config.prefetch_scoring) == (2, 3, False)
+
+
+def test_pool_settings_default(write_config) -> None:
+    config = load_config(write_config(GOOD))
+
+    assert config.pool_policy is None
+    assert config.screen_rows is None
+    assert config.rollouts_per_step == 608
+    assert config.sweep_gap_ratio == 3
+
+
+def test_pool_settings_are_read(tmp_path) -> None:
+    path = tmp_path / "pool.toml"
+    path.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "spread"\n'
+        'screen_rows = "screens/latest/rows.jsonl"\n'
+        "rollouts_per_step = 320\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+
+    assert config.pool_policy == "spread"
+    assert config.screen_rows == "screens/latest/rows.jsonl"
+    assert config.rollouts_per_step == 320
+
+
+def test_the_default_config_sets_the_rollout_budget() -> None:
+    config = load_config(default_config_path())
+
+    assert config.rollouts_per_step == 608
+    assert config.pool_policy is None
+
+
+@pytest.mark.parametrize(
+    "line, key",
+    [
+        ('pool_policy = "random"', "training.pool_policy"),
+        ('pool_policy = ""', "training.pool_policy"),
+        ("pool_policy = 3", "training.pool_policy"),
+        ("screen_rows = 3", "training.screen_rows"),
+        ('screen_rows = ""', "training.screen_rows"),
+        ("rollouts_per_step = 0", "training.rollouts_per_step"),
+        ("rollouts_per_step = 1.5", "training.rollouts_per_step"),
+        ("sweep_gap_ratio = 2", "training.sweep_gap_ratio"),
+        ("sweep_gap_ratio = 11", "training.sweep_gap_ratio"),
+        ("sweep_gap_ratio = 3.5", "training.sweep_gap_ratio"),
+        ("sweep_gap_ratio = true", "training.sweep_gap_ratio"),
+    ],
+)
+def test_a_bad_pool_setting_is_named(tmp_path, line: str, key: str) -> None:
+    path = tmp_path / "bad-pool.toml"
+    path.write_text(GOOD + "\n[training]\n" + line + "\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match=key):
+        load_config(path)
+
+
+def test_the_sweep_policy_and_gap_ratio_are_read(tmp_path) -> None:
+    path = tmp_path / "sweep.toml"
+    path.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "sweep"\n'
+        'screen_rows = "screens/latest/rows.jsonl"\n'
+        "sweep_gap_ratio = 5\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+
+    assert config.pool_policy == "sweep"
+    assert config.sweep_gap_ratio == 5
+
+
+def test_the_sweep_gap_ratio_defaults_to_three(tmp_path) -> None:
+    path = tmp_path / "sweep-default.toml"
+    path.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "sweep"\n'
+        'screen_rows = "screens/latest/rows.jsonl"\n',
+        encoding="utf-8",
+    )
+
+    assert load_config(path).sweep_gap_ratio == 3
+
+
+def test_a_pool_policy_cannot_be_combined_with_max_prompts(tmp_path) -> None:
+    path = tmp_path / "conflict.toml"
+    path.write_text(
+        GOOD
+        + '\n[training]\npool_policy = "spread"\n'
+        'screen_rows = "rows.jsonl"\nmax_prompts = 10\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError) as error:
+        load_config(path)
+
+    message = str(error.value)
+    assert "training.pool_policy" in message
+    assert "training.max_prompts" in message
+
+
+def test_a_pool_policy_needs_screen_rows(tmp_path) -> None:
+    path = tmp_path / "no-screen.toml"
+    path.write_text(
+        GOOD + '\n[training]\npool_policy = "spread"\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigError) as error:
+        load_config(path)
+
+    message = str(error.value)
+    assert "training.pool_policy" in message
+    assert "training.screen_rows" in message
+
+
+def test_an_old_refresh_steps_key_is_kept_and_ignored(tmp_path) -> None:
+    path = tmp_path / "old.toml"
+    path.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "spread"\n'
+        'screen_rows = "rows.jsonl"\n'
+        "refresh_steps = 25\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+
+    assert not hasattr(config, "refresh_steps")
+    assert config.raw["training"]["refresh_steps"] == 25
+
+    bad = tmp_path / "bad.toml"
+    bad.write_text(
+        GOOD
+        + "\n[training]\n"
+        'pool_policy = "spread"\n'
+        'screen_rows = "rows.jsonl"\n'
+        "refresh_steps = 0\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(bad).raw["training"]["refresh_steps"] == 0
+
+
+@pytest.mark.parametrize(
+    ("name", "policy"),
+    (("lfm-spread.toml", "spread"), ("lfm-sweep.toml", "sweep")),
+)
+def test_the_parked_pool_arm_configs_load(name: str, policy: str) -> None:
+    config = load_config(REPO_ROOT / "configs" / name)
+
+    assert config.model_name == "LiquidAI/LFM2.5-2.6B"
+    assert config.pool_policy == policy
+    assert config.generations_per_prompt == 16
+    assert config.rollouts_per_step == 304
+    assert config.max_completion_tokens == 1024
+    assert config.learning_rate == 3e-5
+    assert config.lora_targets == "all-linear"
+    assert config.lora_rank == 16
+    assert config.lora_alpha == 32
+    assert config.thinking_budget == 1024
+    assert config.max_steps == 100
+    assert config.max_prompts is None
+    assert config.screen_rows == "screens/mbpp-base/rows.jsonl"
+    assert config.eval_every_steps == 5
+    assert config.checkpoint_every_steps == 10
+
+
+@pytest.mark.parametrize("name", ("lfm-spread.toml", "lfm-sweep.toml"))
+def test_the_parked_pool_arm_configs_checkpoint_every_ten_steps(name: str) -> None:
+    config = load_config(REPO_ROOT / "configs" / name)
+
+    assert config.checkpoint_every_steps == 10
+
+
+def test_the_half_size_step_keeps_the_planned_parked_arithmetic() -> None:
+    from rlvr.schedule import Spread, Sweep
+
+    spread = load_config(REPO_ROOT / "configs" / "lfm-spread.toml")
+    sweep = load_config(REPO_ROOT / "configs" / "lfm-sweep.toml")
+    group = spread.generations_per_prompt
+    prompts_per_step = spread.rollouts_per_step // group
+
+    assert prompts_per_step == 19
+    assert Spread(prompts_per_step=prompts_per_step).parked_count() == 9
+    sweep_schedule = Sweep(prompts_per_step=sweep.rollouts_per_step // group)
+    assert sweep_schedule.sweep_length(267) == 15
+    assert sweep_schedule.gap_length(267) == 45
+
+
+def test_the_arm_config_accepts_a_screen_for_every_trained_prompt(
+    tmp_path,
+) -> None:
+    from dataclasses import replace
+
+    from rlvr.cli import build_pools, build_prompts
+    from rlvr.data import load_split, prompt_id_for
+    from rlvr.screening import ScreenRow, ScreenStore
+
+    config = load_config(REPO_ROOT / "configs" / "lfm-spread.toml")
+    split = load_split(seed=config.split_seed)
+    directory = tmp_path / "screen"
+    store = ScreenStore(directory)
+    for question in split.train:
+        store.append_row(
+            ScreenRow(
+                prompt_id=prompt_id_for(question),
+                samples=16,
+                passed=8,
+                pass_rate=0.5,
+            )
+        )
+    measured = replace(config, screen_rows=str(directory))
+
+    train, _ = build_prompts(measured)
+    pools = build_pools(measured, train)
+
+    assert [prompt.prompt_id for prompt in train] == [
+        prompt_id_for(question) for question in split.train
+    ]
+    assert len(train) == 711
+    assert pools is not None
+    assert pools.samples == 16
+    assert len(pools.train) == 711
+
+
+def test_the_parked_pool_arm_configs_differ_only_in_policy_keys() -> None:
+    def read(name: str) -> dict:
+        path = REPO_ROOT / "configs" / name
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+
+    spread = read("lfm-spread.toml")
+    sweep = read("lfm-sweep.toml")
+    assert spread["training"].pop("pool_policy") == "spread"
+    assert sweep["training"].pop("pool_policy") == "sweep"
+    assert "refresh_steps" not in spread["training"]
+    assert "refresh_steps" not in sweep["training"]
+    assert sweep["training"].pop("sweep_gap_ratio") == 3
+    assert "sweep_gap_ratio" not in spread["training"]
+
+    assert spread == sweep

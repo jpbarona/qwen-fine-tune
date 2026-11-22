@@ -125,4 +125,30 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 108. Sixteen rollouts per prompt decide who trains and who parks
 109. Labels come only from screens, never from selected training rollouts
 110. Spread parked work beats dedicated batches full of all-fail groups
+111. Spread against sweep is a measurable arm at equal compute
+112. One vLLM environment now samples training and the screen alike
+113. Sixteen samples per prompt decide the train, rehearsal and parked pools
+114. Spread joins a small parked slice to every training step
+115. Sweep covers the parked pool, then trains for a gap
+116. Both arms differ only in the parked pool policy keys
+117. A final screen row without a newline is rewritten on read
+118. Sweep spends budget on parked steps, so fewer train passes
+119. Refresh steps is now an arm config key defaulting to forty
 
+120. The screen covers the 711 train rows, not all 961
+121. Screen splits 711 into 270 train, 174 solved, 267 parked
+122. A pooled step costs 500 seconds, half of it the update
+123. Completions run 1,200 tokens since vLLM cannot stop at the budget
+124. The spread arm inflated to 1,300 tokens and broke syntax at step 33
+125. The cap drops to 1,024 so a runaway answer scores minus one
+126. Steps halve to nineteen prompts, about 240 seconds
+127. Meta keeps the first start values after a resume
+128. Step 21 after the cap, 486 tokens and five percent truncated
+129. Both arms evaluate every five steps on the pinned hundred
+130. The spread arm collapsed again between steps 36 and 40
+131. Truncation reached 99 percent and the pass rate hit zero
+132. Longer answers scored lower inside groups, so not length hacking
+133. Step 40 scored 0.23, step 50 scored zero on the pinned set
+134. Likely cause is a rate too high with no KL anchor
+135. The run stopped at step 54 and the GPU is now free
+136. Arm rate drops to 3e-5 after the second collapse

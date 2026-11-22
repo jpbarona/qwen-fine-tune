@@ -42,7 +42,7 @@ from urllib.parse import urlsplit
 
 from .dashboard_io import _all_rollout_records, _read_json, _read_jsonl, _read_tail_lines
 from .memory import MEMORY_METRIC_FIELDS
-from .stages import BANDS
+from .stages import BANDS, UNSTAGED_STAGE
 
 __all__ = ["collect_dashboard", "render_html", "sample_gpu", "serve_dashboard"]
 
@@ -124,10 +124,21 @@ SERIES_FIELDS: tuple[str, ...] = (
     "step_seconds",
     "completion_tokens_per_second",
     "sequences_per_second",
+    "train_prompts",
+    "parked_prompts",
+    "advantage_share",
+    "group_spread",
+    "group_sd",
 )
 
 #: Fields that are whole counts and are read as integers, not floats.
-COUNT_SERIES_FIELDS: tuple[str, ...] = ("cache_hits", "prompts", "sequences")
+COUNT_SERIES_FIELDS: tuple[str, ...] = (
+    "cache_hits",
+    "prompts",
+    "sequences",
+    "train_prompts",
+    "parked_prompts",
+)
 
 LATEST_FIELDS: tuple[str, ...] = SERIES_FIELDS + ("rollouts",)
 
@@ -248,9 +259,43 @@ def _resolve_paths(paths: Iterable[str | Path]) -> list[tuple[str, Path | None]]
     return targets
 
 
+def _schedule_step_prompts(meta: Mapping[str, Any]) -> int | None:
+    """The scheduled step size recorded by a pooled run, or None."""
+    schedule = meta.get("schedule")
+    if not isinstance(schedule, Mapping):
+        return None
+    return _positive_int(schedule.get("step_prompts"))
+
+
+def _pool_policy(meta: Mapping[str, Any]) -> str | None:
+    """The pool re-screen policy the run used, or None for an unpooled run.
+
+    `pool_policy` is the current key. A meta file written before it was
+    promoted to the top level still carries the policy inside `schedule`, so
+    that value is read as the fallback.
+    """
+    policy = _string(meta.get("pool_policy"))
+    if policy is not None:
+        return policy
+    schedule = meta.get("schedule")
+    if isinstance(schedule, Mapping):
+        return _string(schedule.get("policy"))
+    return None
+
+
+def _pool_train_size(meta: Mapping[str, Any]) -> int | None:
+    """The measured train pool count recorded by a pooled run, or None."""
+    pools = meta.get("pools")
+    if not isinstance(pools, Mapping):
+        return None
+    return _positive_int(pools.get("train"))
+
+
 def _real_target_steps(meta: Mapping[str, Any], config: Mapping[str, Any]) -> int | None:
     """Epochs times the train size, divided into batches of prompts.
 
+    A pooled run records its scheduled step size, which replaces the adaptive
+    starting batch. Its train size is the measured pool, not the config split.
     A meta file written before batching has no start size, so it counts one
     prompt per step and keeps the old figure.
     """
@@ -267,7 +312,12 @@ def _real_target_steps(meta: Mapping[str, Any], config: Mapping[str, Any]) -> in
     data = config.get("data")
     if epochs is None or not isinstance(data, dict):
         return None
-    train_size = _positive_int(data.get("train_size"))
+    schedule_step = _schedule_step_prompts(meta)
+    train_size = _pool_train_size(meta) if schedule_step is not None else None
+    if train_size is None:
+        train_size = _positive_int(data.get("train_size"))
+    if schedule_step is not None:
+        batch_prompts = schedule_step
     if train_size is None:
         return None
     return -(-(epochs * train_size) // batch_prompts)
@@ -306,14 +356,22 @@ def _target_steps(meta: Mapping[str, Any]) -> int | None:
 
 
 def _prompt_sample_target(meta: Mapping[str, Any]) -> int | None:
-    """Epochs times the train size: the number of prompt presentations planned.
+    """The number of prompt presentations the run plans to make.
 
-    One step samples a growing batch of prompts, so the step count depends on
-    the batching policy. The number of prompts the run has to present does not,
-    which makes it the honest progress denominator for a real run.
+    A pooled run has a fixed step size, so the plan is the target step count
+    times the scheduled prompts per step. Without a schedule, one step samples a
+    growing batch of prompts, so the step count depends on the batching policy.
+    The number of prompts the run has to present does not, which makes it the
+    honest progress denominator for a real run.
     """
     if meta.get("mode") == "fake":
         return None
+    schedule_step = _schedule_step_prompts(meta)
+    if schedule_step is not None:
+        target = _target_steps(meta)
+        if target is None:
+            return None
+        return target * schedule_step
     epochs: int | None = None
     trainer = meta.get("trainer")
     if isinstance(trainer, Mapping):
@@ -335,7 +393,14 @@ def _prompt_sample_target(meta: Mapping[str, Any]) -> int | None:
 
 
 def _start_batch_prompts(meta: Mapping[str, Any]) -> int | None:
-    """The batch size the step target was computed from, when it is recorded."""
+    """The prompts per step the step target used, when it is recorded.
+
+    A pooled run uses its scheduled step size. Without a schedule this is the
+    adaptive starting batch.
+    """
+    schedule_step = _schedule_step_prompts(meta)
+    if schedule_step is not None:
+        return schedule_step
     trainer = meta.get("trainer")
     if isinstance(trainer, Mapping):
         return _positive_int(trainer.get("batch_start_prompts"))
@@ -481,11 +546,11 @@ def _tests_passed_histogram(passed_counts: list[int]) -> dict[str, Any]:
 
 
 def _band_pass_rates(run_dir: Path) -> list[dict[str, Any]]:
-    """Full pass rate per curriculum band, over the whole rollout file.
+    """Full pass rate per stage value, over the whole rollout file.
 
     A rollout counts as passed only when every test passed, matching the
-    training pool rule. Bands appear in the fixed order first, then any band
-    name the run folder carries that is not one of the four.
+    training pool rule. The four fixed bands appear in order first, then any
+    other stage value the run folder carries, including `unstaged`.
     """
     counts: dict[str, int] = {}
     passed: dict[str, int] = {}
@@ -519,10 +584,10 @@ def _band_pass_rates(run_dir: Path) -> list[dict[str, Any]]:
 def _stage_progress(
     run_dir: Path, meta: Mapping[str, Any], dropped_by_band: Mapping[str, int] | None = None
 ) -> dict[str, Any]:
-    """How much of the current curriculum band has been solved, per step.
+    """How much of the current stage value has been solved, per step.
 
     A prompt counts as solved in a step only when every rollout of that prompt
-    in that step passed, which is the training pool rule. The total for a band
+    in that step passed, which is the training pool rule. The total for a stage
     is its starting training pool from `meta.json`, so the percentage is stable
     even though the pool shrinks.
 
@@ -534,6 +599,9 @@ def _stage_progress(
     The whole rollout file is streamed, because a solved prompt can sit far
     before the tail. The series keeps one point per training step, and carries
     the band with it, because a run that moves to a new band restarts at zero.
+
+    A run with no curriculum has one pool. Its total is the `train` count from
+    `meta.json`, under the `unstaged` band name, so the chart still renders.
     """
     curriculum = meta.get("curriculum")
     totals: dict[str, int] = {}
@@ -547,6 +615,12 @@ def _stage_progress(
                 count = _integer(stage.get("train"))
                 if name is not None and count:
                     totals[name] = count
+
+    pools = meta.get("pools")
+    if isinstance(pools, Mapping):
+        count = _integer(pools.get("train"))
+        if count:
+            totals[UNSTAGED_STAGE] = count
 
     dropped_counts = dropped_by_band or {}
     solved: dict[str, set[str]] = {}
@@ -941,6 +1015,7 @@ def _waiting_run(arm: str) -> dict[str, Any]:
         "prompt_samples": 0,
         "prompt_sample_target": None,
         "entropy_every_steps": None,
+        "pool_policy": None,
         "stage": None,
         "bands": [],
         "stage_progress": {
@@ -996,6 +1071,7 @@ def _collect_run(
         "prompt_samples": _prompt_samples(rows),
         "prompt_sample_target": _prompt_sample_target(meta),
         "entropy_every_steps": _entropy_every_steps(meta),
+        "pool_policy": _pool_policy(meta),
         "stage": _string(rows[-1].get("stage")) if rows else None,
         "bands": _band_pass_rates(run_dir),
         "stage_progress": _stage_progress(run_dir, meta, dropped_by_band),
@@ -1281,7 +1357,8 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Pragma", "no-cache")
         self.end_headers()
         self.wfile.write(body)
 

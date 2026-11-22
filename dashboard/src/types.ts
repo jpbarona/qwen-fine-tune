@@ -12,6 +12,11 @@ export interface SeriesMap {
   cache_hits: Nullable[]
   prompts: Nullable[]
   sequences: Nullable[]
+  train_prompts: Nullable[]
+  parked_prompts: Nullable[]
+  advantage_share: Nullable[]
+  group_spread: Nullable[]
+  group_sd: Nullable[]
   gpu_live_mib: Nullable[]
   gpu_cached_mib: Nullable[]
   gpu_fragmented_mib: Nullable[]
@@ -108,6 +113,7 @@ export interface Run {
   prompt_samples: number
   prompt_sample_target: number | null
   entropy_every_steps: number | null
+  pool_policy: string | null
   stage: string | null
   bands: BandRate[]
   stage_progress: StageProgress

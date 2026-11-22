@@ -1,7 +1,7 @@
 """Command line interface.
 
     rlvr run --arm <code-score|hybrid|gated-judge|gated-process> --fake
-    rlvr screen --questions <path> --samples <n> --output <dir> [--fake]
+    rlvr screen --questions <path> [--samples <n>] --output <dir> [--fake]
     rlvr eval-band --band <band> [--count 100] [--seed 2026] [--checkpoint <dir>] [--out <path>]
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
     rlvr dashboard [<run-dir> ...] [--runs-root <runs-root>] [--port 8081]
@@ -14,8 +14,10 @@ fails at startup. `--resume` continues the latest run folder from its last
 checkpoint.
 
 `screen` samples the base model with thinking off and writes a difficulty table.
-It never trains, builds no optimizer, and writes into its own output folder, not
-a run folder. A restart skips the question ids already in the table.
+It takes sixteen samples per question by default and `--samples` overrides
+that. It never trains, builds no optimizer, and writes into its own output
+folder, not a run folder. A restart skips the question ids already in the
+table.
 
 `eval-band` scores one labelled difficulty band from the training split. It
 prints one JSON line with pass@1 for that band, and writes the same line to
@@ -39,13 +41,14 @@ import json
 import sys
 from pathlib import Path
 from time import perf_counter
-from typing import Mapping, Sequence
+from typing import Sequence
 
 from .batching import START_PROMPTS, BatchSizePolicy
 from .config import Config, ConfigError, default_config_path, load_config
 from .control import CONTROL_NAME, ControlWatcher
 from .checkpoint import find_latest_checkpoint, read_checkpoint_manifest
 from .data import (
+    DEFAULT_LABELS_PATH,
     TEST_SIZE,
     TRAIN_SIZE,
     DatasetError,
@@ -67,11 +70,11 @@ from .fake import (
     FakeGenerator,
     FakeJudge,
     FakeTestRunner,
-    fake_band_labels,
     fake_memory,
 )
 from .judge import JudgeClient, MissingAPIKeyError
 from .memory import configure_expandable_segments, read_torch_memory
+from .pools import DEFAULT_PROMOTION_BAR, Pools, PoolsError, from_rows
 from .publish import PublishError, publish_report
 from .reward import (
     ARMS,
@@ -85,26 +88,21 @@ from .resume import (
     ResumeError,
     manifest_count as _manifest_count,
     resume_batch_policy as _resume_batch_policy,
-    resume_stage as _resume_stage,
     validate_resume,
 )
 from .runs import RunStore
-from .screening import ScreenError, screen as run_screen
-from .stages import (
-    BANDS,
-    LabelledRow,
-    Stage,
-    StageError,
-    build_stages as build_ordered_stages,
-)
+from .schedule import Spread
+from .screening import DEFAULT_SCREEN_SAMPLES, ROWS_NAME, ScreenError, ScreenStore
+from .screening import screen as run_screen
+from .stages import BANDS
 from .summary import SummaryError, format_summary, load_reports, write_report
 from .synthetic import SyntheticError, load_synthetic_questions
 
 __all__ = [
-    "build_curriculum",
     "build_generator",
     "build_judge",
     "build_parser",
+    "build_pools",
     "build_prompts",
     "build_screen_test_runner",
     "build_test_runner",
@@ -112,6 +110,8 @@ __all__ = [
     "load_synthetic_rows",
     "main",
     "screen_command",
+    "spread_share_warning",
+    "training_steps",
 ]
 
 USAGE_ERROR = 2
@@ -205,9 +205,9 @@ def build_parser() -> argparse.ArgumentParser:
     screen_parser.add_argument(
         "--samples",
         type=int,
-        required=True,
+        default=DEFAULT_SCREEN_SAMPLES,
         metavar="N",
-        help="samples per question",
+        help=f"samples per question (default: {DEFAULT_SCREEN_SAMPLES})",
     )
     screen_parser.add_argument(
         "--output",
@@ -348,8 +348,8 @@ def load_synthetic_rows() -> tuple[MBPPQuestion, ...]:
     """The 50 synthetic very easy questions as runner rows.
 
     The synthetic file is committed beside the MBPP data. A missing or invalid
-    file stops the run before a folder is made, because the very easy stage has
-    no other material.
+    file stops the run before a folder is made, because the synthetic rows are
+    part of the fixed training set.
     """
     try:
         return tuple(
@@ -362,12 +362,15 @@ def load_synthetic_rows() -> tuple[MBPPQuestion, ...]:
 def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
     """Load the fixed split and return the train and test prompts.
 
-    Training uses the 714 MBPP train questions plus the 50 synthetic very easy
-    questions. Evaluation uses the 250 test questions. The split and the prompt
+    With no measured screen, training uses the 711 MBPP train questions plus the
+    50 synthetic very easy questions. With `screen_rows` set, training uses only
+    the 711 MBPP train questions, because the screen must cover every trained
+    prompt. The synthetic rows were scaffolding for the deleted curriculum
+    stage. Evaluation uses the 250 test questions. The split and the prompt
     format come from `data.py`, so every arm and the fake path see the same
     questions. The two lists never share a question, and a synthetic id can
-    never collide with an MBPP id. A wrong or empty split stops the run before
-    a folder is made.
+    never collide with an MBPP id. A wrong or empty split stops the run before a
+    folder is made.
     """
     try:
         split = load_split(seed=config.split_seed)
@@ -386,7 +389,9 @@ def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
             f"the train and test split overlap on {len(train_ids & test_ids)} task ids"
         )
 
-    train_questions = list(split.train) + list(load_synthetic_rows())
+    train_questions = list(split.train)
+    if config.screen_rows is None:
+        train_questions += list(load_synthetic_rows())
     train_prompts = prompts_for_questions(train_questions)
     eval_prompts = prompts_for_questions(split.test)
     if not train_prompts or not eval_prompts:
@@ -394,59 +399,114 @@ def build_prompts(config: Config) -> tuple[list[Prompt], list[Prompt]]:
     return train_prompts, eval_prompts
 
 
-def build_curriculum(
-    config: Config, prompts: list[Prompt], *, fake: bool
-) -> tuple[Stage[Prompt], ...]:
-    """Build the ordered stages for the training prompts.
+def build_pools(config: Config, prompts: Sequence[Prompt]) -> Pools | None:
+    """Build the measured pools from the screen rows, or return None.
 
-    A real run validates the difficulty label file against the MBPP split for
-    the configured seed. A missing file, an unknown or duplicated id, or labels
-    written for a different split seed all stop the run with a clear message,
-    so a wrong config cannot put every row in one band.
+    `[training] screen_rows` may name the screen output folder or its
+    `rows.jsonl` file. An absent key keeps the unmeasured placeholder path,
+    where the experiment trains every prompt and the run record says the pool
+    was not measured.
 
-    The 50 synthetic rows are always placed in the very easy band. They carry
-    their own tests and exist to make the first stage solvable.
-
-    The fake path supplies its own deterministic labels. The first fake prompt
-    that fully passes is put alone in the first band, so the fake run shows a
-    stage one exhaustion and a stage two start at a fixed step.
+    Every row must belong to the supplied training prompts. A row from another
+    split would send a prompt id the run cannot train, so it is a config error,
+    not a silently ignored row. Every training prompt must also have a row,
+    because a partial screen would leave prompts in no pool and train less than
+    the operator asked for.
     """
-    if fake:
-        labels: Mapping[str, str] = fake_band_labels(prompts)
-        synthetic_ids: set[str] = set()
-    else:
-        try:
-            split = load_split(seed=config.split_seed)
-            labels = load_difficulty_labels(split)
-        except DatasetError as error:
-            raise UsageError(f"cannot load difficulty labels: {error}") from error
-        synthetic_ids = {question.prompt_id for question in load_synthetic_rows()}
+    if config.screen_rows is None:
+        return None
 
-    rows = []
-    for prompt in prompts:
-        if prompt.prompt_id in synthetic_ids:
-            band = BANDS[0]
-        else:
-            band = labels.get(prompt.prompt_id)
-            if band is None:
-                raise UsageError(
-                    f"prompt {prompt.prompt_id!r} has no difficulty label. "
-                    f"The label file must cover the training split for seed "
-                    f"{config.split_seed}."
-                )
-        rows.append(
-            LabelledRow(prompt_id=prompt.prompt_id, band=band, item=prompt)
+    path = Path(config.screen_rows)
+    if not path.exists():
+        raise UsageError(f"screen_rows path not found: {path}")
+    if path.is_dir():
+        directory = path
+    elif path.name == ROWS_NAME:
+        directory = path.parent
+    else:
+        raise UsageError(
+            f"screen_rows must be a screen folder or a {ROWS_NAME} file, "
+            f"got {path}"
+        )
+
+    try:
+        rows = ScreenStore(directory).read_rows()
+    except ScreenError as error:
+        raise UsageError(f"cannot read screen rows: {error}") from error
+    if not rows:
+        raise UsageError(f"screen rows are empty: {path}")
+
+    samples = rows[0].samples
+    if samples != config.generations_per_prompt:
+        raise UsageError(
+            f"config: screen rows used {samples} samples per prompt, but "
+            f"'training.generations_per_prompt' is "
+            f"{config.generations_per_prompt}. A screen must use the training "
+            "group size, or the pool labels describe a different rollout count."
         )
     try:
-        return build_ordered_stages(
-            rows,
-            BANDS,
-            config.carry_over_ratio,
-            seed=config.split_seed,
-            start_stage=config.stage,
+        pools = from_rows(rows, samples=samples, promotion_bar=DEFAULT_PROMOTION_BAR)
+    except PoolsError as error:
+        raise UsageError(f"cannot build the pools: {error}") from error
+
+    known = {prompt.prompt_id for prompt in prompts}
+    measured = set(pools.train) | set(pools.retired) | set(pools.parked)
+    unknown = sorted(measured - known)
+    if unknown:
+        raise UsageError(
+            f"screen rows name {len(unknown)} prompt ids that are not in the "
+            f"training split, for example {unknown[0]!r}"
         )
-    except StageError as error:
-        raise UsageError(f"cannot build curriculum stages: {error}") from error
+    missing = sorted(known - measured)
+    if missing:
+        shown = ", ".join(repr(prompt_id) for prompt_id in missing[:3])
+        raise UsageError(
+            f"screen rows cover {len(measured)} of {len(known)} training "
+            f"prompts, {len(missing)} missing, for example {shown}"
+        )
+    return pools
+
+
+def spread_share_warning(config: Config, pools: Pools | None) -> str | None:
+    """A warning when the parked pool cannot fill the planned parked block.
+
+    The spread policy plans half of the step for parked prompts, with a minimum
+    of four and at most one fewer than the step. A smaller parked pool leaves
+    the block short, so the step spends less on parked work than planned. This
+    is a warning, not a failure.
+    """
+    if config.pool_policy != "spread" or pools is None:
+        return None
+    group = config.generations_per_prompt
+    prompts_per_step = max(1, config.rollouts_per_step // group)
+    planned = Spread(prompts_per_step=prompts_per_step).parked_count()
+    parked = len(pools.parked)
+    if parked >= planned:
+        return None
+    return (
+        f"rlvr: warning: the parked pool holds {parked} prompts, below the "
+        f"planned parked block of {planned}. The planned parked share is "
+        f"{planned}/{prompts_per_step} of each step."
+    )
+
+
+def training_steps(
+    config: Config, prompts: Sequence[Prompt], pools: Pools | None
+) -> int:
+    """The step count for one run over `config.epochs` epochs.
+
+    With a pool policy the step size comes from the rollout budget, so an epoch
+    is one pass over the measured train pool at that size. Without one the old
+    path applies: an epoch is one pass at the starting batch size. Both round
+    up, so a short tail still gets a step.
+    """
+    if config.pool_policy is not None and pools is not None:
+        available = len(pools.train)
+        per_step = max(1, config.rollouts_per_step // config.generations_per_prompt)
+        batches = -(-available // per_step)
+    else:
+        batches = -(-len(prompts) // START_PROMPTS)
+    return config.epochs * batches
 
 
 def build_test_runner(config: Config, *, fake: bool):
@@ -454,8 +514,7 @@ def build_test_runner(config: Config, *, fake: bool):
 
     The real runner holds every question because training rollouts run the
     train questions and the synthetic easy questions, and evaluation runs the
-    held-out test questions and each stage's held-out slice. The fake runner
-    ignores questions entirely.
+    held-out test questions. The fake runner ignores questions entirely.
     """
     if fake:
         return FakeTestRunner()
@@ -491,7 +550,8 @@ def _qwen_generator(config: Config, *, trainable: bool):
     except ImportError as error:
         raise UsageError(
             "the real generator needs torch, transformers, and peft. "
-            f"install the train extra or pass --fake. ({error})"
+            "install with pip install -e '.[vllm]' or pass --fake. "
+            f"({error})"
         ) from error
     except ValueError as error:
         raise UsageError(f"cannot configure the model: {error}") from error
@@ -500,22 +560,19 @@ def _qwen_generator(config: Config, *, trainable: bool):
 def build_generator(config: Config, *, fake: bool, trainable: bool = True):
     """The real generator, or the fake generator.
 
-    `trainable` false loads the base model with no adapter and no optimizer.
-    The difficulty screen uses that, and it always stays on the Hugging Face
-    path. Training honours `[training] engine`, building the vLLM wrapper when
-    it is `vllm`.
+    Every real generator samples through vLLM. `trainable` false loads the base
+    model with no adapter and no optimizer, and the engine samples those base
+    weights. The difficulty screen uses that. Training keeps the default, so
+    the adapter is written and handed to the engine after each step.
     """
     if fake:
         return FakeGenerator()
     from .model_profiles import validate_inference_engine
 
-    if trainable:
-        try:
-            validate_inference_engine(config.model_name, config.engine)
-        except ValueError as error:
-            raise UsageError(str(error)) from error
-    if not trainable or config.engine == "hf":
-        return _qwen_generator(config, trainable=trainable)
+    try:
+        validate_inference_engine(config.model_name)
+    except ValueError as error:
+        raise UsageError(str(error)) from error
 
     from .vllm_backend import VLLMEngine, VLLMGenerator
 
@@ -531,12 +588,11 @@ def build_generator(config: Config, *, fake: bool, trainable: bool = True):
         )
     except ImportError as error:
         raise UsageError(
-            "the vllm inference engine needs the vllm package. install it or "
-            'set engine = "hf" under [training]. '
-            f"({error})"
+            "the rollout engine needs the vllm package. install it with "
+            f"pip install -e '.[vllm]'. ({error})"
         ) from error
     try:
-        trainer = _qwen_generator(config, trainable=True)
+        trainer = _qwen_generator(config, trainable=trainable)
         return VLLMGenerator(trainer=trainer, engine=engine)
     except BaseException:
         try:
@@ -579,24 +635,30 @@ def run_command(args: argparse.Namespace) -> int:
     judge = build_judge(args.arm, config, fake=args.fake)
 
     train_prompts, eval_prompts = build_prompts(config)
-    stages = build_curriculum(config, train_prompts, fake=args.fake)
+    # With screen rows the pool is measured and the schedule can draw parked
+    # prompts. Without them the run keeps the placeholder path: every prompt is
+    # train and the run record says the pool was not measured.
+    pools = build_pools(config, train_prompts)
+    warning = spread_share_warning(config, pools)
+    if warning is not None:
+        print(warning, file=sys.stderr)
+    labels_path = None if args.fake else DEFAULT_LABELS_PATH
     if config.eval_final_questions is not None:
         eval_prompts = eval_prompts[: config.eval_final_questions]
 
-    # Real runs sweep the train questions once per epoch. A step takes a batch
-    # of prompts, so the budget is epochs times the number of batches at the
-    # starting size. The fake path keeps the small `[fake] steps` count.
+    # Real runs sweep the train questions once per epoch. A schedule uses the
+    # rollout budget as the step size, so an epoch is one pass over the measured
+    # train pool. Without a schedule the step size is the starting batch. The
+    # fake path keeps the small `[fake] steps` count.
     if not args.fake:
         from dataclasses import replace
 
-        batches_per_epoch = -(-len(train_prompts) // START_PROMPTS)
-        config = replace(config, steps=config.epochs * batches_per_epoch)
+        config = replace(
+            config, steps=training_steps(config, train_prompts, pools)
+        )
 
     resume_step = 0
     resume_prompt_cursor = 0
-    resume_stage_index: int | None = None
-    resume_stage_step = 0
-    resume_stage_pool: list[str] | None = None
     batch_policy: BatchSizePolicy | None = None
     prior_evaluations: list[dict] = []
     checkpoint = None
@@ -612,9 +674,6 @@ def run_command(args: argparse.Namespace) -> int:
         if manifest["arm"] != args.arm:
             raise UsageError(f"checkpoint arm mismatch: {manifest['arm']!r}")
         resume_prompt_cursor = _manifest_count(manifest, "prompt_cursor", 0)
-        resume_stage_index, resume_stage_step, resume_stage_pool = _resume_stage(
-            manifest
-        )
         batch_policy = _resume_batch_policy(config, manifest)
         resume_step = checkpoint.step
 
@@ -654,16 +713,14 @@ def run_command(args: argparse.Namespace) -> int:
         test_runner=test_runner,
         store=store,
         prompts=train_prompts,
-        stages=stages,
+        pools=pools,
+        labels_path=labels_path,
         eval_prompts=eval_prompts,
         resume_step=resume_step,
         prior_evaluations=prior_evaluations,
         fake=args.fake,
         memory=fake_memory if args.fake else read_torch_memory,
         resume_prompt_cursor=resume_prompt_cursor,
-        resume_stage_index=resume_stage_index,
-        resume_stage_step=resume_stage_step,
-        resume_stage_pool=resume_stage_pool,
         batch_policy=batch_policy,
         control=control,
     )
@@ -675,16 +732,14 @@ def run_command(args: argparse.Namespace) -> int:
         f"stop_reason={summary.stop_reason} stage={summary.stage or '-'} "
         f"run folder: {summary.run_dir}"
     )
-    if summary.stop_reason == "curriculum_complete":
-        print(
-            "curriculum complete: every stage pool was exhausted "
-            f"after {summary.steps} steps"
-        )
     return 0
 
 
 def screen_command(args: argparse.Namespace) -> int:
-    """Sample the base model and write the difficulty table."""
+    """Sample the base model and write the difficulty table.
+
+    The sample count defaults to sixteen and `--samples` overrides it.
+    """
     if args.samples < 1:
         raise UsageError(f"--samples must be at least 1, got {args.samples}")
 
@@ -747,7 +802,11 @@ def eval_band_command(args: argparse.Namespace) -> int:
     except ValueError as error:
         raise UsageError(str(error)) from error
 
-    generator = _qwen_generator(config, trainable=False)
+    # A checkpoint needs an adapter, so that path builds a trainable trainer.
+    # Without one the base weights are sampled and no checkpoint is written.
+    generator = build_generator(
+        config, fake=False, trainable=args.checkpoint is not None
+    )
     if args.checkpoint is not None:
         try:
             generator.load_checkpoint(args.checkpoint)

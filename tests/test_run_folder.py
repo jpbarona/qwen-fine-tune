@@ -263,3 +263,81 @@ def test_default_timestamp_is_utc_and_path_safe() -> None:
     from rlvr.runs import utc_timestamp
 
     assert re.fullmatch(r"\d{8}T\d{6}Z", utc_timestamp())
+
+
+def test_label_rows_are_appended_and_read(tmp_path) -> None:
+    from rlvr.runs import RunStore
+
+    store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
+    store.append_label({"step": 1, "prompt_id": "a", "label": "train"})
+    store.append_label({"step": 2, "prompt_id": "b", "label": "parked"})
+
+    assert store.labels_path == store.run_dir / "labels.jsonl"
+    assert store.read_labels() == [
+        {"step": 1, "prompt_id": "a", "label": "train"},
+        {"step": 2, "prompt_id": "b", "label": "parked"},
+    ]
+
+
+def test_truncate_drops_label_changes_past_the_checkpoint(tmp_path) -> None:
+    from rlvr.runs import RunStore
+
+    store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
+    store.append_label({"step": 1, "prompt_id": "a", "label": "train"})
+    store.append_label({"step": 2, "prompt_id": "b", "label": "parked"})
+    store.truncate_to_step(1)
+
+    assert store.read_labels() == [
+        {"step": 1, "prompt_id": "a", "label": "train"}
+    ]
+    assert read_jsonl(store.labels_path) == store.read_labels()
+
+
+def test_a_torn_final_label_line_is_dropped_and_removed(tmp_path) -> None:
+    from rlvr.runs import RunStore
+
+    store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
+    store.append_label({"step": 1, "prompt_id": "a", "label": "train"})
+    with store.labels_path.open("a", encoding="utf-8") as handle:
+        handle.write('{"step": 2, "prompt_id": "b"')
+
+    assert store.read_labels() == [
+        {"step": 1, "prompt_id": "a", "label": "train"}
+    ]
+    text = store.labels_path.read_text(encoding="utf-8")
+    assert text.endswith("\n")
+    assert "\"b\"" not in text
+
+
+def test_a_bad_label_line_that_is_not_the_torn_tail_raises(tmp_path) -> None:
+    from rlvr.runs import RunStore
+
+    store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
+    store.labels_path.write_text(
+        '{"step": 1, "prompt_id": "a", "label": "train"}\n'
+        "not json\n"
+        '{"step": 3, "prompt_id": "c", "label": "train"}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="label file line 2"):
+        store.read_labels()
+
+
+def test_an_unterminated_complete_label_line_is_rewritten(tmp_path) -> None:
+    from rlvr.runs import RunStore
+
+    store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
+    first = '{"step": 1, "prompt_id": "a", "label": "train"}'
+    store.labels_path.write_text(first, encoding="utf-8")
+
+    assert store.read_labels() == [
+        {"step": 1, "prompt_id": "a", "label": "train"}
+    ]
+    assert store.labels_path.read_text(encoding="utf-8").endswith("\n")
+
+    store.append_label({"step": 2, "prompt_id": "b", "label": "parked"})
+    assert store.read_labels() == [
+        {"step": 1, "prompt_id": "a", "label": "train"},
+        {"step": 2, "prompt_id": "b", "label": "parked"},
+    ]

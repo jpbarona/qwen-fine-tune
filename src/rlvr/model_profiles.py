@@ -61,12 +61,12 @@ def validate_transformers_version(profile: ModelProfile, version: str) -> None:
         raise ValueError(
             f"{profile.model_type} requires transformers >= "
             f"{profile.minimum_transformers_major}.0.0; installed version is {version}. "
-            "Install the LFM environment with pip install -e '.[lfm]'."
+            "Install the runtime with pip install -e '.[vllm]'."
         )
 
 
 def validate_inference_engine(
-    model_name: str, engine: str, *, vllm_version: str | None = None
+    model_name: str, *, vllm_version: str | None = None
 ) -> None:
     """Check the installed vLLM can serve this architecture with LoRA.
 
@@ -76,8 +76,6 @@ def validate_inference_engine(
     that is not installed at all is left to the engine builder, which reports
     the install command.
     """
-    if engine != "vllm":
-        return
     profile = model_profile(model_name)
     if profile.minimum_vllm is None:
         return
@@ -88,11 +86,10 @@ def validate_inference_engine(
     installed = _major_minor(vllm_version)
     if installed < profile.minimum_vllm:
         minimum = ".".join(str(part) for part in profile.minimum_vllm) + ".0"
-        extra = "vllm-lfm" if profile == LFM2 else "vllm"
         raise ValueError(
             f"{profile.model_type} rollouts on vLLM require vllm >= {minimum}, "
             f"but version {vllm_version} is installed. Install it with "
-            f"pip install -e '.[{extra}]' or set training.engine = \"hf\"."
+            "pip install -e '.[vllm]'."
         )
 
 
@@ -118,8 +115,7 @@ def _installed_vllm_version() -> str | None:
     if not isinstance(found, str) or not found:
         raise ValueError(
             "cannot read the vllm version: the package metadata and "
-            "vllm.__version__ are both missing. Reinstall vllm or set "
-            'training.engine = "hf".'
+            "vllm.__version__ are both missing. Reinstall vllm."
         )
     return found
 

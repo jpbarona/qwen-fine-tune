@@ -23,14 +23,13 @@ Optional keys, with the defaults shown:
     [training] generations_per_prompt = 8
     [training] epochs = 5
     [training] temperature = 0.9
-    [training] engine = "hf"  (also accepted as inference_engine)
     [training] learning_rate = 1e-5
     [training] lora_rank = 32
     [training] lora_alpha = 64
     [training] lora_targets = "attention"
     [training] max_prompt_tokens = 512
     [training] max_completion_tokens = 2048
-    [training] thinking_budget_start = 768
+    [training] thinking_budget = 1024
     [training] entropy_every_steps = 500
     [training] clip_epsilon = 0.2
     [training] kl_beta = 0.0
@@ -43,12 +42,13 @@ Optional keys, with the defaults shown:
     [training] eval_batch_size = 8
     [training] prefetch_scoring = true
     [training] seed = 0
+    [training] pool_policy = (unset: no schedule, train the pool as it is)
+    [training] sweep_gap_ratio = 3
+    [training] screen_rows = (unset: no measured pool)
+    [training] rollouts_per_step = 608
 
     [budget] max_steps = (unset: run all of fake.steps)
     [budget] max_judge_calls = (unset: no judge call cap)
-
-    [curriculum] stage = "very easy"
-    [curriculum] carry_over_ratio = 0.2
 
     [judge] provider = "openrouter"
     [judge] base_url = (unset: the provider default endpoint)
@@ -71,14 +71,41 @@ It is an absolute figure, never a percentage.
 memory allows. It caps sequences per step. Step time is unverified, because
 test containers and judge calls run outside the batch. The value is at least
 one. An absent key means no cap, so a config written before this key keeps its
-old growth behaviour.
+old growth behaviour. It cannot be combined with `pool_policy`, because a
+schedule takes its step size from `rollouts_per_step`.
 
-`[curriculum] stage` is the band a run starts at and must be one of the four
-fixed bands. `[curriculum] carry_over_ratio` is the share of the previous band
-added to the next stage, at least 0 and below 1.
+`thinking_budget` is the token budget for the reasoning block. The same value
+is used on every step. It is recorded only, because vLLM 0.34 does not enforce
+a per-request budget.
 
-Extra keys and tables are kept and ignored here. Later tasks add the training,
-data, and judge settings they need without changing this loader's contract.
+`pool_policy` names the parked prompt schedule. `"spread"` sends a block of
+parked prompts with every step. `"sweep"` covers the whole parked pool in
+consecutive all-parked steps, then trains for a gap. An absent key means no
+schedule, so the run trains the measured train pool and leaves parked prompts
+alone. A set policy requires `screen_rows`, because the parked prompts come
+from the measured screen.
+
+`sweep_gap_ratio` is the number of training steps after a sweep, as a multiple
+of the sweep length. It is an integer from 3 to 10 and defaults to 3. The value
+is validated whether or not the sweep policy is selected, so a bad arm config
+fails at load.
+
+`screen_rows` is the screen output folder, or its `rows.jsonl` file. The pools
+are built from it before the run. An absent key means no measured pool, which
+is the placeholder used by unit tests and the fake path.
+
+`rollouts_per_step` is the sequence budget for one step. Prompts per step is
+this value divided by `generations_per_prompt`. The spread parked block is
+`max(4, prompts_per_step // 2)`, capped at one fewer than the step. The 608
+default comes from the measured 19 November run, where 608 sequences at group
+size 8 took 236 seconds.
+
+The removed curriculum keys are ignored when a config still sets them, because
+extra keys and tables are kept and ignored. A stale `training.refresh_steps`
+key is ignored too, because spread no longer reads a refresh interval. The
+removed engine keys are the exception: `training.engine` and its
+`training.inference_engine` spelling raise an error that names the key, because
+sampling always uses vLLM now.
 
 The judge API key is never part of the config. It comes from the environment
 named by `[judge] api_key_env`, which defaults per provider. The loader keeps
@@ -100,9 +127,13 @@ from .reward import (
     DEFAULT_LENGTH_PENALTY_PER_TOKEN,
     DEFAULT_LENGTH_SOFT_LIMIT,
 )
-from .budget import DEFAULT_THINKING_BUDGET_START
+from .budget import DEFAULT_THINKING_BUDGET
 from .model_profiles import LORA_TARGETS
-from .stages import BANDS, DEFAULT_CARRY_OVER_RATIO
+from .schedule import (
+    DEFAULT_SWEEP_GAP_RATIO,
+    MAX_SWEEP_GAP_RATIO,
+    MIN_SWEEP_GAP_RATIO,
+)
 
 __all__ = ["Config", "ConfigError", "default_config_path", "load_config"]
 
@@ -136,13 +167,11 @@ DEFAULT_CLIP_EPSILON = 0.2
 DEFAULT_KL_BETA = 0.0
 DEFAULT_SEED = 0
 
-#: Which backend samples rollouts. Training always stays on the Hugging Face
-#: model, so `vllm` changes the sampler only.
-DEFAULT_INFERENCE_ENGINE = "hf"
-INFERENCE_ENGINES: tuple[str, ...] = ("hf", "vllm")
+#: Sequence budget for one step, used when a pool schedule is active.
+DEFAULT_ROLLOUTS_PER_STEP = 608
 
-#: The band a run starts at, and the default carry over share.
-DEFAULT_STAGE = BANDS[0]
+#: Pool policies the code implements.
+POOL_POLICIES: tuple[str, ...] = ("spread", "sweep")
 
 
 class ConfigError(ValueError):
@@ -166,14 +195,13 @@ class Config:
     generations_per_prompt: int = DEFAULT_GENERATIONS_PER_PROMPT
     epochs: int = DEFAULT_EPOCHS
     temperature: float = DEFAULT_TEMPERATURE
-    engine: str = DEFAULT_INFERENCE_ENGINE
     learning_rate: float = DEFAULT_LEARNING_RATE
     lora_rank: int = DEFAULT_LORA_RANK
     lora_alpha: int = DEFAULT_LORA_ALPHA
     lora_targets: str = DEFAULT_LORA_TARGETS
     max_prompt_tokens: int = DEFAULT_MAX_PROMPT_TOKENS
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
-    thinking_budget_start: int = DEFAULT_THINKING_BUDGET_START
+    thinking_budget: int = DEFAULT_THINKING_BUDGET
     entropy_every_steps: int = DEFAULT_ENTROPY_EVERY_STEPS
     clip_epsilon: float = DEFAULT_CLIP_EPSILON
     kl_beta: float = DEFAULT_KL_BETA
@@ -186,8 +214,10 @@ class Config:
     eval_batch_size: int = 8
     prefetch_scoring: bool = True
     seed: int = DEFAULT_SEED
-    stage: str = DEFAULT_STAGE
-    carry_over_ratio: float = DEFAULT_CARRY_OVER_RATIO
+    pool_policy: str | None = None
+    sweep_gap_ratio: int = DEFAULT_SWEEP_GAP_RATIO
+    screen_rows: str | None = None
+    rollouts_per_step: int = DEFAULT_ROLLOUTS_PER_STEP
     max_steps: int | None = None
     max_judge_calls: int | None = None
 
@@ -291,20 +321,6 @@ def _optional_float(raw: dict[str, Any], dotted: str, default: float, *, positiv
     return number
 
 
-def _band(raw: dict[str, Any], dotted: str, default: str) -> str:
-    """A band name that must be one of the fixed ordered bands."""
-    value = _optional(raw, dotted, None)
-    if value is None:
-        return default
-    if not isinstance(value, str) or not value.strip():
-        raise ConfigError(f"config: '{dotted}' must be a non-empty string, got {_shown(value)}")
-    if value not in BANDS:
-        raise ConfigError(
-            f"config: '{dotted}' must be one of {', '.join(BANDS)}, got {value!r}"
-        )
-    return value
-
-
 def _lora_targets(raw: dict[str, Any], dotted: str, default: str) -> str:
     """One of the allowed adapter placements, or `default` when absent."""
     value = _optional(raw, dotted, None)
@@ -315,6 +331,50 @@ def _lora_targets(raw: dict[str, Any], dotted: str, default: str) -> str:
     if value not in LORA_TARGETS:
         raise ConfigError(
             f"config: '{dotted}' must be one of {', '.join(LORA_TARGETS)}, got {value!r}"
+        )
+    return value
+
+
+def _optional_string(raw: dict[str, Any], dotted: str, default: str | None) -> str | None:
+    """A non-empty string from `dotted`, or `default` when absent."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return default
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(
+            f"config: '{dotted}' must be a non-empty string, got {_shown(value)}"
+        )
+    return value
+
+
+def _pool_policy(raw: dict[str, Any], dotted: str) -> str | None:
+    """One of the implemented pool policies, or None when absent."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(
+            f"config: '{dotted}' must be a non-empty string, got {_shown(value)}"
+        )
+    if value not in POOL_POLICIES:
+        raise ConfigError(
+            f"config: '{dotted}' must be one of {', '.join(POOL_POLICIES)}, "
+            f"got {value!r}"
+        )
+    return value
+
+
+def _sweep_gap_ratio(raw: dict[str, Any], dotted: str, default: int) -> int:
+    """An integer from 3 to 10, or `default` when the key is absent."""
+    value = _optional(raw, dotted, None)
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"config: '{dotted}' must be an integer, got {_shown(value)}")
+    if not MIN_SWEEP_GAP_RATIO <= value <= MAX_SWEEP_GAP_RATIO:
+        raise ConfigError(
+            f"config: '{dotted}' must be from {MIN_SWEEP_GAP_RATIO} to "
+            f"{MAX_SWEEP_GAP_RATIO}, got {value}"
         )
     return value
 
@@ -330,29 +390,21 @@ def _optional_unit_float(raw: dict[str, Any], dotted: str, default: float) -> fl
     return number
 
 
-def _engine(raw: dict[str, Any], default: str) -> str:
-    """One of the allowed inference engines, or `default` when absent.
+def _reject_engine_keys(raw: dict[str, Any]) -> None:
+    """Reject the removed sampling engine keys.
 
-    `training.engine` is the documented key. `training.inference_engine` is
-    accepted as the same setting, so the sample config's spelling also works.
-    Conflicting values are rejected rather than silently picking one.
+    Sampling always uses vLLM, so the key has no meaning. A config that still
+    sets it fails loudly and names the key instead of being silently ignored.
     """
-    primary = _optional(raw, "training.engine", None)
-    alias = _optional(raw, "training.inference_engine", None)
-    if primary is not None and alias is not None and primary != alias:
-        raise ConfigError(
-            "config: 'training.engine' and 'training.inference_engine' disagree, "
-            f"got {_shown(primary)} and {_shown(alias)}"
-        )
-    value = primary if primary is not None else alias
-    if value is None:
-        return default
-    if not isinstance(value, str) or value not in INFERENCE_ENGINES:
-        raise ConfigError(
-            "config: 'training.engine' must be one of "
-            f"{', '.join(INFERENCE_ENGINES)}, got {_shown(value)}"
-        )
-    return value
+    training = raw.get("training")
+    if not isinstance(training, dict):
+        return
+    for key in ("engine", "inference_engine"):
+        if key in training:
+            raise ConfigError(
+                f"config: 'training.{key}' is not a setting. Sampling always "
+                "uses vLLM, so remove the key."
+            )
 
 
 def _optional_int_none(raw: dict[str, Any], dotted: str) -> int | None:
@@ -383,6 +435,24 @@ def load_config(path: str | Path) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError(f"config: {file_path} must contain a table of settings")
 
+    _reject_engine_keys(raw)
+
+    pool_policy = _pool_policy(raw, "training.pool_policy")
+    screen_rows = _optional_string(raw, "training.screen_rows", None)
+    max_prompts = _optional_int_none(raw, "training.max_prompts")
+    if pool_policy is not None and screen_rows is None:
+        raise ConfigError(
+            "config: 'training.pool_policy' needs 'training.screen_rows'. A "
+            "policy schedules parked prompts, and those come from the measured "
+            "screen rows."
+        )
+    if pool_policy is not None and max_prompts is not None:
+        raise ConfigError(
+            "config: 'training.pool_policy' and 'training.max_prompts' cannot "
+            "both be set. A schedule uses the rollout budget as the step size, "
+            "so max_prompts would be ignored."
+        )
+
     return Config(
         path=file_path,
         raw=raw,
@@ -411,7 +481,6 @@ def load_config(path: str | Path) -> Config:
         temperature=_optional_float(
             raw, "training.temperature", DEFAULT_TEMPERATURE, positive=True
         ),
-        engine=_engine(raw, DEFAULT_INFERENCE_ENGINE),
         learning_rate=_optional_float(
             raw, "training.learning_rate", DEFAULT_LEARNING_RATE, positive=True
         ),
@@ -430,8 +499,8 @@ def load_config(path: str | Path) -> Config:
         max_completion_tokens=_optional_positive_int(
             raw, "training.max_completion_tokens", DEFAULT_MAX_COMPLETION_TOKENS
         ),
-        thinking_budget_start=_optional_positive_int(
-            raw, "training.thinking_budget_start", DEFAULT_THINKING_BUDGET_START
+        thinking_budget=_optional_positive_int(
+            raw, "training.thinking_budget", DEFAULT_THINKING_BUDGET
         ),
         entropy_every_steps=_optional_non_negative_int(
             raw, "training.entropy_every_steps", DEFAULT_ENTROPY_EVERY_STEPS
@@ -457,14 +526,18 @@ def load_config(path: str | Path) -> Config:
         memory_floor_mib=_optional_non_negative_int(
             raw, "training.memory_floor_mib", DEFAULT_MEMORY_FLOOR_MIB
         ),
-        max_prompts=_optional_int_none(raw, "training.max_prompts"),
+        max_prompts=max_prompts,
         test_workers=_optional_positive_int(raw, "training.test_workers", 4),
         eval_batch_size=_optional_positive_int(raw, "training.eval_batch_size", 8),
         prefetch_scoring=_optional_bool(raw, "training.prefetch_scoring", True),
         seed=_optional_non_negative_int(raw, "training.seed", DEFAULT_SEED),
-        stage=_band(raw, "curriculum.stage", DEFAULT_STAGE),
-        carry_over_ratio=_optional_unit_float(
-            raw, "curriculum.carry_over_ratio", DEFAULT_CARRY_OVER_RATIO
+        pool_policy=pool_policy,
+        sweep_gap_ratio=_sweep_gap_ratio(
+            raw, "training.sweep_gap_ratio", DEFAULT_SWEEP_GAP_RATIO
+        ),
+        screen_rows=screen_rows,
+        rollouts_per_step=_optional_positive_int(
+            raw, "training.rollouts_per_step", DEFAULT_ROLLOUTS_PER_STEP
         ),
         max_steps=_optional_int_none(raw, "budget.max_steps"),
         max_judge_calls=_optional_int_none(raw, "budget.max_judge_calls"),

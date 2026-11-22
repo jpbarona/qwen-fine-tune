@@ -4,14 +4,21 @@ and not duplicating records. These use the fake generator and real files."""
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
 
-from rlvr.checkpoint import checkpoint_dir_name, find_latest_checkpoint, write_checkpoint_manifest
+from rlvr.checkpoint import (
+    checkpoint_dir_name,
+    find_latest_checkpoint,
+    read_checkpoint_manifest,
+    write_checkpoint_manifest,
+)
 from rlvr.config import load_config
 from rlvr.experiment import Experiment, Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner
+from rlvr.resume import ResumeError, validate_resume
 from rlvr.runs import RunStore
 from rlvr.schema import RolloutRecord
 
@@ -173,3 +180,162 @@ def test_resume_continues_without_duplicating_records(tmp_path) -> None:
     _experiment(tmp_path, resumed, resume_step=checkpoint.step, prior=prior).run()
 
     assert _rollout_steps(resumed.run_dir) == [1] * 8 + [2] * 8 + [3] * 8
+
+
+def test_an_old_checkpoint_with_stage_fields_still_resumes(tmp_path) -> None:
+    from rlvr.resume import manifest_count, resume_batch_policy
+
+    root = tmp_path / "runs"
+    store = RunStore(root, "code-score", timestamp=TIMESTAMP)
+    store.write_meta({"arm": "code-score"})
+    for step in (1, 2):
+        for _ in range(8):
+            store.append_rollout(_record(step))
+        store.append_metric({"step": step})
+
+    # A checkpoint written before the pool change carries a stage position.
+    write_checkpoint_manifest(
+        store.checkpoints_dir / checkpoint_dir_name(2),
+        step=2,
+        arm="code-score",
+        timestamp=TIMESTAMP,
+        prompt_cursor=2,
+        batch={"current": 1, "largest_fit": 1, "settled": True},
+        stage={"index": 1, "step": 3, "pool": ["mbpp-0000"]},
+    )
+
+    resumed = RunStore.resume(root, "code-score")
+    checkpoint = find_latest_checkpoint(resumed.checkpoints_dir)
+    assert checkpoint is not None and checkpoint.step == 2
+
+    manifest = read_checkpoint_manifest(checkpoint.directory)
+    assert manifest["stage"]["index"] == 1
+    assert manifest_count(manifest, "prompt_cursor", 0) == 2
+    config = load_config(_config_path(tmp_path))
+    policy = resume_batch_policy(config, manifest)
+    assert policy is not None and policy.current == 1
+
+    resumed.truncate_to_step(checkpoint.step)
+    result = _experiment(
+        tmp_path,
+        resumed,
+        resume_step=checkpoint.step,
+        prior=resumed.read_evaluations(),
+    ).run()
+
+    assert result.steps == 3
+    assert _rollout_steps(resumed.run_dir) == [1] * 8 + [2] * 8 + [3] * 8
+
+
+def _pooled_resume(tmp_path: Path):
+    text = (
+        CONFIG_TEXT
+        + "\n[training]\n"
+        + 'pool_policy = "spread"\n'
+        + 'screen_rows = "screens/a"\n'
+        + "generations_per_prompt = 16\n"
+    )
+    config_path = tmp_path / "pooled.toml"
+    config_path.write_text(text, encoding="utf-8")
+    config = load_config(config_path)
+    meta_path = tmp_path / "meta.json"
+    meta_path.write_text(
+        json.dumps(
+            {
+                "arm": "code-score",
+                "mode": "fake",
+                "split_seed": 1,
+                "config": tomllib.loads(text),
+                "pool_policy": "spread",
+                "screen_rows": "screens/a",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return config, text, meta_path
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "field"),
+    (
+        ('pool_policy = "spread"', 'pool_policy = "sweep"', "pool_policy"),
+        ('screen_rows = "screens/a"', 'screen_rows = "screens/b"', "screen_rows"),
+    ),
+)
+def test_resume_rejects_a_changed_pool_policy_or_screen(
+    tmp_path: Path, old: str, new: str, field: str
+) -> None:
+    config, text, meta_path = _pooled_resume(tmp_path)
+    validate_resume(meta_path, config, arm="code-score", fake=True)
+
+    changed = text.replace(old, new)
+    assert changed != text
+    changed_path = tmp_path / "changed.toml"
+    changed_path.write_text(changed, encoding="utf-8")
+
+    with pytest.raises(ResumeError, match=field):
+        validate_resume(
+            meta_path, load_config(changed_path), arm="code-score", fake=True
+        )
+
+
+def _step_size_resume(tmp_path: Path):
+    text = (
+        CONFIG_TEXT
+        + "\n[training]\n"
+        + 'pool_policy = "spread"\n'
+        + 'screen_rows = "screens/a"\n'
+        + "generations_per_prompt = 8\n"
+        + "rollouts_per_step = 608\n"
+    )
+    config_path = tmp_path / "step-size.toml"
+    config_path.write_text(text, encoding="utf-8")
+    meta = {
+        "arm": "code-score",
+        "mode": "fake",
+        "split_seed": 1,
+        "config": tomllib.loads(text),
+        "pool_policy": "spread",
+        "screen_rows": "screens/a",
+    }
+    meta_path = tmp_path / "step-size-meta.json"
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    return load_config(config_path), text, meta_path, meta
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "field"),
+    (
+        ("rollouts_per_step = 608", "rollouts_per_step = 304", "rollouts_per_step"),
+        (
+            "generations_per_prompt = 8",
+            "generations_per_prompt = 16",
+            "generations_per_prompt",
+        ),
+    ),
+)
+def test_resume_rejects_a_changed_step_size(
+    tmp_path: Path, old: str, new: str, field: str
+) -> None:
+    config, text, meta_path, _ = _step_size_resume(tmp_path)
+    validate_resume(meta_path, config, arm="code-score", fake=True)
+
+    changed = text.replace(old, new)
+    assert changed != text
+    changed_path = tmp_path / "changed.toml"
+    changed_path.write_text(changed, encoding="utf-8")
+
+    with pytest.raises(ResumeError, match=field):
+        validate_resume(
+            meta_path, load_config(changed_path), arm="code-score", fake=True
+        )
+
+
+def test_older_metadata_without_step_size_still_resumes(tmp_path: Path) -> None:
+    config, _, meta_path, meta = _step_size_resume(tmp_path)
+    training = meta["config"]["training"]
+    del training["rollouts_per_step"]
+    del training["generations_per_prompt"]
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    validate_resume(meta_path, config, arm="code-score", fake=True)

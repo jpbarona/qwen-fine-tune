@@ -3,8 +3,9 @@
 This module is the concrete `Generator` for GPU runs. It loads
 the configured model with thinking enabled, wraps it in a LoRA adapter over the
 attention projections, and implements one GRPO weight update per training step.
-A step samples several prompt groups in one `generate_batch` call, accumulates
-the gradient of every group, and steps the optimizer once at the end. Advantage
+The vLLM engine samples the prompt groups, this module builds one group per
+prompt and accumulates the gradient of every group, and the optimizer steps
+once at the end. Advantage
 is normalised inside a prompt group, never across the step. The backward pass
 runs once per generation, so only one autograd graph is alive at a time and the
 gradients accumulate across the group. That is what makes the 2,048 token cap
@@ -39,7 +40,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from .budget import budget_stop_is_truncation
 from .experiment import Generation, Prompt
 from .model_profiles import LORA_TARGETS, model_profile, validate_transformers_version
 
@@ -61,7 +61,6 @@ __all__ = [
     "mean_token_loss",
     "pad_prompts",
     "seed_rngs",
-    "split_generated_rows",
     "split_thinking_and_code",
     "thinking_marker_index",
     "truncate_prompt",
@@ -130,42 +129,6 @@ def thinking_marker_index(token_ids: Sequence[int], marker_id: int) -> int:
         if token_ids[index] == marker_id:
             return index + 1
     return 0
-
-
-class _ThinkingBudgetProcessor:
-    """Force a row to EOS once its thinking budget is spent unclosed.
-
-    A row that already wrote the closing marker is left alone. A row that
-    reaches the budget without it has every logit except EOS set to minus
-    infinity, so generation ends there and the rollout scores as truncated.
-    The decision itself lives in `row_should_force_end`, which is unit tested.
-    """
-
-    def __init__(
-        self,
-        *,
-        prompt_length: int,
-        budget: int,
-        marker_id: int,
-        eos_token_id: int | None,
-    ) -> None:
-        self.prompt_length = prompt_length
-        self.budget = budget
-        self.marker_id = marker_id
-        self.eos_token_id = eos_token_id
-
-    def __call__(self, input_ids: Any, scores: Any) -> Any:
-        if self.eos_token_id is None:
-            return scores
-        generated = input_ids[:, self.prompt_length :]
-        length = int(generated.shape[1])
-        if length < self.budget:
-            return scores
-        closed = (generated == self.marker_id).any(dim=1)
-        force_end = ~closed
-        scores.masked_fill_(force_end.unsqueeze(1), float("-inf"))
-        scores[:, self.eos_token_id].masked_fill_(force_end, 0.0)
-        return scores
 
 
 def categorical_entropy(logits: Sequence[float]) -> float:
@@ -424,43 +387,6 @@ def check_attention_mask(
             raise ValueError(f"row {row} masks every token")
 
 
-def split_generated_rows(
-    rows: Sequence[Sequence[int]],
-    *,
-    prompt_count: int,
-    per_prompt: int,
-    prompt_length: int,
-) -> list[list[list[int]]]:
-    """Split generate output into one group of completions per prompt.
-
-    `generate` returns the rows grouped by input prompt, `per_prompt` rows each
-    and in prompt order. The first `prompt_length` columns are the padded
-    prompt, which is dropped here so every group holds completion tokens only.
-    """
-    if prompt_count < 1:
-        raise ValueError(f"prompt_count must be at least 1, got {prompt_count}")
-    if per_prompt < 1:
-        raise ValueError(f"per_prompt must be at least 1, got {per_prompt}")
-    if prompt_length < 0:
-        raise ValueError(f"prompt_length must not be negative, got {prompt_length}")
-    expected = prompt_count * per_prompt
-    if len(rows) != expected:
-        raise ValueError(
-            f"got {len(rows)} rows for {prompt_count} prompts of {per_prompt}, "
-            f"expected {expected}"
-        )
-    groups: list[list[list[int]]] = []
-    for index in range(prompt_count):
-        start = index * per_prompt
-        groups.append(
-            [
-                [int(token) for token in row[prompt_length:]]
-                for row in rows[start : start + per_prompt]
-            ]
-        )
-    return groups
-
-
 def seed_rngs(seed: int) -> None:
     """Seed the Python, numpy, and torch RNGs.
 
@@ -512,16 +438,17 @@ class _GroupEntry:
 
 
 class QwenGenerator:
-    """The real generator and trainer behind the `Generator` seam.
+    """The real trainer behind the `Generator` seam. The engine samples.
 
     The class loads the model, tokenizer, LoRA adapter, and optimizer on
-    construction. `generate_batch` samples one group per prompt in a single
-    padded call and caches the token ids, masks, and old logprobs the update
-    needs, never the logits. `accumulate` runs the backward pass for one group
-    and `apply_update` steps the optimizer once over every accumulated group.
-    `update` keeps the single group shortcut. `save_checkpoint` and
-    `load_checkpoint` write and restore the adapter weights, the optimizer
-    state, and the step number, which counts weight updates.
+    construction. The vLLM engine samples token ids and
+    `build_generation_batch` turns them into groups, caching the token ids,
+    masks, and old logprobs the update needs, never the logits. `accumulate`
+    runs the backward pass for one group and `apply_update` steps the optimizer
+    once over every accumulated group. `update` keeps the single group
+    shortcut. `save_checkpoint` and `load_checkpoint` write and restore the
+    adapter weights, the optimizer state, and the step number, which counts
+    weight updates.
 
     With `trainable` false the class loads the base model only. It builds no
     adapter and no optimizer, so a measurement run cannot train or checkpoint.
@@ -630,134 +557,7 @@ class QwenGenerator:
         trainable_params = [param for param in self.model.parameters() if param.requires_grad]
         self.optimizer = torch.optim.AdamW(trainable_params, lr=self.learning_rate)
 
-    # --- generation ------------------------------------------------------
-
-    def generate(
-        self,
-        prompt: Prompt,
-        *,
-        n: int,
-        temperature: float,
-        thinking: bool = True,
-    ) -> list[Generation]:
-        """Sample `n` generations for one prompt.
-
-        This is the single prompt shortcut over `generate_batch`. Evaluation and
-        the difficulty screen use it. Training calls `generate_batch` so several
-        prompts share one call.
-        """
-        return self.generate_batch(
-            [prompt], n=n, temperature=temperature, thinking=thinking
-        )[0]
-
-    def generate_batch(
-        self,
-        prompts: Sequence[Prompt],
-        *,
-        n: int,
-        temperature: float,
-        thinking: bool = True,
-        thinking_budget: int | None = None,
-    ) -> list[list[Generation]]:
-        """Sample `n` generations for each prompt in one padded call.
-
-        Prompts are truncated to `max_prompt_tokens`, left padded to the longest
-        one, and passed with an attention mask that marks the pads. The output
-        rows come back grouped by prompt, so `split_generated_rows` cuts them
-        back into one group per prompt before any decoding, scoring or parsing.
-
-        Greedy evaluation (temperature 0.0) runs the model in eval mode and does
-        no group bookkeeping, so it never clobbers groups cached for the next
-        update. Sampling runs in train mode and caches one group per prompt. A
-        non-trainable generator stays in eval mode and caches nothing.
-
-        `thinking` is passed to the chat template. Training leaves it on. The
-        difficulty screen turns it off at the same completion cap.
-        """
-        if n < 1:
-            raise ValueError(f"n must be at least 1, got {n}")
-        prompt_list = list(prompts)
-        if not prompt_list:
-            raise ValueError("generate_batch needs at least one prompt")
-        torch = self._torch
-        do_sample = temperature > 0.0
-        caching = do_sample and self.trainable
-        if caching:
-            # A failed backward can leave gradients before a whole group has
-            # accumulated. A new training sample always starts a fresh step.
-            self.optimizer.zero_grad()
-            self._accumulated_groups = 0
-            self._pending_groups = None
-
-        if caching:
-            self.model.train()
-        else:
-            self.model.eval()
-
-        prompt_ids: list[list[int]] = []
-        prompt_truncated: list[bool] = []
-        for prompt in prompt_list:
-            kept, truncated = self._encode_prompt(prompt, thinking=thinking)
-            prompt_ids.append(kept)
-            prompt_truncated.append(truncated)
-
-        pad_token_id = self.tokenizer.pad_token_id
-        padded_ids, attention_mask = pad_prompts(prompt_ids, pad_token_id)
-        check_attention_mask(padded_ids, attention_mask, pad_token_id)
-        prompt_length = len(padded_ids[0])
-        inputs = {
-            "input_ids": torch.tensor(padded_ids, device=self._device),
-            "attention_mask": torch.tensor(
-                attention_mask, dtype=torch.long, device=self._device
-            ),
-        }
-
-        generate_kwargs: dict[str, Any] = dict(
-            max_new_tokens=self.max_completion_tokens,
-            do_sample=do_sample,
-            temperature=temperature if do_sample else None,
-            num_return_sequences=n,
-            pad_token_id=pad_token_id,
-            return_dict_in_generate=True,
-        )
-        if thinking_budget is not None and do_sample:
-            generate_kwargs["logits_processor"] = [
-                _ThinkingBudgetProcessor(
-                    prompt_length=prompt_length,
-                    budget=thinking_budget,
-                    marker_id=self.think_end_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                )
-            ]
-        with torch.no_grad():
-            outputs = self.model.generate(**inputs, **generate_kwargs)
-
-        groups = split_generated_rows(
-            outputs.sequences,
-            prompt_count=len(prompt_list),
-            per_prompt=n,
-            prompt_length=prompt_length,
-        )
-
-        generations: list[list[Generation]] = []
-        cached_groups: list[list[_GroupEntry]] = []
-        for index, prompt in enumerate(prompt_list):
-            group, entries = self._decode_group(
-                prompt,
-                padded_ids[index],
-                attention_mask[index],
-                prompt_length,
-                prompt_truncated=prompt_truncated[index],
-                completion_rows=groups[index],
-                caching=caching,
-                thinking_budget=thinking_budget,
-            )
-            generations.append(group)
-            cached_groups.append(entries)
-
-        if caching:
-            self._pending_groups = cached_groups
-        return generations
+    # --- prompt encoding -------------------------------------------------
 
     def encode_prompt(
         self, prompt: Prompt, *, thinking: bool = True
@@ -765,8 +565,7 @@ class QwenGenerator:
         """Prompt token ids and the truncation flag, for an external sampler.
 
         The vLLM backend cannot tokenize, so the trainer encodes the prompt and
-        the engine samples from these ids. The prompt cap is applied here, so
-        both sampling paths see the same prompt length.
+        the engine samples from these ids. The prompt cap is applied here.
         """
         return self._encode_prompt(prompt, thinking=thinking)
 
@@ -799,11 +598,10 @@ class QwenGenerator:
     ) -> list[list[Generation]]:
         """Build generation objects from token ids sampled by the vLLM engine.
 
-        The rows are the same shape the Hugging Face path splits from
-        `generate`. Each prompt is padded on its own, so the mask is all ones
-        and the completion starts at the prompt length. When `cache` is true
-        the old logprobs are computed on the training model and the group data
-        is cached for the update pass, exactly as `generate_batch` does.
+        Each prompt is padded on its own, so the mask is all ones and the
+        completion starts at the prompt length. When `cache` is true the old
+        logprobs are computed on the training model and the group data is
+        cached for the update pass.
         """
         prompt_list = list(prompts)
         counts = (
@@ -822,8 +620,8 @@ class QwenGenerator:
                 "this generator was built without an adapter and cannot cache groups"
             )
         if cache:
-            # Match generate_batch, including an interrupted first group's
-            # backward pass, which leaves the completed group counter at zero.
+            # A new sample always starts a fresh step, including after an
+            # interrupted first group's backward pass.
             self.optimizer.zero_grad()
             self._accumulated_groups = 0
             self._pending_groups = None
@@ -864,12 +662,11 @@ class QwenGenerator:
         prompt_truncated: bool,
         completion_rows: Sequence[Sequence[int]],
         caching: bool,
-        thinking_budget: int | None = None,
     ) -> tuple[list[Generation], list[_GroupEntry]]:
         """Decode one prompt's completion rows and cache its update data.
 
-        Shared by the Hugging Face batch path and the vLLM batch builder, so
-        both produce identical generation objects and identical group entries.
+        The vLLM batch builder passes the engine's token ids here, so every
+        group gets the same generation objects and group entries.
         """
         torch = self._torch
         eos = self.tokenizer.eos_token_id
@@ -891,10 +688,6 @@ class QwenGenerator:
             if not truncated:
                 generated_ids = generated_ids[: generated_ids.index(eos) + 1]
             split = self._split_at_think_end(generated_ids)
-            if thinking_budget is not None:
-                truncated = budget_stop_is_truncation(
-                    len(generated_ids), thinking_budget, split > 0, truncated
-                )
             reasoning = self.tokenizer.decode(
                 generated_ids[:split], skip_special_tokens=True
             ).strip()
@@ -1053,9 +846,10 @@ class QwenGenerator:
         group count, which makes the step the mean over the prompt batch.
 
         The prompt and generations are accepted for interface symmetry with the
-        seam. The token data comes from the group cached by `generate_batch`,
-        and the group is popped in order, so the rewards must belong to the
-        prompt the entry was sampled for. That is checked.
+        seam. The token data comes from the group cached by
+        `build_generation_batch`, and the group is popped in order, so the
+        rewards must belong to the prompt the entry was sampled for. That is
+        checked.
 
         Backward runs once per generation and the gradients accumulate across
         the group. Only one autograd graph is alive at a time, which is what
@@ -1075,7 +869,7 @@ class QwenGenerator:
         if self._pending_groups is None:
             raise RuntimeError("accumulate called with no sampled groups")
         if not self._pending_groups:
-            raise RuntimeError("accumulate called more times than generate_batch sampled")
+            raise RuntimeError("accumulate called more times than the sampler returned")
         group = self._pending_groups.pop(0)
         if group and group[0].prompt_id != prompt.prompt_id:
             raise ValueError(

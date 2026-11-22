@@ -1,5 +1,5 @@
 # LFM2.5-2.6B uses the shared GRPO workflow and attention-only LoRA.
-# Install .[lfm] in an isolated environment. Its native template always thinks.
+# Install .[vllm] for the one environment. Its native template always thinks.
 # Hyperparameters match the Qwen profile as a comparison starting point.
 
 # Small step and evaluation counts for validating LFM on a training GPU.
@@ -29,7 +29,6 @@ test_size = 250
 
 [training]
 method = "grpo"
-engine = "hf"
 generations_per_prompt = 8
 temperature = 0.9
 learning_rate = 1e-5

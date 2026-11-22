@@ -21,9 +21,10 @@ Advantage is normalised inside one prompt group. The backward pass runs once per
 generation and gradients accumulate across the group, so only one autograd graph
 is alive at a time. This is what makes the 2,048 token cap fit at a larger batch.
 
-A checkpoint records the prompt cursor, the batch policy state, and the
-curriculum position. A resume continues on the next batch boundary with the same
-prompt position, batch size, and stage pool.
+A checkpoint records the prompt cursor and the batch policy state. A resume
+continues on the next batch boundary with the same prompt position and batch
+size. Older checkpoints may carry a stage position. It is ignored, because a
+run now has one pool.
 
 ## D1. One arm only for now
 
@@ -191,6 +192,9 @@ mask back.
 
 ## D11. vLLM for rollouts
 
+Status: superseded by D33. The `[training] engine` key, the `hf` default and the
+`vllm-lfm` extra no longer exist. Read D33 for the current engine decision.
+
 The seam is built. `VLLMGenerator` implements the `Generator` protocol and
 samples token ids with a vLLM engine while the Hugging Face model keeps the LoRA
 adapter and does the update. The engine is optional: `[training] engine`
@@ -219,12 +223,14 @@ not kept, so no timing is quoted here. `scripts/smoke_lfm_vllm.py` now writes
 uses a synthetic adapter and does not call the trainer's `apply_update`, so the
 per-step handoff from the trainer remains unproven.
 
-## D12. Thinking budget schedule
+## D12. Thinking budget
 
-Status: implemented. `[training] thinking_budget_start` defaults to 768 and
-doubles at each curriculum stage, capped at `max_completion_tokens`, so the
-four bands get 768, 1536, 2048, 2048. A rollout that reaches the budget without
-closing is ended there and scores as truncated.
+Status: not enforced under vLLM, documented limitation.
+`[training] thinking_budget` defaults to 1024 and is the same on every step. The
+per-stage ladder was deleted with the curriculum. The value is recorded but not
+enforced. vLLM 0.34 removed per-request logits processors, so a rollout that
+reaches the budget is not ended there. The value is kept for a later vLLM
+mechanism, or for a switch to a sampler that can enforce it.
 
 Closing the block pays up to 0.4 when no test passed, capped below one test so
 one pass always beats closing alone. With three tests it pays 0.3. It does not
@@ -616,7 +622,11 @@ the step 140 evaluation, are lost with the box.
 
 ## D32. Parked prompts are re-screened inside training steps
 
-Status: chosen, not implemented.
+Status: superseded by D34. Both spread and sweep are implemented. The parked cap
+is a quarter of the rollout budget, not half, and the sweep is no longer
+rejected. Read D34 for the arm settings.
+
+The original choice follows.
 
 Prompts that the model fails 8 of 8 leave the training pool and are parked. Some
 become solvable as the policy moves, so the parked set is re-screened. The
@@ -640,3 +650,280 @@ regresses upward on the next measurement regardless of the model.
 Formulas, cost, and the files to touch are in `IDEAS.md`, "Re-screening parked
 prompts inside training".
 
+## D33. vLLM is the only sampling engine
+
+Status: implemented. This decision supersedes D11.
+
+Every rollout goes through vLLM, in training and in the screen. The Hugging Face
+generate path is deleted. The `[training] engine` and
+`[training] inference_engine` keys are rejected by name, because there is no
+engine choice to record. The `hf`, `lfm` and `vllm-lfm` extras are gone. One
+`vllm` extra pins
+vLLM 0.34.0, torch 2.14.0, transformers 5.22.2, peft 0.18.1 and accelerate
+1.8.1.
+
+The base model still loads in process for the optimizer and the update pass.
+The engine serves samples and receives the LoRA adapter after each update. The
+screen builds the same generator with `trainable=False`.
+
+Why. The repository carried two sampling engines, and the screen could only use
+the slow one. A sixteen sample screen over the 711 training prompts was hours of
+work on that path. One engine also removes the install and version drift between
+an LFM environment and a Qwen environment. The cost is the thinking budget,
+which vLLM 0.34 cannot enforce per request. D12 records that limit.
+
+## D34. Two parked-pool arms at 100 steps
+
+Status: ready to run, not run. These arms need a GPU.
+
+The study compares the two parked re-screen policies at equal compute. Both arms
+start from base weights and run 100 steps, so the difference is the schedule, not
+the step count or the model state.
+
+- Model LFM2.5-2.6B at revision `7141b56cd4650af95c7c7b86983443aed050c96a`.
+- Group size 16, rollout budget 608 sequences per step, which is 38 prompts.
+- Learning rate 1e-4, all-linear LoRA at rank 16 and alpha 32.
+- One fixed thinking budget of 1,024.
+- `configs/lfm-spread.toml`: `pool_policy = "spread"` and `refresh_steps = 40`.
+  The slice is `min(9, ceil(parked / 40))` prompts, so the parked cap is a
+  quarter of the step.
+- `configs/lfm-sweep.toml`: `pool_policy = "sweep"` and a gap ratio of 3. A
+  sweep is `ceil(parked / 38)` steps, and the gap is 3 times that length.
+- One pool from a sixteen sample screen over the 711 training questions. There
+  is no curriculum and no stage ladder.
+- `[budget] max_steps = 100`. The planned length is longer than the budget, so
+  both arms stop at the same step.
+
+Both configs are identical except the policy keys. The screen path is the same
+in both. `max_prompts` is not set, because a schedule takes its step size from
+the rollout budget and the two keys cannot be combined.
+
+The four measurements are the non-zero advantage share, the mean absolute
+advantage, promotions per thousand parked rollouts, and pass@1 on the pinned
+100. The runbook in README.md says how to take each one from the run files.
+
+A sweep spends part of its 100 step budget on parked steps. Its train passes are
+fewer than a spread run at the same step count. Both spend about a quarter of
+their rollouts on parked work, so the sequences are equal, not the number of
+train only steps.
+
+Why. The previous LFM run was flat at 138 steps, and 61 percent of step 60
+groups carried no advantage. That is a pool problem: the curriculum kept
+sampling prompts the model could not solve. This pair tests whether measured
+pools plus re-screening change that, and which schedule does it better.
+
+
+## D35. The screen covers exactly the 711 training prompts
+
+Status: implemented. First run started 21 November 2026.
+
+A pooled run needs a screen row for every training prompt, because a missing row
+stops the run before the model loads. So the screen input is the pinned training
+split, not the whole dataset.
+
+`data/train_split.jsonl` holds the 711 rows of the pinned split in the MBPP row
+schema. `data/mbpp_full.jsonl` still holds all 961 for the commands that need
+them. The arm configs read `screens/mbpp-base/rows.jsonl`.
+
+Synthetic rows are not added when `screen_rows` is set. They were scaffolding for
+the very easy stage, and the curriculum is gone.
+
+The first screen runs at sixteen samples over those 711 prompts, about 11,400
+rollouts, and its output is pulled before the box is destroyed.
+
+## D36. The first screen splits 711 prompts into 270 train, 174 solved, 267 parked
+
+Status: measured 21 November 2026, first arm launched the same day.
+
+The screen ran at sixteen samples over the 711 training prompts on LFM2.5-2.6B
+base weights. Zero passes: 267. Partial: 270. Full: 174. The pass rate histogram
+has a large spike at zero and a second at one, which is the bimodal pool the
+curriculum hid.
+
+The spread slice is `min(9, ceil(P / refresh_steps))`. With 267 parked, forty
+refresh steps gives seven prompts, below the cap of nine, so the spread arm would
+spend 18.4 percent of its rollouts on parked work against the sweep's 25 percent.
+The arm config sets `refresh_steps = 30`, which gives nine prompts and 23.7
+percent. That keeps the two arms within one prompt of equal compute.
+
+The sweep arm covers 267 prompts in eight steps at 38 per step, with a gap of 24
+steps.
+
+## D37. A pooled step costs about 500 seconds, and the update is half of it
+
+Status: measured on the first two steps of the spread arm, 21 November 2026.
+
+| Step | Generation | Scoring | Update | Total |
+| --- | --- | --- | --- | --- |
+| 1 | 204 | 75 | 248 | 527 |
+| 2 | 186 | 93 | 216 | 494 |
+
+Each step is 38 prompts and 608 sequences, split 29 train and 9 parked. Completion
+length fell from 1,360 to 1,171 tokens. Truncation fell from 33.6 to 20.9 percent.
+Pass rate rose from 37.3 to 51.5 percent.
+
+The earlier 236 second step carried 226 token completions, because the Hugging
+Face loop forced EOS at the thinking budget. vLLM cannot do that, so completions
+are about five times longer and the update pass scales with them.
+
+Cost. At 500 seconds a step, a 100 step arm is about 14 hours. Two arms are about
+28 hours, near 16 dollars at the current price.
+
+The truncation fall over one step with a rising pass rate suggests the model is
+learning to close its reasoning block under the truncation penalty, without the
+forced stop.
+
+## D38. The spread arm drifted from step 26, and the fixes that follow
+
+Status: measured 21 November 2026.
+
+The arm started from step 20 with the screen pools and drifted over seven steps.
+
+| Step | Reward | Train pass | Mean tokens | Syntax errors | Truncation |
+| --- | --- | --- | --- | --- | --- |
+| 26 | 0.657 | 65% | 483 | 49 | 0% |
+| 30 | 0.476 | 53% | 845 | 55 | 0% |
+| 32 | 0.292 | 43% | 1,026 | 105 | 0% |
+| 33 | -0.065 | 30% | 1,324 | 297 | 30% |
+
+The policy inflated its traces and then failed to finish the code. It was not one
+bad step, and the gradient norm rose with it, 0.03 to 0.23.
+
+Three conditions allowed it. The thinking budget is unenforced under vLLM, so
+nothing shortened an answer. The length term is capped at 0.2 total, which is
+small against a 1.3 second per sequence cost. And the train pool is 29 prompts
+seen every nine steps, which is thin for sixteen samples.
+
+Four changes.
+
+1. `max_completion_tokens` becomes 1024, so a runaway answer is truncated at -1.
+   The cap was 2,048, which is far enough away to be ignored.
+2. Checkpoints every ten steps, asserted by a config test so it cannot drift.
+3. The dashboard serves `no-store`, so a reload shows the current build without a
+   query string.
+4. `rollouts_per_step` becomes 304, which is 19 prompts at group size 16, halving
+   the step to about 240 seconds. The parked cap becomes four prompts and the
+   sweep covers the pool in fifteen steps.
+
+The arm restarts from the step-20 checkpoint, the last one before the drift, so
+the bad steps are discarded.
+
+The arm restarted from the step-20 checkpoint, the last one before the drift, so
+the bad steps are discarded. Step 21 with the new settings measured 19 prompts,
+304 sequences, 486 mean tokens and 5.3 percent truncation, against 1,871 tokens
+and 88 percent truncation at the stop.
+
+One record-keeping gap: `meta.json` is written when a run folder is created and
+is not refreshed on resume, so it still reports the first start's values, such as
+`eval_every_steps = 20`. The schedule uses the loaded config, not the metadata,
+so behaviour is correct and the record is stale.
+
+## D39. Both parked-pool arms evaluate every five steps
+
+Both arms now evaluate every 5 training steps on the pinned 100. A 100 question
+cohort has about five points of noise, so ten steps between points is too coarse
+to catch a turn. Checkpoints stay at 10 steps. Evaluations are cheap, about 3
+minutes measured.
+
+## D40. The spread arm collapsed again at steps 36 to 40
+
+Status: measured 22 November 2026. The run was stopped at step 54.
+
+| Step | Pass rate | Mean tokens | Truncation |
+|---|---|---|---|
+| 30 | 57% | 337 | 1% |
+| 35 | 58% | 435 | 6% |
+| 36 | 39% | 519 | 6% |
+| 37 | 32% | 636 | 20% |
+| 38 | 10% | 781 | 60% |
+| 39 | 0% | 1,007 | 98% |
+| 40 | 0% | - | 99% |
+
+Pinned 100: step 20 0.36, step 30 0.57, step 40 0.23, step 50 0.00.
+
+The policy lost its output format. Code that starts with `def` fell from 99.7
+percent at step 35 to 1.0 percent at step 40. All 19 groups degraded together.
+
+Ruled out: batch difficulty, mean screen passes 6.4 at step 38 against 7.6 at
+step 34. Stale source, the file hashes match. The completion cap was applied.
+The prompt mix, 15 train and 4 parked throughout.
+
+Longer answers scored lower inside groups from step 32 onward, so this was not
+reward hacking toward length.
+
+The adapter moved 1.58 in norm from step 30 to 39, about 5 percent of its 30.0
+norm. With no KL anchor, a small weight move was enough to break the format.
+
+The operator's read is that 1e-4 is too high once the pool produces dense
+advantage. The next arm uses 3e-5. Data is in
+`/home/opencode/Work/rl-grpo-data/2026-11-22-lfm-spread-collapse/`.
+
+## D39. The capped run collapsed, and the box went away
+
+Status: observed 22 November 2026. The box became unreachable during this entry.
+
+The capped spread arm resumed from step 20 with the 1,024 completion cap.
+
+| Eval step | pass@1 |
+| --- | --- |
+| 20 | 0.36 |
+| 30 | 0.57 |
+| 40 | 0.23 |
+| 50 | 0.00 |
+
+The step rows show the mechanism. Truncation climbed until step 47, where 0.98 of
+rollouts hit the 1,024 cap and every group scored -1. From step 51 the model
+flipped to the other corner.
+
+| Step | Reward | Pass | Tokens | Truncation | Update norm |
+| --- | --- | --- | --- | --- | --- |
+| 47 | -0.985 | 0 | 1,009 | 0.98 | 0.177 |
+| 48 | -0.975 | 0 | 997 | 0.967 | 0.167 |
+| 49 | -0.935 | 0 | 958 | 0.911 | 0.163 |
+| 50 | -0.365 | 0 | 375 | 0.217 | 0.197 |
+| 51 | -0.009 | 0 | 4 | 0 | 0.325 |
+| 52 | -0.180 | 0 | 94 | 0.003 | 0.301 |
+| 53 | -0.066 | 0 | 59 | 0.039 | 0.309 |
+| 54 | -0.003 | 0 | 5 | 0.003 | 0.285 |
+
+So the cap traded long rambling for empty answers. With no enforceable thinking
+budget the policy could not shorten the reasoning while keeping the code, so it
+learned to emit almost nothing.
+
+The process ended at step 54 with no error in the log. Shortly after, the box
+stopped answering on port 22 at all, so the cause may be the instance rather than
+the trainer. Steps 35 to 54 were never pulled and are lost if the box is gone.
+
+Next settings, when a box returns: cap 1,536, length term soft limit 600 at
+0.002 per token with a floor of 1.0, and rate 3e-5 from the step-30 checkpoint.
+
+## D41. The pools use saved queues, three failures demote, and solved prompts retire
+
+Status: implemented 22 November 2026.
+
+The spread schedule chose each block by multiplying the step number by the block
+size. A block size change moved the start backwards, and a pool change
+reshuffled the order. In the 22 November run the parked block missed 52 of 267
+prompts and repeated 101 of 316 slots. The train block has the same fault.
+
+Decision: each pool keeps a queue. A step takes a block from the front, and a
+prompt that stays in its pool goes to the back. The first pass covers every
+prompt before any repeat. The run saves both queues in `labels.jsonl` after each
+step.
+
+The parked block is `max(4, floor(prompts_per_step / 2))`. At 19 prompts per
+step that is 9 parked and 10 train. `refresh_steps` is removed.
+
+A train prompt demotes after 3 zero-pass groups across the run. A pass does not
+clear the count. The threshold is 3 because each train prompt appears about once
+every 27 steps, so four failures cannot fit inside a 100-step run for most
+prompts.
+
+A screen prompt with 16 passes out of 16 is retired. It leaves the train and
+parked pools and the usable count. The run record lists `retired` in place of
+`rehearsal`.
+
+The eight-sample probe is held. The second-passing-group idea is dropped.
+
+Spec: `docs/superpowers/specs/2026-11-22-parked-and-train-queues-design.md`.
+Plan: `docs/superpowers/plans/2026-11-22-parked-and-train-queues.md`.
