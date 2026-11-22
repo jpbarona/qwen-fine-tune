@@ -50,9 +50,9 @@ The two arm configs drop it.
 
 ### One queue per pool
 
-Each pool has a queue of prompt ids. A step takes a block from the front. A
-prompt that stays in its pool goes to the back. A prompt that changes pool leaves
-the queue.
+Each pool has a queue of prompt ids. A step takes a block from the front. The
+taken block goes to the back in the same order. Prompts that stay in the pool
+keep their place. A prompt that changes pool leaves the queue.
 
 The first pass covers every prompt in the pool before any prompt repeats. After
 that the queue cycles in the same order, oldest first.
