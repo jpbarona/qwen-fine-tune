@@ -896,3 +896,34 @@ the trainer. Steps 35 to 54 were never pulled and are lost if the box is gone.
 
 Next settings, when a box returns: cap 1,536, length term soft limit 600 at
 0.002 per token with a floor of 1.0, and rate 3e-5 from the step-30 checkpoint.
+
+## D41. The pools use saved queues, three failures demote, and solved prompts retire
+
+Status: chosen 22 November 2026, not implemented.
+
+The spread schedule chose each block by multiplying the step number by the block
+size. A block size change moved the start backwards, and a pool change
+reshuffled the order. In the 22 November run the parked block missed 52 of 267
+prompts and repeated 101 of 316 slots. The train block has the same fault.
+
+Decision: each pool keeps a queue. A step takes a block from the front, and a
+prompt that stays in its pool goes to the back. The first pass covers every
+prompt before any repeat. The run saves both queues in `labels.jsonl` after each
+step.
+
+The parked block is `max(4, floor(prompts_per_step / 2))`. At 19 prompts per
+step that is 9 parked and 10 train. `refresh_steps` is removed.
+
+A train prompt demotes after 3 zero-pass groups across the run. A pass does not
+clear the count. The threshold is 3 because each train prompt appears about once
+every 27 steps, so four failures cannot fit inside a 100-step run for most
+prompts.
+
+A screen prompt with 16 passes out of 16 is retired. It leaves the train and
+parked pools and the usable count. The run record lists `retired` in place of
+`rehearsal`.
+
+The eight-sample probe is held. The second-passing-group idea is dropped.
+
+Spec: `docs/superpowers/specs/2026-11-22-parked-and-train-queues-design.md`.
+Plan: `docs/superpowers/plans/2026-11-22-parked-and-train-queues.md`.

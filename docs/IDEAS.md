@@ -9,7 +9,6 @@ Two chunks per idea. Sorted newest first inside each topic. The date marks first
 - **Stopping rule.** Write a stop rule for each run and add a rate decay. A run at the wrong rate spends hours on nothing (2026-11-19).
 - **Adaptive generations.** Raise group size when the pool shrinks, and judge mastery on the first eight. Extra samples feed the advantage only (2026-11-19).
 - **Judge arms.** Add a judge term smaller than half a test. All-zero groups carry signal, and a full pass wins (2026-11-19).
-- **Rehearsal set.** Keep a fixed slice of solved prompts in every batch. Easy prompts hold reward variance, and the model keeps seeing them (2026-11-19).
 
 ## Evaluation
 
@@ -35,12 +34,10 @@ The research question: which sampling and weighting rule wins at a fixed rollout
 - **Replace low-signal.** Resample groups under the threshold inside the same rollout budget. You keep equal compute and drop the dead groups (2026-11-22).
 - **Std-weighted.** Weight each group's update by its reward std. Flat groups contribute nothing, and wide groups drive the step (2026-11-22).
 
-## Model generated
+## Chosen from the model review
 
-A model review of the screen and two spread pulls proposed these five. None is chosen.
+Three of the five model ideas are chosen. The eight-sample probe is held. The second-passing-group idea is dropped. Chosen 2026-11-22.
 
-- **Parked coverage.** Draw each parked prompt once before repeating any. The current rotation missed 52 prompts and repeated 101 slots in one run (2026-11-22).
-- **Eight-sample probe.** Probe parked prompts with eight samples and confirm promotions with sixteen. The two-stage screen uses 37 to 44 percent less parked compute (2026-11-22).
-- **Demotion on draws.** Count demotion on draws, not calendar steps. Ten failed groups need about 130 steps at the current revisit gap (2026-11-22).
-- **Second passing group.** Require a second passing group before a promotion enters train. Five of sixteen promotions showed no passing group in train (2026-11-22).
-- **Retire rehearsal.** Retire rehearsal from training and stop counting it as usable. All 174 prompts sat unused across 43,168 rollouts from two pulls (2026-11-22).
+- **Parked and train queues.** Show every prompt in a pool once before any repeat, then cycle oldest first. Save both queues after each step. The old step arithmetic missed 52 of 267 parked prompts and repeated 101 of 316 slots (2026-11-22).
+- **Demotion at three.** Demote a train prompt after 3 zero-pass groups across the run. A pass does not reset the count. Ten failures needed about 130 steps at the old gap (2026-11-22).
+- **Retire solved prompts.** A prompt with 16 of 16 screen passes leaves the pool and the usable count. All 174 such prompts sat unused across 43,168 rollouts from two pulls (2026-11-22).
