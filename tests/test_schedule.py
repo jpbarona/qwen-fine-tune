@@ -341,6 +341,21 @@ def test_a_pass_does_not_clear_the_zero_pass_count() -> None:
     assert policy.failure_streak("p") == 0
 
 
+def test_a_restored_count_waits_for_a_zero_pass_group() -> None:
+    policy = spread()
+    passing = GroupOutcome(prompt_id="p", passed=1, samples=16, parked=False)
+    failing = GroupOutcome(prompt_id="p", passed=0, samples=16, parked=False)
+
+    policy.restore_streak("p", 3)
+
+    assert policy.observe(1, [passing]) == ()
+    assert policy.failure_streak("p") == 3
+
+    updates = policy.observe(2, [failing])
+    assert [update.reason for update in updates] == ["demoted"]
+    assert policy.failure_streak("p") == 0
+
+
 def test_separate_prompts_keep_separate_counts() -> None:
     policy = spread(demote_after=10)
     first = GroupOutcome(prompt_id="a", passed=0, samples=16, parked=False)

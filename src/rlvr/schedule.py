@@ -218,9 +218,9 @@ def _observe_outcome(
 
     A parked group promotes at `promotion_bar` passing rollouts. A train group
     with no passing rollout adds one to its count, and a count of
-    `demote_after` demotes it. A passing train group leaves the count alone. A
-    demotion resets the count to zero. A parked group never changes a train
-    count.
+    `demote_after` demotes it on a zero-pass group. A passing train group
+    leaves the count alone. A demotion resets the count to zero. A parked group
+    never changes a train count.
     """
     if outcome.parked:
         if outcome.passed >= promotion_bar:
@@ -240,7 +240,7 @@ def _observe_outcome(
         streak += 1
 
     update: LabelUpdate | None = None
-    if streak >= demote_after:
+    if outcome.passed == 0 and streak >= demote_after:
         update = LabelUpdate(
             step=step,
             prompt_id=outcome.prompt_id,
