@@ -4,7 +4,7 @@ The dashboard reads the same run folders the summary reads, but never fails on
 a run that is mid-write. It serves two resources:
 
     GET /          one HTML page with the React bundle inlined
-    GET /data.json the JSON the page polls every five seconds
+    GET /data.json the JSON the page polls every half second
 
 The page is a monitoring tool, not a report. One section per arm, one KPI strip
 per section, and a grid of charts. Distributions come from the tail of
@@ -1215,7 +1215,7 @@ def _gpu_state(now: float | None = None) -> dict[str, Any]:
 
 
 
-# Reuse unchanged run summaries across five-second polls. The rollout panels
+# Reuse unchanged run summaries across half-second polls. The rollout panels
 # each scan the complete history, so rebuilding only after a file changes keeps
 # monitoring work off the CPU while training is generating or updating.
 _RUN_CACHE_LIMIT = 16

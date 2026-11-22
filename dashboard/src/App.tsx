@@ -51,7 +51,7 @@ export default function App({ initial }: { initial: Dashboard }) {
                 className="inline-block h-[5px] w-[5px] rounded-full"
                 style={{ background: live ? ACCENT : '#4f4f57' }}
               />
-              {live ? 'live 5s' : 'paused'}
+              {live ? 'live 0.5s' : 'paused'}
             </button>
           </div>
         </div>
@@ -95,7 +95,7 @@ export default function App({ initial }: { initial: Dashboard }) {
           {runs.map((run) => (
             <span key={run.run_dir ?? run.arm}>{run.run_dir ?? run.arm}</span>
           ))}
-          <span className="ml-auto">{live ? 'refresh 5s' : 'refresh paused'}</span>
+          <span className="ml-auto">{live ? 'refresh 0.5s' : 'refresh paused'}</span>
         </footer>
       </main>
     </div>

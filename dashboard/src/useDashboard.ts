@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { Dashboard } from './types'
 import { isDashboard } from './validateDashboard'
 
-const REFRESH_MS = 5_000
+const REFRESH_MS = 500
 const REQUEST_TIMEOUT_MS = 15_000
 
 /** Keep the last good payload through failures and cancel requests on pause. */
