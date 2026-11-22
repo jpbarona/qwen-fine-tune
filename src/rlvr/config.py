@@ -96,15 +96,16 @@ is the placeholder used by unit tests and the fake path.
 
 `rollouts_per_step` is the sequence budget for one step. Prompts per step is
 this value divided by `generations_per_prompt`. The spread parked block is
-`max(4, prompts_per_step // 2)`, never the whole step. The 608 default comes
-from the measured 19 November run, where 608 sequences at group size 8 took 236
-seconds.
+`max(4, prompts_per_step // 2)`, capped at one fewer than the step. The 608
+default comes from the measured 19 November run, where 608 sequences at group
+size 8 took 236 seconds.
 
 The removed curriculum keys are ignored when a config still sets them, because
-extra keys and tables are kept and ignored. `training.refresh_steps` is ignored
-the same way. The removed engine keys are the exception: `training.engine` and
-its `training.inference_engine` spelling raise an error that names the key,
-because sampling always uses vLLM now.
+extra keys and tables are kept and ignored. A stale `training.refresh_steps`
+key is ignored too, because spread no longer reads a refresh interval. The
+removed engine keys are the exception: `training.engine` and its
+`training.inference_engine` spelling raise an error that names the key, because
+sampling always uses vLLM now.
 
 The judge API key is never part of the config. It comes from the environment
 named by `[judge] api_key_env`, which defaults per provider. The loader keeps

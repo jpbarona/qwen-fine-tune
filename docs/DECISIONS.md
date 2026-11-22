@@ -899,7 +899,7 @@ Next settings, when a box returns: cap 1,536, length term soft limit 600 at
 
 ## D41. The pools use saved queues, three failures demote, and solved prompts retire
 
-Status: chosen 22 November 2026, not implemented.
+Status: implemented 22 November 2026.
 
 The spread schedule chose each block by multiplying the step number by the block
 size. A block size change moved the start backwards, and a pool change

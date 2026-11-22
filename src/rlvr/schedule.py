@@ -459,8 +459,8 @@ class Sweep:
     because the budget is a target and not a floor. The seeded order is fixed
     when the first sweep starts and saved with the position. A later sweep
     reuses the order, so a prompt that joined the pool waits at the end. A
-    prompt promoted in an earlier step is skipped, so it cannot run twice and no
-    prompt is skipped.
+    prompt promoted in an earlier step leaves the pool, so its slot in the order
+    is skipped. No prompt runs twice, and no remaining parked prompt is skipped.
 
     The schedule keeps a cycle position. Position `0` to `m - 1` is a sweep
     step and the rest of the cycle is a training step. The position is saved

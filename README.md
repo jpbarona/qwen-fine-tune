@@ -479,17 +479,28 @@ to train. A prompt that passes all sixteen is retired and is not trained.
 A prompt that passes none goes to parked. There are no curriculum stages.
 
 The labels come from screens. Training rollouts may demote a train prompt after
-ten consecutive full-failure groups. They never promote a prompt, because a
-prompt selected for a low pass count regresses upward on the next measurement.
-A parked prompt is promoted at two passes of sixteen or more.
+three zero-pass groups across the run. A passing group does not clear the count,
+and a demotion resets it. They never promote a prompt, because a prompt selected
+for a low pass count regresses upward on the next measurement. A parked prompt
+is promoted at two passes of sixteen or more.
+
+Spread keeps a queue per pool. A step takes its block from the front, and a
+prompt that stays in the pool goes to the back, so a pool covers every prompt
+once before any repeat. Sweep keeps a fixed parked order and a train queue for
+its gap steps. In spread a promoted prompt joins the back of the train queue and
+a demoted prompt joins the back of the parked queue. In sweep a promoted prompt
+joins the back of the train queue and a demoted prompt joins the end of the
+parked order. The queues and the order are saved in `labels.jsonl` after each
+step, and a resume continues the same order.
 
 Two schedules put parked prompts back into training. The spread policy joins a
 parked block to every step. The block is half of the step, with a minimum of
-four prompts, and it is never the whole step. So a step of 19 prompts runs 9
-parked and 10 train. The sweep policy covers the whole parked pool in
-consecutive steps, then trains for a gap. Both use the same rollout budget per
-step. The run prints a warning when the parked pool holds fewer prompts than
-the planned parked block. The arm runbook above runs one arm per policy.
+four prompts, and it is capped at one fewer than the step. So a step of 19
+prompts runs 9 parked and 10 train. The sweep policy covers the whole parked
+pool in consecutive steps, then trains for a gap. Both use the same rollout
+budget per step. The run prints a warning when the parked pool holds fewer
+prompts than the planned parked block. The arm runbook above runs one arm per
+policy.
 
 There is one pool and no stage ladder. Every record keeps the `stage` field at
 `unstaged` so older readers still find it. Older runs also wrote a per-stage

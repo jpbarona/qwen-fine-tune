@@ -93,7 +93,8 @@ prefetch_scoring = true
 # the unmeasured placeholder pool.
 # screen_rows = "screens/latest/rows.jsonl"
 # Sequence budget for one step. Prompts per step is this value divided by the
-# group size, and the spread parked block is half of the prompt count.
+# group size. The spread parked block is max(4, half the prompt count), capped
+# at one fewer than the step.
 rollouts_per_step = 608
 
 [budget]
