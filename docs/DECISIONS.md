@@ -824,3 +824,36 @@ Both arms now evaluate every 5 training steps on the pinned 100. A 100 question
 cohort has about five points of noise, so ten steps between points is too coarse
 to catch a turn. Checkpoints stay at 10 steps. Evaluations are cheap, about 3
 minutes measured.
+
+## D40. The spread arm collapsed again at steps 36 to 40
+
+Status: measured 22 November 2026. The run was stopped at step 54.
+
+| Step | Pass rate | Mean tokens | Truncation |
+|---|---|---|---|
+| 30 | 57% | 337 | 1% |
+| 35 | 58% | 435 | 6% |
+| 36 | 39% | 519 | 6% |
+| 37 | 32% | 636 | 20% |
+| 38 | 10% | 781 | 60% |
+| 39 | 0% | 1,007 | 98% |
+| 40 | 0% | - | 99% |
+
+Pinned 100: step 20 0.36, step 30 0.57, step 40 0.23, step 50 0.00.
+
+The policy lost its output format. Code that starts with `def` fell from 99.7
+percent at step 35 to 1.0 percent at step 40. All 19 groups degraded together.
+
+Ruled out: batch difficulty, mean screen passes 6.4 at step 38 against 7.6 at
+step 34. Stale source, the file hashes match. The completion cap was applied.
+The prompt mix, 15 train and 4 parked throughout.
+
+Longer answers scored lower inside groups from step 32 onward, so this was not
+reward hacking toward length.
+
+The adapter moved 1.58 in norm from step 30 to 39, about 5 percent of its 30.0
+norm. With no KL anchor, a small weight move was enough to break the format.
+
+The operator's read is that 1e-4 is too high once the pool produces dense
+advantage. The next arm uses 3e-5. Data is in
+`/home/opencode/Work/rl-grpo-data/2026-11-22-lfm-spread-collapse/`.

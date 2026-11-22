@@ -646,7 +646,7 @@ def test_the_parked_pool_arm_configs_load(name: str, policy: str) -> None:
     assert config.generations_per_prompt == 16
     assert config.rollouts_per_step == 304
     assert config.max_completion_tokens == 1024
-    assert config.learning_rate == 1e-4
+    assert config.learning_rate == 3e-5
     assert config.lora_targets == "all-linear"
     assert config.lora_rank == 16
     assert config.lora_alpha == 32

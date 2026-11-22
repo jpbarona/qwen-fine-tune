@@ -145,3 +145,10 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 127. Meta keeps the first start values after a resume
 128. Step 21 after the cap, 486 tokens and five percent truncated
 129. Both arms evaluate every five steps on the pinned hundred
+130. The spread arm collapsed again between steps 36 and 40
+131. Truncation reached 99 percent and the pass rate hit zero
+132. Longer answers scored lower inside groups, so not length hacking
+133. Step 40 scored 0.23, step 50 scored zero on the pinned set
+134. Likely cause is a rate too high with no KL anchor
+135. The run stopped at step 54 and the GPU is now free
+136. Arm rate drops to 3e-5 after the second collapse

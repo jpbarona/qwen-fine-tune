@@ -144,7 +144,7 @@ The study compares two ways to re-screen parked prompts at equal compute.
 `configs/lfm-sweep.toml` covers the parked pool in consecutive steps, then
 trains for a gap. The two configs are identical except the policy keys. Both
 run 100 steps from base weights at group size 16, a 304 sequence rollout budget,
-rate 1e-4, all-linear LoRA rank 16 and alpha 32, a 1,024 token completion cap,
+rate 3e-5, all-linear LoRA rank 16 and alpha 32, a 1,024 token completion cap,
 and a recorded but unenforced thinking budget of 1,024.
 
 Install with the one vLLM environment in the Install section. The screen uses
