@@ -67,12 +67,12 @@ prefetch_scoring = true
 seed = 0
 # The measured screen. The folder holds rows.jsonl and summary.json.
 screen_rows = "screens/mbpp-base/rows.jsonl"
-# This arm joins a parked block to every step. The block is max(4, 19 // 2)
-# and capped at one fewer than the step, so 9 parked and 10 train prompts.
+# This arm joins a parked block to every step. The block is max(4, 10 // 2)
+# and capped at one fewer than the step, so 5 parked and 5 train prompts.
 pool_policy = "spread"
-# 304 sequences per step. At 16 rollouts per prompt this is 19 prompts. A step
-# is expected to take about 240 seconds.
-rollouts_per_step = 304
+# 160 sequences per step. At 16 rollouts per prompt this is 10 prompts, half
+# the previous 19. A step is expected to take about 125 seconds.
+rollouts_per_step = 160
 
 [run]
 checkpoint_every_steps = 10
