@@ -46,9 +46,10 @@ readers still find the field. Evaluation stays greedy with n=1.
 
 Pool label changes are appended to `labels.jsonl` in the run folder. A resume
 reads that file before the first step, so a promoted or demoted prompt keeps its
-pool. Resume and budget guards wrap the same loop. The step counter counts
-batches and weight updates, so a resume starts at the batch after the
-checkpoint.
+pool. A scheduled run also writes its saved queues in that file, so a resume
+continues the same rotation. Resume and budget guards wrap the same loop. The
+step counter counts batches and weight updates, so a resume starts at the batch
+after the checkpoint.
 """
 
 from __future__ import annotations
@@ -74,6 +75,7 @@ from .config import Config
 from .evaluation import pass_at_1, select_eval_subset, subset_selector
 from .memory import MemoryReport
 from .pools import DEFAULT_PROMOTION_BAR, Pools
+from .queues import queues_from_row, restore_queue
 from .schedule import (
     GroupOutcome,
     LabelUpdate,
@@ -771,11 +773,13 @@ class Experiment:
     def _load_labels(self) -> None:
         """Replay pool changes and failure streaks from the run's label file.
 
-        The file holds one row per change and one row per saved train streak,
-        in step order. The last row for a prompt wins. A row with an unknown
-        label or streak is ignored, so a future row name cannot move a prompt
-        by accident. A sweep position row is replayed last, so a resume mid
-        sweep continues at the saved cycle index.
+        The file holds one row per change, one row per saved train streak and
+        one row per step that saves both queues, in step order. The last row for
+        a prompt wins. A row with an unknown label or streak is ignored, so a
+        future row name cannot move a prompt by accident. A sweep position row
+        is replayed last, so a resume mid sweep continues at the saved cycle
+        index. A queues row is reconciled with the current pool before the
+        schedule sees it.
         """
         reader = getattr(self.store, "read_labels", None)
         if reader is None:
@@ -786,6 +790,7 @@ class Experiment:
         restore = getattr(self._schedule, "restore_streak", None)
         restore_position = getattr(self._schedule, "restore_position", None)
         restore_order = getattr(self._schedule, "restore_order", None)
+        restore_state = getattr(self._schedule, "restore_state", None)
         for row in reader():
             parsed = label_from_row(row)
             if parsed is not None:
@@ -809,6 +814,19 @@ class Experiment:
             saved_order = sweep_order_from_row(row)
             if saved_order is not None and restore_order is not None:
                 restore_order(saved_order)
+            saved_queues = queues_from_row(row)
+            if saved_queues is not None and restore_state is not None:
+                parked_ids, train_ids = saved_queues
+                restore_state(
+                    restore_queue(
+                        parked_ids,
+                        (prompt.prompt_id for prompt in self._parked_prompts),
+                    ),
+                    restore_queue(
+                        train_ids,
+                        (prompt.prompt_id for prompt in self.prompts),
+                    ),
+                )
 
     def _observe_step(self, step: int, result: StepResult) -> None:
         """Ask the schedule for label changes, then apply and record them.
@@ -823,11 +841,13 @@ class Experiment:
         self._record_streaks(step, result.outcomes)
 
     def _record_schedule_state(self, step: int) -> None:
-        """Save a schedule's cycle position beside the label state.
+        """Save a schedule's state beside the label state.
 
-        Only a schedule with a moving cycle has state to save. The row goes to
-        the label file after the step, so a resume at this step's checkpoint
-        replays the position that the next step should use.
+        The row is the schedule's own shape. A schedule with a moving cycle
+        saves its position. A schedule with queues saves both queues as a
+        `queues` row. The row goes to the label file after the step, so a
+        resume at this step's checkpoint replays the state that the next step
+        should use.
         """
         if self._schedule is None:
             return
