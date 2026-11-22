@@ -51,4 +51,23 @@ if [ "$has_config" = false ]; then
 fi
 
 rlvr_venv="${RLVR_VENV:-.venv}"
+
+# vLLM compiles kernels at the first step. The torch wheel ships a matching CUDA
+# toolkit inside the venv, so point the build at that copy. Without this the
+# FlashInfer and causal_conv1d kernels fall back to slow reference paths.
+if [ -z "${CUDA_HOME:-}" ]; then
+  for candidate in "$rlvr_venv"/lib/python*/site-packages/nvidia/cu*/bin/nvcc; do
+    [ -x "$candidate" ] || continue
+    CUDA_HOME="$(dirname "$(dirname "$candidate")")"
+    break
+  done
+fi
+if [ -n "${CUDA_HOME:-}" ]; then
+  export CUDA_HOME
+  case ":$PATH:" in
+    *":$CUDA_HOME/bin:"*) ;;
+    *) export PATH="$CUDA_HOME/bin:$PATH" ;;
+  esac
+fi
+
 exec "$rlvr_venv/bin/rlvr" run --arm "$arm" "$@"

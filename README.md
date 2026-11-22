@@ -21,13 +21,18 @@ Then install:
 ./scripts/setup-env.sh
 ```
 
-The script needs Python 3.12 or newer, the Python development headers, ninja,
-and the CUDA toolkit for the fast kernels. It installs the headers, ninja and
-the build tools itself when passwordless sudo is available. If a check fails it
-prints the exact command to fix it.
+The script needs Python 3.12 or newer, the Python development headers and ninja.
+It installs the headers, ninja and the build tools itself when passwordless sudo
+is available. If a check fails it prints the exact command to fix it.
 
-Without `nvcc` the run still works. FlashInfer and `causal_conv1d` fall back to
-slow reference kernels, so each step takes longer.
+The torch wheel ships a matching CUDA toolkit inside the venv, `nvcc` included.
+The script uses that copy to build `causal_conv1d`, and `run.sh` exports
+`CUDA_HOME` for every training run, so neither needs a hand install or a shell
+export. Only when the venv toolkit is absent does the script fall back to the
+NVIDIA apt repository.
+
+Without a toolkit the run still works. FlashInfer and `causal_conv1d` fall back
+to slow reference kernels, so each step takes longer.
 
 The two arm configs also need the screen. `screens/` is in `.gitignore`, so a
 fresh clone has none and each arm fails at load with `screen_rows path not
@@ -46,8 +51,9 @@ python3.12 -m venv .venv
 ```
 
 The `vllm` extra pins vLLM 0.34.0, torch 2.14.0, Transformers 5.22.2, PEFT
-0.18.1 and Accelerate 1.8.1. It needs a CUDA 12 host whose driver supports the
-torch wheel. Every rollout in training and in the screen samples with vLLM.
+0.18.1 and Accelerate 1.8.1. The torch wheel here is built for CUDA 13.0, so the
+host driver must support it. Every rollout in training and in the screen samples
+with vLLM.
 
 ## LFM2.5-2.6B
 

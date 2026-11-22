@@ -25,12 +25,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 check_only=0
 strict=0
+install_cuda_flag=1
 venv=""
 
 for arg in "$@"; do
   case "$arg" in
     --check) check_only=1 ;;
     --strict) strict=1 ;;
+    --no-cuda) install_cuda_flag=0 ;;
     -h|--help)
       sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
@@ -168,18 +170,79 @@ if [ "$ninja_ok" -eq 0 ]; then
 fi
 
 # The CUDA toolkit. The prebuilt wheels run without it, but the fast kernels
-# need nvcc, and causal_conv1d has to compile.
+# need nvcc, and causal_conv1d has to compile. The check runs again after pip,
+# when torch reports the exact CUDA version to match.
 cuda_ok=0
 if command -v nvcc >/dev/null 2>&1; then
   cuda_ok=1
 elif [ -x "${CUDA_HOME:-/nonexistent}/bin/nvcc" ] || [ -x /usr/local/cuda/bin/nvcc ]; then
   cuda_ok=1
 else
-  warn "no nvcc found, so FlashInfer and causal_conv1d fall back to slow kernels."
-  echo "  a /usr/local/cuda directory without bin/nvcc does not count."
-  echo "  sudo apt-get install -y nvidia-cuda-toolkit"
-  echo "  or install the CUDA 12 toolkit, then run this script again."
+  warn "no nvcc found. It will be installed after torch, matching the wheel."
 fi
+
+venv_cuda_prefix() {
+  local candidate
+  for candidate in "$venv"/lib/python*/site-packages/nvidia/cu*/bin/nvcc; do
+    [ -x "$candidate" ] || continue
+    dirname "$(dirname "$candidate")"
+    return 0
+  done
+  return 1
+}
+
+install_cuda() {
+  local want="$1"
+  local major="${want%%.*}"
+  local minor="${want#*.}"
+  [ "$minor" = "$want" ] && minor=0
+  local distro repo
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  distro="${ID}${VERSION_ID//./}"
+  case "$distro" in
+    ubuntu2204) repo=ubuntu2204 ;;
+    ubuntu2404) repo=ubuntu2404 ;;
+    debian12) repo=debian12 ;;
+    *)
+      warn "no NVIDIA apt repo for $distro. Install CUDA ${want} by hand."
+      return 1
+      ;;
+  esac
+  if ! sudo -n true 2>/dev/null; then
+    warn "no passwordless sudo, so CUDA ${want} was not installed."
+    echo "  install the CUDA ${major}.${minor} toolkit for ${repo} by hand."
+    return 1
+  fi
+  local keyring=/tmp/cuda-keyring-${repo}.deb
+  local url="https://developer.download.nvidia.com/compute/cuda/repos/${repo}/x86_64/cuda-keyring_1.1-1_all.deb"
+  echo "installing CUDA ${major}.${minor} toolkit from ${repo}"
+  if ! curl -fsSL -o "$keyring" "$url"; then
+    warn "could not download $url"
+    return 1
+  fi
+  if ! sudo -n dpkg -i "$keyring" >/dev/null 2>&1 && ! sudo -n apt-get install -y -f -qq; then
+    warn "could not install the CUDA keyring"
+    return 1
+  fi
+  sudo -n apt-get update -qq || true
+  if ! sudo -n apt-get install -y -qq "cuda-toolkit-${major}-${minor}"; then
+    warn "could not install cuda-toolkit-${major}-${minor}"
+    return 1
+  fi
+  rm -f "$keyring"
+  export CUDA_HOME="/usr/local/cuda-${major}.${minor}"
+  export PATH="$CUDA_HOME/bin:$PATH"
+  if [ -x "$CUDA_HOME/bin/nvcc" ]; then
+    echo "CUDA_HOME=$CUDA_HOME"
+    echo "add this to your shell profile:"
+    echo "  export CUDA_HOME=$CUDA_HOME"
+    echo "  export PATH=\$CUDA_HOME/bin:\$PATH"
+    return 0
+  fi
+  warn "cuda-toolkit-${major}-${minor} installed but $CUDA_HOME/bin/nvcc is missing"
+  return 1
+}
 
 # The screen. It is gitignored, so a fresh clone has none and each arm fails
 # after the model loads.
@@ -260,10 +323,37 @@ echo "installing -e .[vllm]"
 echo "installing pytest"
 "$venv/bin/python" -m pip install "pytest>=9,<10"
 
+# torch reports the CUDA version its wheel was built for. Install the matching
+# toolkit when nvcc is missing, so the fast kernels build on the first try.
+if [ "$install_cuda_flag" -eq 1 ] && [ "$cuda_ok" -eq 0 ]; then
+  # The torch wheel ships its own CUDA toolkit, nvcc included. Prefer it over an
+  # apt install, because the versions match by construction.
+  venv_cuda="$(venv_cuda_prefix || true)"
+  if [ -n "$venv_cuda" ]; then
+    CUDA_HOME="$venv_cuda"
+    export CUDA_HOME
+    export PATH="$CUDA_HOME/bin:$PATH"
+    cuda_ok=1
+    echo "using the toolkit in the venv: CUDA_HOME=$CUDA_HOME"
+    echo "  run.sh sets this for every training run, so no export is needed."
+  else
+    want="$("$venv/bin/python" -c 'import torch; print(torch.version.cuda or "")' 2>/dev/null || true)"
+    if [ -z "$want" ]; then
+      warn "torch reports no CUDA build, so the toolkit is skipped."
+    elif install_cuda "$want"; then
+      cuda_ok=1
+    fi
+  fi
+fi
+
 if [ "$cuda_ok" -eq 1 ]; then
   echo "installing causal_conv1d"
   if ! "$venv/bin/python" -m pip install -q causal_conv1d; then
     warn "causal_conv1d did not install, the LFM path uses the slow reference kernel."
+  fi
+  echo "downloading the prebuilt FlashInfer kernels"
+  if ! "$venv/bin/python" -m vllm download-kernels >/dev/null 2>&1; then
+    warn "vllm download-kernels did not run. FlashInfer compiles its kernels at the first step instead."
   fi
 else
   echo "skipping causal_conv1d, no CUDA toolkit to build it"
