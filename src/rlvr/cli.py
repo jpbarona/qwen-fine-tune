@@ -801,7 +801,11 @@ def run_command(args: argparse.Namespace) -> int:
         args.runs_root,
         store.run_dir,
         config.mlflow.enabled,
-        tracking_uri=config.mlflow.tracking_uri,
+        # The container gets MLFLOW_TRACKING_URI from docker-run.sh. A config
+        # value wins, then the environment, then the local SQLite file.
+        tracking_uri=(
+            config.mlflow.tracking_uri or os.environ.get("MLFLOW_TRACKING_URI")
+        ),
         artifact_root=config.mlflow.artifact_root,
         checkpoints_uri=(
             upload_prefix(config.mlflow.bucket, args.arm, store.timestamp)

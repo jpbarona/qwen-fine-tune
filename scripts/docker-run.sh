@@ -66,5 +66,6 @@ exec docker run --rm --gpus all --ipc=host \
   -e TMPDIR="$runner_tmp" \
   -e OPENROUTER_API_KEY \
   -e OPENCODE_GO_API_KEY \
+  -e MLFLOW_TRACKING_URI \
   -w /app \
   "$image" /app/run.sh "$arm" "$@"

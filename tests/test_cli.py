@@ -25,6 +25,7 @@ from rlvr.config import load_config
 from rlvr.data import load_split, prompt_id_for
 from rlvr.fake import FakeJudge
 from rlvr.memory import ALLOCATOR_ENV, EXPANDABLE_SEGMENTS
+from rlvr.mlflow_log import NullMirror
 from rlvr.synthetic import load_synthetic_questions
 
 CONFIG = """\
@@ -1545,6 +1546,43 @@ def run_args(tmp_path: Path, config_path: Path) -> Namespace:
         resume=False,
         control=None,
     )
+
+
+def test_run_uses_the_environment_tracking_uri(tmp_path, config_path, monkeypatch) -> None:
+    """The container gets MLFLOW_TRACKING_URI, and the mirror must honor it."""
+    seen: list[str | None] = []
+
+    def fake_open_mirror(runs_root, run_dir, enabled, *, tracking_uri=None, **kwargs):
+        seen.append(tracking_uri)
+        return NullMirror()
+
+    monkeypatch.setattr("rlvr.cli.open_mirror", fake_open_mirror)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://172.17.0.1:8081")
+
+    assert run_command(run_args(tmp_path, config_path)) == 0
+
+    assert seen == ["http://172.17.0.1:8081"]
+
+
+def test_a_config_tracking_uri_wins_over_the_environment(
+    tmp_path, config_path, monkeypatch
+) -> None:
+    seen: list[str | None] = []
+
+    def fake_open_mirror(runs_root, run_dir, enabled, *, tracking_uri=None, **kwargs):
+        seen.append(tracking_uri)
+        return NullMirror()
+
+    monkeypatch.setattr("rlvr.cli.open_mirror", fake_open_mirror)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://172.17.0.1:8081")
+    config_path.write_text(
+        CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9999"\n',
+        encoding="utf-8",
+    )
+
+    assert run_command(run_args(tmp_path, config_path)) == 0
+
+    assert seen == ["http://127.0.0.1:9999"]
 
 
 def test_run_starts_the_uploader_when_a_bucket_is_set(tmp_path, monkeypatch) -> None:

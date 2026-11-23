@@ -4,16 +4,17 @@
 # Usage:
 #   ./scripts/start-remote-run.sh <arm> <host> [extra args]
 #
-# The script opens the reverse tunnel, waits for the server health endpoint,
-# then starts `docker-run.sh` in the background. A run is not launched when the
-# health check never answers, because that run would train with no store.
-# Extra args pass through to `docker-run.sh`.
+# The script opens the reverse tunnel, reads the gateway and port that
+# open-tunnel.sh actually bound, and checks the health endpoint from the box.
+# A run is not launched when that check never answers, because that run would
+# train with no store. Extra args pass through to `docker-run.sh`.
 #
 # Environment:
 #   MLFLOW_PORT             forwarded port, default 8081
+#   SSH_KEY                 private key, default ~/.ssh/id_ed25519
 #   RLVR_HEALTH_ATTEMPTS    tries before giving up, default 30
 #   RLVR_HEALTH_INTERVAL    seconds between tries, default 2
-#   RLVR_TUNNEL_DIR         pid and log directory, default ~/.cache/rlvr
+#   RLVR_TUNNEL_DIR         pid, state and log directory, default ~/.cache/rlvr
 
 set -uo pipefail
 
@@ -34,17 +35,42 @@ port="${MLFLOW_PORT:-8081}"
 attempts="${RLVR_HEALTH_ATTEMPTS:-30}"
 interval="${RLVR_HEALTH_INTERVAL:-2}"
 cache_dir="${RLVR_TUNNEL_DIR:-$HOME/.cache/rlvr}"
+key_path="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
+
+target="$host"
+case "$target" in
+  *@*) ;;
+  *) target="Ubuntu@$host" ;;
+esac
+bare_host="${host##*@}"
+safe_host="${bare_host//[^A-Za-z0-9_.-]/_}"
+state_file="$cache_dir/tunnel-$safe_host-$port.state"
 
 if ! "$repo_root/scripts/open-tunnel.sh" "$host" "$port"; then
-  echo "start-remote-run.sh: the tunnel did not open" >&2
+  echo "start-remote-run.sh: the tunnel did not open, nothing launched" >&2
   exit 1
 fi
 
-health="http://127.0.0.1:$port/health"
+if [ ! -f "$state_file" ]; then
+  echo "start-remote-run.sh: open-tunnel.sh left no state at $state_file" >&2
+  exit 1
+fi
+gateway=""
+# shellcheck disable=SC1090
+. "$state_file"
+if [ -z "$gateway" ] || [ -z "$port" ]; then
+  echo "start-remote-run.sh: $state_file does not name a gateway and port" >&2
+  exit 1
+fi
+
+# The check runs on the box against the forwarded address. A local curl would
+# pass with a dead forward, which is the case this gate exists to catch.
+health="http://$gateway:$port/health"
 ready=false
 try=1
 while [ "$try" -le "$attempts" ]; do
-  if curl -fsS --max-time 5 "$health" >/dev/null 2>&1; then
+  if timeout 25 ssh -o BatchMode=yes -o ConnectTimeout=10 -i "$key_path" \
+      "$target" "curl -sSf $health" >/dev/null 2>&1; then
     ready=true
     break
   fi
@@ -55,17 +81,17 @@ while [ "$try" -le "$attempts" ]; do
 done
 
 if [ "$ready" != true ]; then
-  echo "start-remote-run.sh: no answer from $health after $attempts tries" >&2
-  echo "start-remote-run.sh: check the MLflow server on this VM before retrying" >&2
+  echo "start-remote-run.sh: no answer from $health through $bare_host after" \
+    "$attempts tries" >&2
+  echo "start-remote-run.sh: check the MLflow server and the tunnel, nothing launched" >&2
   exit 1
 fi
 
-safe_host="${host//[^A-Za-z0-9_.-]/_}"
 mkdir -p "$cache_dir" "$repo_root/.runner-tmp"
 log_file="$cache_dir/run-$arm-$safe_host.log"
 
 setsid nohup "$repo_root/scripts/docker-run.sh" "$arm" "$@" >"$log_file" 2>&1 &
 runner_pid=$!
 
-echo "run launched on $host (pid $runner_pid), log $log_file"
+echo "run launched on $bare_host (pid $runner_pid), log $log_file"
 echo "store: $health"
