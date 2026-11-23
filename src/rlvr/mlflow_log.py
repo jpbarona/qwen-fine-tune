@@ -354,6 +354,9 @@ class MlflowMirror:
         self._client: Any = None
         self._question_steps: set[tuple[int, str]] = set()
         self._distribution_steps: set[tuple[int, str]] = set()
+        # A mirror that found an existing `mlflow.json` only owns the table
+        # counts, not the run ids an earlier mirror wrote.
+        self._owns_ids = False
         # A mirror rebuilt over the same run folder picks up the counts from
         # the last one, so a restart does not append the same rows twice.
         self._logged_rows: dict[str, int] = _load_table_counts(self.run_dir)
@@ -439,6 +442,7 @@ class MlflowMirror:
             },
         )
         self.gpu_run_id = child.info.run_id
+        self._owns_ids = True
         self._write_ids()
 
     @_guarded
@@ -631,14 +635,22 @@ class MlflowMirror:
             client.set_terminated(self.run_id, status)
 
     def _write_ids(self) -> None:
-        payload = {
-            "run_id": self.run_id,
-            "gpu_run_id": self.gpu_run_id,
-            "tables": {
-                name: self._logged_rows.get(name, 0) for name in APPENDED_TABLES
-            },
+        """Write the run ids and table counts to `mlflow.json`.
+
+        A mirror that opened the run owns both ids and writes them. A mirror
+        that found an existing file updates only the table counts, so the ids
+        an earlier mirror wrote are left alone. An empty file is filled with
+        the ids this mirror has.
+        """
+        path = self.run_dir / IDS_NAME
+        payload = _read_json(path)
+        if self._owns_ids or not payload:
+            payload["run_id"] = self.run_id
+            payload["gpu_run_id"] = self.gpu_run_id
+        payload["tables"] = {
+            name: self._logged_rows.get(name, 0) for name in APPENDED_TABLES
         }
-        _write_atomic(self.run_dir / IDS_NAME, json.dumps(payload, indent=2) + "\n")
+        _write_atomic(path, json.dumps(payload, indent=2) + "\n")
 
 
 def open_mirror(runs_root: Path, run_dir: Path, enabled: bool) -> Mirror:

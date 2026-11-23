@@ -252,6 +252,32 @@ def test_a_fresh_mirror_does_not_re_append_the_event_tables(tmp_path: Path) -> N
     assert not (run_dir / "mlflow-errors.log").exists()
 
 
+def test_a_fresh_mirror_keeps_the_gpu_id_when_it_pushes_a_new_row(
+    tmp_path: Path,
+) -> None:
+    mirror, run_dir = started_mirror(tmp_path)
+    mirror.push_tables(1)
+    mirror.close()
+
+    # A fresh mirror that continues the same run without calling start().
+    fresh = MlflowMirror(tmp_path / "runs", run_dir)
+    fresh.run_id = mirror.run_id
+    with (run_dir / "labels.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"step": 2, "prompt_id": "p2", "label": "train"}) + "\n")
+    fresh.push_tables(2)
+
+    payload = json.loads((run_dir / "mlflow.json").read_text(encoding="utf-8"))
+    assert payload["run_id"] == mirror.run_id
+    assert payload["gpu_run_id"] == mirror.gpu_run_id
+    assert payload["tables"]["labels.json"] == 2
+
+    labels = read_rows(
+        MlflowClient(), mirror.run_id, "labels.json", tmp_path / "download"
+    )
+    assert [row["prompt_id"] for row in labels] == ["p1", "p2"]
+    fresh.close()
+
+
 def test_a_shrunk_event_file_does_not_re_push_the_whole_table(
     tmp_path: Path,
 ) -> None:
