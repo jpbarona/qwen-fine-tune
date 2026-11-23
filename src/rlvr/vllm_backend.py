@@ -22,7 +22,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
-from .values import Generation, Prompt
+from rlvr.core.values import Generation, Prompt
 
 __all__ = ["VLLMEngine", "VLLMGenerator"]
 

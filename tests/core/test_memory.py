@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rlvr.memory import (
+from rlvr.core.memory import (
     ALLOCATOR_ENV,
     EXPANDABLE_SEGMENTS,
     MEMORY_METRIC_FIELDS,

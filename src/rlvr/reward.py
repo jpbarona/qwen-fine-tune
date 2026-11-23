@@ -44,7 +44,7 @@ from __future__ import annotations
 import math
 from typing import Callable
 
-from .constants import (
+from rlvr.core.constants import (
     ARMS,
     DEFAULT_LENGTH_PENALTY_FLOOR,
     DEFAULT_LENGTH_PENALTY_PER_TOKEN,

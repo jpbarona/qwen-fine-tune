@@ -136,7 +136,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .constants import (
+from rlvr.core.constants import (
     DEFAULT_LENGTH_PENALTY_FLOOR,
     DEFAULT_LENGTH_PENALTY_PER_TOKEN,
     DEFAULT_LENGTH_SOFT_LIMIT,

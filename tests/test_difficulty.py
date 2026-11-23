@@ -27,7 +27,7 @@ from rlvr.data import (
     prompt_for_question,
     prompt_id_for,
 )
-from rlvr.stages import BANDS
+from rlvr.core.stages import BANDS
 from rlvr.synthetic import (
     DEFAULT_SYNTHETIC_PATH,
     MAX_REFERENCE_LINES,

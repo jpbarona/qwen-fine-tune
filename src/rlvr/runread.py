@@ -27,8 +27,8 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
 from .dashboard_io import _all_rollout_records, _read_json, _read_jsonl, _read_tail_lines
-from .memory import MEMORY_METRIC_FIELDS
-from .stages import BANDS, UNSTAGED_STAGE
+from rlvr.core.memory import MEMORY_METRIC_FIELDS
+from rlvr.core.stages import BANDS, UNSTAGED_STAGE
 
 __all__ = ["collect_dashboard", "target_steps"]
 

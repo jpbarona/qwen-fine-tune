@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .constants import LORA_TARGETS
+from rlvr.core.constants import LORA_TARGETS
 
 
 @dataclass(frozen=True)

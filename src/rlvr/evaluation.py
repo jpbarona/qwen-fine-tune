@@ -25,10 +25,10 @@ from __future__ import annotations
 import random
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
-from .stages import BANDS
+from rlvr.core.stages import BANDS
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard for type checkers
-    from .values import Prompt
+    from rlvr.core.values import Prompt
 
 __all__ = [
     "SUBSET_METHOD",

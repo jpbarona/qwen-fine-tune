@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from rlvr.checkpoint import (
+from rlvr.core.checkpoint import (
     CheckpointError,
     checkpoint_dir_name,
     find_latest_checkpoint,

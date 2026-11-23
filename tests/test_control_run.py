@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from rlvr.batching import BatchSizePolicy
-from rlvr.config import load_config
-from rlvr.control import ControlWatcher
+from rlvr.core.batching import BatchSizePolicy
+from rlvr.core.config import load_config
+from rlvr.core.control import ControlWatcher
 from rlvr.experiment import Experiment, Outcome, Prompt
 
 CONFIG_TEXT = """\

@@ -10,6 +10,6 @@ Pure Python, no torch.
 
 from __future__ import annotations
 
-from .constants import DEFAULT_THINKING_BUDGET
+from rlvr.core.constants import DEFAULT_THINKING_BUDGET
 
 __all__ = ["DEFAULT_THINKING_BUDGET"]

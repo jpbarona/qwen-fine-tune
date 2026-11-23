@@ -14,13 +14,13 @@ from threading import Event, get_ident
 
 import pytest
 
-from rlvr.batching import BatchSizePolicy
-from rlvr.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
-from rlvr.config import load_config
+from rlvr.core.batching import BatchSizePolicy
+from rlvr.core.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
+from rlvr.core.config import load_config
 from rlvr.experiment import Experiment, Generation, Outcome, Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 from rlvr.runs import RunStore
-from rlvr.schema import RolloutRecord
+from rlvr.core.schema import RolloutRecord
 
 CONFIG_TEXT = """\
 [model]

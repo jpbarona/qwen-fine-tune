@@ -55,7 +55,7 @@ HELD_OUT_FRACTION = 0.2
 
 #: Repo-relative path of the difficulty label file. Task 15 owns its contents.
 DEFAULT_LABELS_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "difficulty_labels.jsonl"
+    Path(__file__).resolve().parents[3] / "data" / "difficulty_labels.jsonl"
 )
 
 #: Used when a run has no stages at all, so records still carry a string.

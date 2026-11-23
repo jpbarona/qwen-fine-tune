@@ -63,18 +63,18 @@ from time import perf_counter
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from . import repro
-from .control import ControlState, ControlWatcher
-from .batching import START_PROMPTS, BatchSizePolicy, is_cuda_out_of_memory
-from .checkpoint import (
+from rlvr.core.control import ControlState, ControlWatcher
+from rlvr.core.batching import START_PROMPTS, BatchSizePolicy, is_cuda_out_of_memory
+from rlvr.core.checkpoint import (
     checkpoint_dir_name,
     parse_checkpoint_step,
     prune_checkpoints,
     select_checkpoints_to_keep,
     write_checkpoint_manifest,
 )
-from .config import Config
+from rlvr.core.config import Config
 from .evaluation import pass_at_1, select_eval_subset, subset_selector
-from .memory import MemoryReport
+from rlvr.core.memory import MemoryReport
 from .pools import DEFAULT_PROMOTION_BAR, Pools
 from .queues import queues_from_row, restore_queue
 from .schedule import (
@@ -100,8 +100,8 @@ from .reward import (
     uses_output_judge,
     uses_process_judge,
 )
-from .schema import RolloutRecord
-from .stages import UNSTAGED_STAGE
+from rlvr.core.schema import RolloutRecord
+from rlvr.core.stages import UNSTAGED_STAGE
 
 __all__ = [
     "Experiment",
@@ -197,7 +197,7 @@ def _empty_cuda_cache() -> None:
 
 
 # The values that cross the experiment seam.
-from .values import Generation, JudgeResult, Outcome, Prompt, TestResult
+from rlvr.core.values import Generation, JudgeResult, Outcome, Prompt, TestResult
 
 
 class Generator(Protocol):

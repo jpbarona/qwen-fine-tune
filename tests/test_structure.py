@@ -4,10 +4,11 @@ Two properties are cheap to lose and expensive to notice late:
 
 - the values that cross the experiment seam live in one module, so a caller
   does not have to import the training loop to name a prompt
-- the module import graph has no cycle
+- the module import graph has no cycle, and a base module such as the config
+  loader does not reach into a domain
 
-Both are read from the source with the standard library, so the check needs no
-imports of the package itself.
+All of it is read from the source with the standard library, so the check never
+imports the package itself.
 """
 
 from __future__ import annotations
@@ -21,43 +22,64 @@ SEAM_VALUES = frozenset({"Prompt", "Generation", "TestResult", "Outcome", "Judge
 
 
 def _sources() -> dict[str, Path]:
-    return {path.stem: path for path in sorted(SRC.glob("*.py"))}
+    found: dict[str, Path] = {}
+    for path in sorted(SRC.rglob("*.py")):
+        parts = list(path.relative_to(SRC).with_suffix("").parts)
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        found[".".join(parts)] = path
+    return found
 
 
-def _local_imports(path: Path) -> dict[str, set[str]]:
-    """Map each sibling module this file imports to the names it takes."""
+def _resolve(module: str, node: ast.ImportFrom) -> list[str]:
+    """The dotted modules an ImportFrom points at, without the rlvr prefix."""
+    if node.level == 0:
+        target = node.module or ""
+        return [target[len("rlvr.") :]] if target.startswith("rlvr.") else [target]
+    parts = module.split(".")
+    base = parts[:-node.level]
+    if node.module:
+        return [".".join([*base, *node.module.split(".")])]
+    return [".".join([*base, alias.name]) for alias in node.names]
+
+
+def _imports(module: str, path: Path) -> dict[str, set[str]]:
+    """Map each module this file imports to the names it takes from it."""
     found: dict[str, set[str]] = {}
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if not isinstance(node, ast.ImportFrom) or node.level != 1 or not node.module:
+        if not isinstance(node, ast.ImportFrom):
             continue
-        root = node.module.split(".")[0]
-        names = {alias.name for alias in node.names}
-        found.setdefault(root, set()).update(names)
+        names = {alias.name for alias in node.names} if node.module else set()
+        for target in _resolve(module, node):
+            found.setdefault(target, set()).update(names)
     return found
 
 
 def test_the_seam_values_are_not_imported_from_the_training_loop() -> None:
     offenders: list[str] = []
     for name, path in _sources().items():
-        if name in {"experiment", "values"}:
+        if name in {"training.experiment", "core.values"}:
             continue
-        taken = _local_imports(path).get("experiment", set()) & SEAM_VALUES
+        taken = _imports(name, path).get("training.experiment", set()) & SEAM_VALUES
         if taken:
             offenders.append(f"{name} imports {', '.join(sorted(taken))} from experiment")
     assert not offenders, "\n".join(offenders)
 
 
-def test_the_config_loader_does_not_reach_into_domains() -> None:
-    """Config is a base module. Its validation must not pull in the domains."""
-    domain = {"reward", "budget", "schedule", "model_profiles", "batching"}
-    reached = sorted(set(_local_imports(SRC / "config.py")) & domain)
-    assert not reached, f"config imports {', '.join(reached)}"
+def test_the_config_loader_stays_in_the_base_layer() -> None:
+    module = "core.config"
+    sources = _sources()
+    targets = {
+        target for target in _imports(module, SRC / "core" / "config.py") if target in sources
+    }
+    outside = sorted(target for target in targets if not target.startswith("core."))
+    assert not outside, f"config imports {', '.join(outside)}"
 
 
 def test_the_module_graph_has_no_cycle() -> None:
     sources = _sources()
     graph = {
-        name: {root for root in _local_imports(path) if root in sources and root != name}
+        name: {target for target in _imports(name, path) if target in sources and target != name}
         for name, path in sources.items()
     }
 

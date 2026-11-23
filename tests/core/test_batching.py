@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.batching import (
+from rlvr.core.batching import (
     DEFAULT_MEMORY_FLOOR_MIB,
     MIN_PROMPTS,
     START_PROMPTS,
@@ -21,11 +21,11 @@ from rlvr.batching import (
     free_memory_mib,
     is_cuda_out_of_memory,
 )
-from rlvr.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
-from rlvr.config import default_config_path, load_config
+from rlvr.core.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
+from rlvr.core.config import default_config_path, load_config
 from rlvr.experiment import Experiment, Generation, Outcome, Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
-from rlvr.memory import MemoryReport
+from rlvr.core.memory import MemoryReport
 from rlvr.qwen import group_advantages
 from rlvr.resume import resume_batch_policy
 from rlvr.runs import RunStore

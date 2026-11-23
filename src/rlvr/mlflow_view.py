@@ -26,9 +26,9 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import NAMESPACE_URL, uuid5
 
-from .memory import MEMORY_METRIC_FIELDS
+from rlvr.core.memory import MEMORY_METRIC_FIELDS
 from .mlflow_log import ARTIFACTS_NAME, DATABASE_NAME, EXPERIMENT_NAME
-from .stages import BANDS
+from rlvr.core.stages import BANDS
 
 __all__ = [
     "TAG_KEY",

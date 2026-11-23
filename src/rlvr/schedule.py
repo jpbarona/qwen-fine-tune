@@ -33,7 +33,7 @@ same index and the same train rotation.
 
 from __future__ import annotations
 
-from .constants import (
+from rlvr.core.constants import (
     DEFAULT_SWEEP_GAP_RATIO,
     MAX_SWEEP_GAP_RATIO,
     MIN_SWEEP_GAP_RATIO,
@@ -48,7 +48,7 @@ from .pools import DEFAULT_PROMOTION_BAR
 from .queues import PromptQueue
 
 if TYPE_CHECKING:  # pragma: no cover - import used only by type checkers
-    from .values import Prompt
+    from rlvr.core.values import Prompt
 
 __all__ = [
     "DEFAULT_DEMOTE_AFTER",

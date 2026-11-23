@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import hashlib
 
-from .values import Generation, JudgeResult, Prompt, Outcome
-from .memory import MemoryReport
-from .stages import BANDS
+from rlvr.core.values import Generation, JudgeResult, Prompt, Outcome
+from rlvr.core.memory import MemoryReport
+from rlvr.core.stages import BANDS
 
 __all__ = [
     "FakeGenerator",

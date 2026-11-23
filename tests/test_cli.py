@@ -22,10 +22,10 @@ from rlvr.cli import (
     sync_mlflow_command,
     sync_mlflow_settings,
 )
-from rlvr.config import load_config
+from rlvr.core.config import load_config
 from rlvr.data import load_split, prompt_id_for
 from rlvr.fake import FakeJudge
-from rlvr.memory import ALLOCATOR_ENV, EXPANDABLE_SEGMENTS
+from rlvr.core.memory import ALLOCATOR_ENV, EXPANDABLE_SEGMENTS
 from rlvr.mlflow_log import NullMirror
 from rlvr.synthetic import load_synthetic_questions
 

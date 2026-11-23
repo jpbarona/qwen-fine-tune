@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.control import (
+from rlvr.core.control import (
     ControlError,
     ControlState,
     ControlWatcher,
@@ -83,7 +83,7 @@ def test_unchanged_content_is_not_reparsed(tmp_path: Path, monkeypatch) -> None:
     watcher.poll()
 
     calls = []
-    import rlvr.control as control
+    import rlvr.core.control as control
 
     real = control.parse_control
     monkeypatch.setattr(control, "parse_control", lambda raw: calls.append(raw) or real(raw))

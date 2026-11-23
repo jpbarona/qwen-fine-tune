@@ -26,7 +26,7 @@ from pathlib import Path
 from threading import Event, Thread
 from typing import Any, Callable, Mapping
 
-from .memory import MemoryReport, read_torch_memory
+from rlvr.core.memory import MemoryReport, read_torch_memory
 
 __all__ = ["GPU_ROWS_NAME", "GpuSampler", "read_gpu"]
 

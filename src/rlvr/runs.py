@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .mlflow_log import Mirror, NullMirror
-from .schema import RolloutRecord
+from rlvr.core.schema import RolloutRecord
 
 __all__ = ["RunStore", "utc_timestamp"]
 

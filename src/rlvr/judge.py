@@ -54,8 +54,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
-from .config import Config, ConfigError
-from .values import JudgeResult, Prompt
+from rlvr.core.config import Config, ConfigError
+from rlvr.core.values import JudgeResult, Prompt
 
 __all__ = [
     "DEFAULT_BACKOFF_BASE",

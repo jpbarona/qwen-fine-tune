@@ -12,7 +12,7 @@ from types import ModuleType
 
 import pytest
 
-from rlvr.config import load_config
+from rlvr.core.config import load_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

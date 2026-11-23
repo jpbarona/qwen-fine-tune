@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .batching import BatchSizePolicy
-from .config import Config
+from rlvr.core.batching import BatchSizePolicy
+from rlvr.core.config import Config
 
 
 class ResumeError(ValueError):

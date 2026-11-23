@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from rlvr.schema import FIELD_NAMES, FIELD_TYPES, RolloutRecord, SchemaError
+from rlvr.core.schema import FIELD_NAMES, FIELD_TYPES, RolloutRecord, SchemaError
 
 # The contract, verbatim. Order matters: records are written in this order.
 CONTRACT: list[tuple[str, tuple[str, ...]]] = [

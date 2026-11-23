@@ -9,18 +9,18 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.checkpoint import (
+from rlvr.core.checkpoint import (
     checkpoint_dir_name,
     find_latest_checkpoint,
     read_checkpoint_manifest,
     write_checkpoint_manifest,
 )
-from rlvr.config import load_config
+from rlvr.core.config import load_config
 from rlvr.experiment import Experiment, Prompt
 from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner
 from rlvr.resume import ResumeError, validate_resume
 from rlvr.runs import RunStore
-from rlvr.schema import RolloutRecord
+from rlvr.core.schema import RolloutRecord
 
 TIMESTAMP = "20261112T000000Z"
 

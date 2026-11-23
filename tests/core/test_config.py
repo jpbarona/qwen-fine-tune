@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.config import Config, ConfigError, default_config_path, load_config
+from rlvr.core.config import Config, ConfigError, default_config_path, load_config
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 GOOD = """\
 [model]
@@ -460,7 +460,7 @@ def test_a_negative_memory_floor_is_named(tmp_path) -> None:
 
 
 def test_the_shipped_real_config_loads() -> None:
-    config = load_config(Path(__file__).resolve().parents[1] / "configs" / "real.toml")
+    config = load_config(Path(__file__).resolve().parents[2] / "configs" / "real.toml")
     assert config.model_name == "Qwen/Qwen3-0.6B"
     assert config.model_revision == "c1899de289a04d12100db370d81485cdf75e47ca"
     assert config.epochs == 5
@@ -476,7 +476,7 @@ def test_the_shipped_real_config_loads() -> None:
 
 
 def test_the_shipped_smoke_config_loads() -> None:
-    config = load_config(Path(__file__).resolve().parents[1] / "configs" / "smoke.toml")
+    config = load_config(Path(__file__).resolve().parents[2] / "configs" / "smoke.toml")
     assert config.max_steps == 8
     assert config.max_judge_calls == 128
     assert config.max_completion_tokens == 2048

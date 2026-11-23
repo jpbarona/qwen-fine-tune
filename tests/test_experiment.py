@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.batching import BatchSizePolicy
-from rlvr.config import load_config
+from rlvr.core.batching import BatchSizePolicy
+from rlvr.core.config import load_config
 from rlvr.experiment import (
     Experiment,
     Generation,
@@ -24,9 +24,9 @@ from rlvr.experiment import (
     TestResult,
 )
 from rlvr.judge import UnrecoverableJudgeError
-from rlvr.memory import MemoryReport
+from rlvr.core.memory import MemoryReport
 from rlvr.reward import RewardError
-from rlvr.schema import RolloutRecord
+from rlvr.core.schema import RolloutRecord
 
 CONFIG_TEXT = """\
 [model]
@@ -1209,7 +1209,7 @@ def test_resume_starts_after_the_checkpoint_step_and_skips_meta(tmp_path) -> Non
 
 
 def test_a_checkpoint_manifest_is_saved_every_configured_steps(tmp_path) -> None:
-    from rlvr.checkpoint import find_latest_checkpoint
+    from rlvr.core.checkpoint import find_latest_checkpoint
     from rlvr.fake import FakeGenerator, FakeTestRunner
     from rlvr.runs import RunStore
 

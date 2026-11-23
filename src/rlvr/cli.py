@@ -63,8 +63,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping, Sequence
 
-from .batching import START_PROMPTS, BatchSizePolicy
-from .config import (
+from rlvr.core.batching import START_PROMPTS, BatchSizePolicy
+from rlvr.core.config import (
     Config,
     ConfigError,
     MlflowSettings,
@@ -72,8 +72,8 @@ from .config import (
     load_config,
     mlflow_settings_from_raw,
 )
-from .control import CONTROL_NAME, ControlWatcher
-from .checkpoint import find_latest_checkpoint, read_checkpoint_manifest
+from rlvr.core.control import CONTROL_NAME, ControlWatcher
+from rlvr.core.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
 from .dashboard_io import _read_json
 from .data import (
     DEFAULT_LABELS_PATH,
@@ -87,7 +87,7 @@ from .data import (
     prompts_for_questions,
 )
 from .experiment import EVAL_TEMPERATURE, Experiment, Judge
-from .values import JudgeResult, Prompt
+from rlvr.core.values import JudgeResult, Prompt
 from .evaluation import band_eval_prompts, pass_at_1
 from .fake import (
     FakeGenerator,
@@ -97,7 +97,7 @@ from .fake import (
 )
 from .gpu import GPU_ROWS_NAME, GpuSampler
 from .judge import JudgeClient, MissingAPIKeyError
-from .memory import configure_expandable_segments, read_torch_memory
+from rlvr.core.memory import configure_expandable_segments, read_torch_memory
 from .mlflow_import import import_run, run_dirs
 from .mlflow_log import open_mirror
 from .mlflow_view import build_route, write_view_tag
@@ -121,7 +121,7 @@ from .runs import RunStore
 from .schedule import Spread
 from .screening import DEFAULT_SCREEN_SAMPLES, ROWS_NAME, ScreenError, ScreenStore
 from .screening import screen as run_screen
-from .stages import BANDS
+from rlvr.core.stages import BANDS
 from .summary import SummaryError, format_summary, load_reports, write_report
 from .synthetic import SyntheticError, load_synthetic_questions
 from .upload import RunUploader, upload_prefix

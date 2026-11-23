@@ -617,7 +617,7 @@ def test_checkpoint_guard_rejects_a_mismatched_lora_placement() -> None:
 
 def test_shipped_lfm_profiles_use_the_pinned_model() -> None:
     from pathlib import Path
-    from rlvr.config import load_config
+    from rlvr.core.config import load_config
 
     root = Path(__file__).resolve().parents[1]
     for name in ("lfm.toml", "lfm-smoke.toml"):

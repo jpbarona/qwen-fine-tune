@@ -8,7 +8,7 @@ from pathlib import Path
 
 from rlvr.fake import fake_memory
 from rlvr.gpu import GpuSampler
-from rlvr.memory import MemoryReport
+from rlvr.core.memory import MemoryReport
 
 ROW_KEYS = {
     "t",

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.schema import FIELD_NAMES, RolloutRecord
+from rlvr.core.schema import FIELD_NAMES, RolloutRecord
 
 TIMESTAMP = "20261112T000000Z"
 

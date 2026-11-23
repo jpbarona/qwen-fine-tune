@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.stages import (
+from rlvr.core.stages import (
     BANDS,
     DEFAULT_CARRY_OVER_RATIO,
     LabelledRow,

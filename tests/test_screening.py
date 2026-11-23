@@ -14,7 +14,7 @@ from typing import Sequence
 import pytest
 
 from rlvr.cli import build_generator, main
-from rlvr.config import load_config
+from rlvr.core.config import load_config
 from rlvr.experiment import Generation, Outcome, Prompt
 from rlvr.fake import FakeGenerator, FakeTestRunner
 from rlvr.screening import (

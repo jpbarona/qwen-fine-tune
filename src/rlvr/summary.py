@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .constants import ARMS
+from rlvr.core.constants import ARMS
 
 __all__ = [
     "RunReport",

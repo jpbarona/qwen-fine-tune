@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from rlvr.cli import UsageError, build_generator
-from rlvr.config import ConfigError, load_config
+from rlvr.core.config import ConfigError, load_config
 from rlvr.experiment import Generation
 from rlvr.vllm_backend import VLLMEngine, VLLMGenerator
 
@@ -204,7 +204,7 @@ def test_a_completion_that_reaches_the_cap_is_truncated_and_scores_minus_one(
 ) -> None:
     from types import SimpleNamespace
 
-    from rlvr.config import load_config
+    from rlvr.core.config import load_config
     from rlvr.experiment import Experiment, Outcome
 
     config = load_config(

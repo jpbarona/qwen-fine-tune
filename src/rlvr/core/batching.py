@@ -31,11 +31,11 @@ This module is pure Python and imports no torch.
 
 from __future__ import annotations
 
-from .constants import DEFAULT_MEMORY_FLOOR_MIB
+from rlvr.core.constants import DEFAULT_MEMORY_FLOOR_MIB
 
 from dataclasses import dataclass, field
 
-from .memory import MemoryReport
+from rlvr.core.memory import MemoryReport
 
 __all__ = [
     "DEFAULT_MEMORY_FLOOR_MIB",

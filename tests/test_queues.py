@@ -8,7 +8,7 @@ resume.
 
 from __future__ import annotations
 
-from rlvr.config import load_config
+from rlvr.core.config import load_config
 from rlvr.experiment import Experiment, Prompt
 from rlvr.pools import Pools
 from rlvr.queues import PromptQueue, queues_from_row, restore_queue
