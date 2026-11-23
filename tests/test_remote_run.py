@@ -229,6 +229,7 @@ def test_start_remote_run_launches_on_the_box(tmp_path) -> None:
         assert result.returncode == 0, result.stderr
         command = launch_command(tmp_path)
         assert command.startswith("cd ~/rl-grpo")
+        assert "[ -f ~/.env ]" in command
         assert "set -a" in command
         assert ". ~/.env" in command
         assert "set +a" in command
@@ -245,6 +246,42 @@ def test_start_remote_run_launches_on_the_box(tmp_path) -> None:
         assert "~/run-code-score.log" in result.stdout
     finally:
         stop_tunnel(tmp_path)
+
+
+def test_the_launch_command_runs_without_a_box_env_file(tmp_path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "rl-grpo").symlink_to(REPO_ROOT, target_is_directory=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_stub(bin_dir, "docker", DOCKER_STUB)
+    environment = fake_environment(tmp_path)
+    environment["HOME"] = str(home)
+    environment["PATH"] = f"{bin_dir}:{environment['PATH']}"
+    try:
+        result = run_script(tmp_path, "code-score", HOST)
+        assert result.returncode == 0, result.stderr
+        command = launch_command(tmp_path)
+    finally:
+        stop_tunnel(tmp_path)
+
+    assert "[ -f ~/.env ]" in command
+    assert not (home / ".env").exists()
+    launched = subprocess.run(
+        ["bash", "-c", command],
+        capture_output=True,
+        text=True,
+        env=environment,
+        cwd=REPO_ROOT,
+        timeout=20,
+    )
+    assert launched.returncode == 0, launched.stderr
+
+    log = tmp_path / "docker.log"
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not log.is_file():
+        time.sleep(0.02)
+    assert log.is_file()
 
 
 def test_start_remote_run_returns_the_launch_status(tmp_path) -> None:

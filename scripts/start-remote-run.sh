@@ -107,7 +107,7 @@ remote_log="~/run-$arm.log"
 # detaches the container from this ssh session, so ssh returns at once and the
 # next arm can launch. The box sources its own environment file for the bucket
 # keys. The pid on stdout is the detached shell, not the training process.
-remote_command="cd ~/rl-grpo && set -a && . ~/.env && set +a; export MLFLOW_TRACKING_URI=$(printf '%q' "$MLFLOW_TRACKING_URI"); setsid nohup ./scripts/docker-run.sh $quoted_args > $remote_log 2>&1 < /dev/null & echo \$!"
+remote_command="cd ~/rl-grpo && [ -f ~/.env ] && set -a && . ~/.env && set +a; export MLFLOW_TRACKING_URI=$(printf '%q' "$MLFLOW_TRACKING_URI"); setsid nohup ./scripts/docker-run.sh $quoted_args > $remote_log 2>&1 < /dev/null & echo \$!"
 
 remote_pid="$(ssh -o BatchMode=yes -o ConnectTimeout=10 \
   -o ServerAliveInterval=15 -i "$key_path" \
