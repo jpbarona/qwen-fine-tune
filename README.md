@@ -213,7 +213,7 @@ so a run keeps its history after the box is destroyed.
 The server is a systemd unit in `deploy/`, run as `opencode`. Once installed it
 binds `127.0.0.1:8081`, keeps its SQLite store at
 `/home/opencode/Work/rl-grpo-data/mlflow/mlflow.db`, and proxies artifacts to
-`s3://opencodeagent1/mlflow/v1`. `sudo deploy/install.sh` installs the unit and
+`s3://opencodeagent1/mlflow/v1/artifacts`. `sudo deploy/install.sh` installs the unit and
 the backup timer. `deploy/README.md` has the details.
 
 The box reaches the server through an SSH reverse tunnel opened by this VM. The

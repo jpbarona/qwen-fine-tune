@@ -3,7 +3,7 @@
 This directory holds the systemd units, the backup script and the install
 script for the MLflow server on this VM. The server owns the SQLite store at
 `/home/opencode/Work/rl-grpo-data/mlflow/mlflow.db` and writes artifacts to
-`s3://opencodeagent1/mlflow/v1`. It listens on `127.0.0.1:8081` only. A GPU box
+`s3://opencodeagent1/mlflow/v1/artifacts`. It listens on `127.0.0.1:8081` only. A GPU box
 reaches it through an SSH reverse tunnel.
 
 ## Files
