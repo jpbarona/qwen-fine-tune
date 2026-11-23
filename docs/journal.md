@@ -169,3 +169,7 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 151. triton compiled its C driver as C++ and failed on CUDA 13
 152. Compiling that driver with gcc fixes the engine start
 153. The MLflow page is slow through this VM, so tunnel from the Mac
+154. The run page cannot share a layout, so the study uses a saved view
+155. rlvr saved-view writes the tag and prints the Chart view route
+156. The tag holds eight sections and fixed ranges on the core three
+157. A second saved-view run replaces the tag, so the store keeps one view

@@ -13,6 +13,10 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 
 ## Designs and plans
 
+- [superpowers/specs/2026-11-23-mlflow-saved-view-design.md](superpowers/specs/2026-11-23-mlflow-saved-view-design.md):
+  the saved view on the study page, the eight sections and the ranges.
+- [superpowers/plans/2026-11-23-mlflow-saved-view.md](superpowers/plans/2026-11-23-mlflow-saved-view.md):
+  the task breakdown for that change.
 - [superpowers/specs/2026-11-23-mlflow-design.md](superpowers/specs/2026-11-23-mlflow-design.md):
   the MLflow store, the parent and child runs, the tables and the importer.
 - [superpowers/plans/2026-11-23-mlflow.md](superpowers/plans/2026-11-23-mlflow.md):

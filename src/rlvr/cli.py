@@ -6,6 +6,7 @@
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
     rlvr dashboard [--runs-root <runs-root>] [--port 8081]
     rlvr import-mlflow --runs-root <runs-root> [--arm <arm>]
+    rlvr saved-view --runs-root <runs-root>
     rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
 
 This build runs both the fake path and, on a GPU host with the `train` extra
@@ -33,6 +34,9 @@ caller's git can already write to.
 `import-mlflow` copies old run folders into the local MLflow store. It walks
 `runs/<arm>/<timestamp>/meta.json` when `--arm` is omitted, and replays each
 folder's metrics, tables and GPU samples.
+
+`saved-view` writes the study saved view to the `rlvr` experiment and prints the
+hash route that opens it. A second call replaces the same tag.
 
 Exit codes: 0 success, 2 for a bad command line, unknown or unimplemented arm,
 bad config, a missing judge key, a bad run folder, a bad question set, or a
@@ -83,6 +87,7 @@ from .judge import JudgeClient, MissingAPIKeyError
 from .memory import configure_expandable_segments, read_torch_memory
 from .mlflow_import import import_run, run_dirs
 from .mlflow_log import open_mirror
+from .mlflow_view import build_route, write_view_tag
 from .pools import DEFAULT_PROMOTION_BAR, Pools, PoolsError, from_rows
 from .publish import PublishError, publish_report
 from .reward import (
@@ -333,6 +338,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--arm",
         default=None,
         help="only import this arm (default: every arm under the runs root)",
+    )
+
+    saved_view = subparsers.add_parser(
+        "saved-view", help="write the study saved view and print its route"
+    )
+    saved_view.add_argument(
+        "--runs-root",
+        type=Path,
+        default=Path("runs"),
+        help="runs root that holds the MLflow store (default: ./runs)",
     )
 
     publish = subparsers.add_parser(
@@ -961,6 +976,16 @@ def import_mlflow_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def saved_view_command(args: argparse.Namespace) -> int:
+    """Write the saved view tag and print the route that opens it."""
+    try:
+        experiment_id = write_view_tag(args.runs_root)
+    except Exception as error:  # noqa: BLE001 - report the store fault and stop
+        raise UsageError(f"cannot write the saved view: {error}") from error
+    print(build_route(experiment_id))
+    return 0
+
+
 def dashboard_argv(runs_root: Path, port: int) -> list[str]:
     """The command that starts the MLflow server.
 
@@ -1036,6 +1061,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return dashboard_command(args)
         if args.command == "import-mlflow":
             return import_mlflow_command(args)
+        if args.command == "saved-view":
+            return saved_view_command(args)
         if args.command == "publish":
             return publish_command(args)
         raise UsageError(f"unknown command {args.command!r}")
