@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.summary import (
+from rlvr.report.summary import (
     RunReport,
     StepMetric,
     SummaryError,

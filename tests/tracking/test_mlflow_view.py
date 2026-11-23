@@ -20,8 +20,8 @@ os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 from mlflow.tracking import MlflowClient  # noqa: E402
 import pytest  # noqa: E402
 
-from rlvr.cli import main  # noqa: E402
-from rlvr.mlflow_view import (  # noqa: E402
+from rlvr.app.cli import main  # noqa: E402
+from rlvr.tracking.mlflow_view import (  # noqa: E402
     build_view_state,
     encode_view_state,
     write_view_tag,

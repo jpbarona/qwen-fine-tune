@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.cli import UsageError, build_generator
+from rlvr.app.cli import UsageError, build_generator
 from rlvr.core.config import ConfigError, load_config
 from rlvr.training.experiment import Generation
 from rlvr.engine.vllm_backend import VLLMEngine, VLLMGenerator

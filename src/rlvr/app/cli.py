@@ -74,7 +74,7 @@ from rlvr.core.config import (
 )
 from rlvr.core.control import CONTROL_NAME, ControlWatcher
 from rlvr.core.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
-from .dashboard_io import _read_json
+from rlvr.tracking.dashboard_io import _read_json
 from rlvr.evaluation.data import (
     DEFAULT_LABELS_PATH,
     TEST_SIZE,
@@ -95,14 +95,14 @@ from rlvr.evaluation.fake import (
     FakeTestRunner,
     fake_memory,
 )
-from .gpu import GPU_ROWS_NAME, GpuSampler
+from rlvr.tracking.gpu import GPU_ROWS_NAME, GpuSampler
 from rlvr.engine.judge import JudgeClient, MissingAPIKeyError
 from rlvr.core.memory import configure_expandable_segments, read_torch_memory
-from .mlflow_import import import_run, run_dirs
-from .mlflow_log import open_mirror
-from .mlflow_view import build_route, write_view_tag
+from rlvr.tracking.mlflow_import import import_run, run_dirs
+from rlvr.tracking.mlflow_log import open_mirror
+from rlvr.tracking.mlflow_view import build_route, write_view_tag
 from rlvr.training.pools import DEFAULT_PROMOTION_BAR, Pools, PoolsError, from_rows
-from .publish import PublishError, publish_report
+from rlvr.tracking.publish import PublishError, publish_report
 from rlvr.training.reward import (
     ARMS,
     ArmNotImplemented,
@@ -111,20 +111,20 @@ from rlvr.training.reward import (
     uses_output_judge,
     uses_process_judge,
 )
-from .resume import (
+from rlvr.app.resume import (
     ResumeError,
     manifest_count as _manifest_count,
     resume_batch_policy as _resume_batch_policy,
     validate_resume,
 )
-from .runs import RunStore
+from rlvr.tracking.runs import RunStore
 from rlvr.training.schedule import Spread
 from rlvr.training.screening import DEFAULT_SCREEN_SAMPLES, ROWS_NAME, ScreenError, ScreenStore
 from rlvr.training.screening import screen as run_screen
 from rlvr.core.stages import BANDS
-from .summary import SummaryError, format_summary, load_reports, write_report
+from rlvr.report.summary import SummaryError, format_summary, load_reports, write_report
 from rlvr.evaluation.synthetic import SyntheticError, load_synthetic_questions
-from .upload import RunUploader, upload_prefix
+from rlvr.tracking.upload import RunUploader, upload_prefix
 
 __all__ = [
     "build_generator",
@@ -890,7 +890,11 @@ def run_command(args: argparse.Namespace) -> int:
             sampler.stop()
         if uploader is not None:
             try:
-                uploader.close()
+                uploader.close(
+                    timeout=float(
+                        os.environ.get("RLVR_UPLOAD_CLOSE_SECONDS", "60")
+                    )
+                )
             except Exception as error:  # noqa: BLE001 - the uploader must not stop training
                 print(f"uploader did not stop cleanly: {error}", file=sys.stderr)
         mirror.close(status="FAILED" if failed else "FINISHED")

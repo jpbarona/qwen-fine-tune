@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from rlvr.evaluation.fake import fake_memory
-from rlvr.gpu import GpuSampler
+from rlvr.tracking.gpu import GpuSampler
 from rlvr.core.memory import MemoryReport
 
 ROW_KEYS = {
@@ -207,7 +207,7 @@ def test_stop_ends_the_sampling(tmp_path: Path) -> None:
 
 
 def test_read_gpu_parses_the_csv_output(monkeypatch) -> None:
-    from rlvr import gpu as gpu_module
+    from rlvr.tracking import gpu as gpu_module
 
     def fake_run(command, **kwargs):
         return gpu_module.subprocess.CompletedProcess(
@@ -264,7 +264,7 @@ def test_the_sample_carries_idle_count_and_age(tmp_path: Path) -> None:
 
 
 def test_read_gpu_returns_none_when_the_binary_is_missing(monkeypatch) -> None:
-    from rlvr import gpu as gpu_module
+    from rlvr.tracking import gpu as gpu_module
 
     def fake_run(command, **kwargs):
         raise FileNotFoundError("nvidia-smi")

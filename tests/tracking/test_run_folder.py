@@ -198,7 +198,7 @@ eval_subset_seed = 5
 
 
 def test_eval_json_is_written_atomically(tmp_path, monkeypatch) -> None:
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
     store.write_eval({"pass_at_1": 0.5})
@@ -207,7 +207,7 @@ def test_eval_json_is_written_atomically(tmp_path, monkeypatch) -> None:
     def fail(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr("rlvr.runs.os.replace", fail)
+    monkeypatch.setattr("rlvr.tracking.runs.os.replace", fail)
     with pytest.raises(OSError, match="disk full"):
         store.write_eval({"pass_at_1": 0.9})
 
@@ -216,12 +216,12 @@ def test_eval_json_is_written_atomically(tmp_path, monkeypatch) -> None:
 
 
 def test_meta_json_is_written_atomically(tmp_path, monkeypatch) -> None:
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     store = RunStore(tmp_path / "runs", "hybrid", timestamp=TIMESTAMP)
     store.write_meta({"arm": "hybrid"})
     before = store.meta_path.read_text(encoding="utf-8")
-    monkeypatch.setattr("rlvr.runs.os.replace", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("disk full")))
+    monkeypatch.setattr("rlvr.tracking.runs.os.replace", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("disk full")))
     with pytest.raises(OSError):
         store.write_meta({"arm": "other"})
     assert store.meta_path.read_text(encoding="utf-8") == before
@@ -248,7 +248,7 @@ def test_a_second_run_creates_a_new_folder(run_fake) -> None:
 
 
 def test_a_store_never_overwrites_an_existing_run_folder(tmp_path) -> None:
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     RunStore(tmp_path / "runs", "hybrid", timestamp=TIMESTAMP)
     with pytest.raises(FileExistsError, match="already exists"):
@@ -256,7 +256,7 @@ def test_a_store_never_overwrites_an_existing_run_folder(tmp_path) -> None:
 
 
 def test_timestamp_must_be_one_path_segment(tmp_path) -> None:
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     for bad in ("a/b", "", ".."):
         with pytest.raises(ValueError, match="path segment"):
@@ -266,13 +266,13 @@ def test_timestamp_must_be_one_path_segment(tmp_path) -> None:
 def test_default_timestamp_is_utc_and_path_safe() -> None:
     import re
 
-    from rlvr.runs import utc_timestamp
+    from rlvr.tracking.runs import utc_timestamp
 
     assert re.fullmatch(r"\d{8}T\d{6}Z", utc_timestamp())
 
 
 def test_label_rows_are_appended_and_read(tmp_path) -> None:
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
     store.append_label({"step": 1, "prompt_id": "a", "label": "train"})
@@ -286,7 +286,7 @@ def test_label_rows_are_appended_and_read(tmp_path) -> None:
 
 
 def test_truncate_drops_label_changes_past_the_checkpoint(tmp_path) -> None:
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
     store.append_label({"step": 1, "prompt_id": "a", "label": "train"})
@@ -300,7 +300,7 @@ def test_truncate_drops_label_changes_past_the_checkpoint(tmp_path) -> None:
 
 
 def test_a_torn_final_label_line_is_dropped_and_removed(tmp_path) -> None:
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
     store.append_label({"step": 1, "prompt_id": "a", "label": "train"})
@@ -316,7 +316,7 @@ def test_a_torn_final_label_line_is_dropped_and_removed(tmp_path) -> None:
 
 
 def test_a_bad_label_line_that_is_not_the_torn_tail_raises(tmp_path) -> None:
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
     store.labels_path.write_text(
@@ -331,7 +331,7 @@ def test_a_bad_label_line_that_is_not_the_torn_tail_raises(tmp_path) -> None:
 
 
 def test_a_metric_row_reaches_the_mirror(tmp_path: Path) -> None:
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     class Recorder:
         rows = []
@@ -350,7 +350,7 @@ def test_a_metric_row_reaches_the_mirror(tmp_path: Path) -> None:
 
 
 def test_an_unterminated_complete_label_line_is_rewritten(tmp_path) -> None:
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
     first = '{"step": 1, "prompt_id": "a", "label": "train"}'

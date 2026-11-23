@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.publish import PublishError, publish_report
+from rlvr.tracking.publish import PublishError, publish_report
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 

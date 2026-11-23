@@ -27,7 +27,7 @@ from typing import Any, Mapping
 from uuid import NAMESPACE_URL, uuid5
 
 from rlvr.core.memory import MEMORY_METRIC_FIELDS
-from .mlflow_log import ARTIFACTS_NAME, DATABASE_NAME, EXPERIMENT_NAME
+from rlvr.tracking.mlflow_log import ARTIFACTS_NAME, DATABASE_NAME, EXPERIMENT_NAME
 from rlvr.core.stages import BANDS
 
 __all__ = [

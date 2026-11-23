@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
-from .dashboard_io import _all_rollout_records, _read_json, _read_jsonl, _read_tail_lines
+from rlvr.tracking.dashboard_io import _all_rollout_records, _read_json, _read_jsonl, _read_tail_lines
 from rlvr.core.memory import MEMORY_METRIC_FIELDS
 from rlvr.core.stages import BANDS, UNSTAGED_STAGE
 
@@ -678,7 +678,7 @@ def _rollouts_per_prompt(meta: Mapping[str, Any]) -> int:
 def _question_text_files() -> list[tuple[str, Path]]:
     """Candidate question files next to the repo or the working directory."""
     roots: list[Path] = []
-    for root in (Path.cwd(), Path(__file__).resolve().parents[2]):
+    for root in (Path.cwd(), Path(__file__).resolve().parents[3]):
         if root not in roots:
             roots.append(root)
     files: list[tuple[str, Path]] = []

@@ -1211,7 +1211,7 @@ def test_resume_starts_after_the_checkpoint_step_and_skips_meta(tmp_path) -> Non
 def test_a_checkpoint_manifest_is_saved_every_configured_steps(tmp_path) -> None:
     from rlvr.core.checkpoint import find_latest_checkpoint
     from rlvr.evaluation.fake import FakeGenerator, FakeTestRunner
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     config_text = (
         "[model]\nname = \"Qwen/Qwen3-0.6B\"\nrevision = \"r\"\n"
@@ -1242,7 +1242,7 @@ def test_a_checkpoint_manifest_is_saved_every_configured_steps(tmp_path) -> None
 
 def test_a_save_prunes_to_the_retained_set(tmp_path) -> None:
     from rlvr.evaluation.fake import FakeGenerator, FakeTestRunner
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
 
     config_text = (
         "[model]\nname = \"Qwen/Qwen3-0.6B\"\nrevision = \"r\"\n"
@@ -1851,7 +1851,7 @@ def test_the_config_builds_the_spread_schedule(tmp_path) -> None:
 
 def test_a_schedule_run_writes_the_label_file_in_the_run_folder(tmp_path) -> None:
     from rlvr.training.pools import Pools
-    from rlvr.runs import RunStore
+    from rlvr.tracking.runs import RunStore
     from rlvr.training.schedule import Spread
 
     prompts = make_prompts(2)

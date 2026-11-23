@@ -33,9 +33,9 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
-from .dashboard_io import _read_json, _read_jsonl
-from .gpu import GPU_ROWS_NAME
-from .runread import (
+from rlvr.tracking.dashboard_io import _read_json, _read_jsonl
+from rlvr.tracking.gpu import GPU_ROWS_NAME
+from rlvr.tracking.runread import (
     META_NAME,
     METRICS_NAME,
     SERIES_FIELDS,

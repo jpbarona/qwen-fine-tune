@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from .mlflow_log import Mirror, NullMirror
+from rlvr.tracking.mlflow_log import Mirror, NullMirror
 from rlvr.core.schema import RolloutRecord
 
 __all__ = ["RunStore", "utc_timestamp"]

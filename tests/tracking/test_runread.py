@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.runread import collect_dashboard
+from rlvr.tracking.runread import collect_dashboard
 
 TIMESTAMP = "20261112T000000Z"
 
@@ -140,7 +140,7 @@ def test_reward_histogram_covers_negative_rewards(tmp_path) -> None:
 
 def test_stage_progress_and_band_rates_read_the_whole_rollout_file(tmp_path) -> None:
     """A prompt solved at the top of a long file still counts."""
-    from rlvr.runread import ROLLOUT_TAIL_BYTES
+    from rlvr.tracking.runread import ROLLOUT_TAIL_BYTES
 
     solved = [
         {
@@ -911,7 +911,7 @@ def test_questions_aggregate_per_prompt_and_only_full_pass_steps_are_solved(tmp_
 
 
 def test_questions_report_prompt_text_when_a_question_file_is_present(tmp_path, monkeypatch) -> None:
-    from rlvr import runread as runread_module
+    from rlvr.tracking import runread as runread_module
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
@@ -939,7 +939,7 @@ def test_questions_report_prompt_text_when_a_question_file_is_present(tmp_path, 
 
 
 def test_questions_do_not_fail_when_a_question_file_is_absent(tmp_path, monkeypatch) -> None:
-    from rlvr import runread as runread_module
+    from rlvr.tracking import runread as runread_module
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(runread_module, "QUESTION_SOURCES", (("mbpp", "missing.jsonl"),))
@@ -981,7 +981,7 @@ def test_a_slow_step_is_still_running(tmp_path, monkeypatch) -> None:
     import os
     import time
 
-    from rlvr import runread as runread_module
+    from rlvr.tracking import runread as runread_module
 
     monkeypatch.setattr(runread_module, "_process_arms", lambda: {"code-score"})
     run_dir = write_run(tmp_path / "runs", "code-score")
@@ -999,7 +999,7 @@ def test_a_run_without_a_process_is_stopped_after_the_grace(tmp_path, monkeypatc
     import os
     import time
 
-    from rlvr import runread as runread_module
+    from rlvr.tracking import runread as runread_module
 
     monkeypatch.setattr(runread_module, "_process_arms", lambda: set())
     run_dir = write_run(tmp_path / "runs", "code-score")
@@ -1013,7 +1013,7 @@ def test_a_run_without_a_process_is_stopped_after_the_grace(tmp_path, monkeypatc
 
 
 def test_a_just_exited_process_does_not_flip_a_fresh_run_to_stopped(tmp_path, monkeypatch) -> None:
-    from rlvr import runread as runread_module
+    from rlvr.tracking import runread as runread_module
 
     monkeypatch.setattr(runread_module, "_process_arms", lambda: set())
     run_dir = write_run(tmp_path / "runs", "code-score")
@@ -1027,7 +1027,7 @@ def test_an_unreadable_process_list_falls_back_to_the_metrics_age(tmp_path, monk
     import os
     import time
 
-    from rlvr import runread as runread_module
+    from rlvr.tracking import runread as runread_module
 
     monkeypatch.setattr(runread_module, "_process_arms", lambda: None)
     run_dir = write_run(tmp_path / "runs", "code-score")
@@ -1144,7 +1144,7 @@ def test_a_control_file_without_events_marks_the_prompt_without_a_step(tmp_path)
 
 
 def test_unchanged_poll_reuses_rollout_summary_but_refreshes_process_status(tmp_path, monkeypatch):
-    import rlvr.runread as runread
+    import rlvr.tracking.runread as runread
 
     run_dir = write_run(tmp_path / "runs", evaluations=[])
     metrics = run_dir / "metrics.jsonl"
@@ -1178,7 +1178,7 @@ def test_changed_metrics_invalidate_dashboard_summary(tmp_path):
 
 
 def test_snapshot_cache_is_bounded(tmp_path, monkeypatch):
-    import rlvr.runread as runread
+    import rlvr.tracking.runread as runread
 
     monkeypatch.setattr(runread, "_RUN_CACHE_LIMIT", 2)
     for index in range(3):

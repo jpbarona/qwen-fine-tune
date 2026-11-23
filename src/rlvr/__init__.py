@@ -11,7 +11,7 @@ __version__ = "0.1.0"
 from rlvr.training.experiment import Experiment, RunSummary
 from rlvr.core.values import Generation, JudgeResult, Outcome, Prompt
 from rlvr.training.reward import ARMS
-from .runs import RunStore
+from rlvr.tracking.runs import RunStore
 from rlvr.core.schema import RolloutRecord
 
 __all__ = [

@@ -9,7 +9,7 @@ import pytest
 from rlvr.core.config import load_config
 from rlvr.training.experiment import Experiment, Prompt
 from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
-from rlvr.runs import RunStore
+from rlvr.tracking.runs import RunStore
 
 
 def test_prompt_ids_are_stable() -> None:
@@ -266,7 +266,7 @@ def test_judge_scores_differ_between_prompts() -> None:
 def test_fakes_touch_no_network(monkeypatch, tmp_path) -> None:
     import socket
 
-    from rlvr.cli import main
+    from rlvr.app.cli import main
 
     def fail(*args, **kwargs):
         raise AssertionError("network use is not allowed in the fake path")

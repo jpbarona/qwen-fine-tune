@@ -13,7 +13,7 @@ from typing import Sequence
 
 import pytest
 
-from rlvr.cli import build_generator, main
+from rlvr.app.cli import build_generator, main
 from rlvr.core.config import load_config
 from rlvr.training.experiment import Generation, Outcome, Prompt
 from rlvr.evaluation.fake import FakeGenerator, FakeTestRunner
@@ -1020,7 +1020,7 @@ def test_cli_screen_without_fake_asks_for_the_train_extra(
 def test_the_screen_asks_for_a_non_trainable_base_model(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    from rlvr import cli
+    from rlvr.app import cli
 
     captured: dict[str, object] = {}
 
@@ -1092,7 +1092,7 @@ def test_build_generator_wraps_every_real_generator_in_the_vllm_backend(
 
 
 def test_build_screen_test_runner_uses_fakes_or_docker() -> None:
-    from rlvr.cli import build_screen_test_runner
+    from rlvr.app.cli import build_screen_test_runner
     from rlvr.evaluation.data import load_dataset
     from rlvr.evaluation.docker_runner import DockerTestRunner
 

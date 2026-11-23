@@ -741,7 +741,7 @@ def test_the_arm_config_accepts_a_screen_for_every_trained_prompt(
 ) -> None:
     from dataclasses import replace
 
-    from rlvr.cli import build_pools, build_prompts
+    from rlvr.app.cli import build_pools, build_prompts
     from rlvr.evaluation.data import load_split, prompt_id_for
     from rlvr.training.screening import ScreenRow, ScreenStore
 

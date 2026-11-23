@@ -26,7 +26,7 @@ vllm = [
 ]
 
 [project.scripts]
-rlvr = "rlvr.cli:main"
+rlvr = "rlvr.app.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

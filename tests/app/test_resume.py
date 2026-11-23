@@ -18,8 +18,8 @@ from rlvr.core.checkpoint import (
 from rlvr.core.config import load_config
 from rlvr.training.experiment import Experiment, Prompt
 from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner
-from rlvr.resume import ResumeError, validate_resume
-from rlvr.runs import RunStore
+from rlvr.app.resume import ResumeError, validate_resume
+from rlvr.tracking.runs import RunStore
 from rlvr.core.schema import RolloutRecord
 
 TIMESTAMP = "20261112T000000Z"
@@ -223,7 +223,7 @@ def test_resume_continues_without_duplicating_records(tmp_path) -> None:
 
 
 def test_an_old_checkpoint_with_stage_fields_still_resumes(tmp_path) -> None:
-    from rlvr.resume import manifest_count, resume_batch_policy
+    from rlvr.app.resume import manifest_count, resume_batch_policy
 
     root = tmp_path / "runs"
     store = RunStore(root, "code-score", timestamp=TIMESTAMP)

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.cli import (
+from rlvr.app.cli import (
     build_judge,
     build_prompts,
     dashboard_argv,
@@ -26,7 +26,7 @@ from rlvr.core.config import load_config
 from rlvr.evaluation.data import load_split, prompt_id_for
 from rlvr.evaluation.fake import FakeJudge
 from rlvr.core.memory import ALLOCATOR_ENV, EXPANDABLE_SEGMENTS
-from rlvr.mlflow_log import NullMirror
+from rlvr.tracking.mlflow_log import NullMirror
 from rlvr.evaluation.synthetic import load_synthetic_questions
 
 CONFIG = """\
@@ -189,7 +189,7 @@ def test_a_judge_arm_fails_before_the_run_folder_when_the_key_is_missing(
 def test_build_judge_only_builds_a_client_for_arms_that_judge(
     write_config, monkeypatch
 ) -> None:
-    from rlvr import cli
+    from rlvr.app import cli
 
     built = []
 
@@ -234,7 +234,7 @@ def test_run_writes_the_four_files(config_path, tmp_path) -> None:
 def test_a_sampler_that_cannot_start_does_not_stop_the_run(
     config_path, tmp_path, monkeypatch, capsys
 ) -> None:
-    from rlvr import cli
+    from rlvr.app import cli
 
     def fail_start(self):
         raise RuntimeError("cannot create a thread")
@@ -342,7 +342,7 @@ def test_unknown_subcommand_fails(tmp_path) -> None:
 
 
 def test_the_parser_accepts_eval_band() -> None:
-    from rlvr.cli import build_parser
+    from rlvr.app.cli import build_parser
 
     args = build_parser().parse_args(["eval-band", "--band", "medium"])
 
@@ -355,7 +355,7 @@ def test_the_parser_accepts_eval_band() -> None:
 
 
 def test_eval_band_requires_a_band(capsys) -> None:
-    from rlvr.cli import build_parser
+    from rlvr.app.cli import build_parser
 
     with pytest.raises(SystemExit) as excinfo:
         build_parser().parse_args(["eval-band"])
@@ -621,7 +621,7 @@ def test_a_fake_run_evaluates_the_held_out_test_split(tmp_path, capsys) -> None:
 def test_a_bad_split_stops_before_the_run_folder(
     config_path, tmp_path, monkeypatch, capsys
 ) -> None:
-    from rlvr import cli
+    from rlvr.app import cli
     from rlvr.evaluation.data import DatasetError
 
     def fail(*args, **kwargs):
@@ -794,7 +794,7 @@ def test_the_fake_run_carries_the_unstaged_value(
 
 
 def test_build_test_runner_uses_fakes_or_docker(write_config) -> None:
-    from rlvr.cli import build_test_runner
+    from rlvr.app.cli import build_test_runner
     from rlvr.evaluation.docker_runner import DockerTestRunner
     from rlvr.evaluation.fake import FakeTestRunner
 
@@ -869,7 +869,7 @@ def test_resume_rejects_changed_identity_before_changing_records(tmp_path, capsy
 
 @pytest.mark.parametrize("error_type", [ValueError, RuntimeError, EOFError])
 def test_failed_checkpoint_load_preserves_existing_records(tmp_path, monkeypatch, capsys, error_type):
-    from rlvr import cli
+    from rlvr.app import cli
 
     config_path = tmp_path / "resume.toml"
     config_path.write_text(RESUME_CONFIG, encoding="utf-8")
@@ -902,7 +902,7 @@ def write_screen_config(tmp_path, screen_rows) -> Path:
 
 
 def test_build_pools_returns_none_without_screen_rows(tmp_path) -> None:
-    from rlvr.cli import build_pools
+    from rlvr.app.cli import build_pools
 
     config = load_config(write_split_config(tmp_path))
     train, _ = build_prompts(config)
@@ -911,7 +911,7 @@ def test_build_pools_returns_none_without_screen_rows(tmp_path) -> None:
 
 
 def test_build_pools_reads_the_screen_rows(tmp_path) -> None:
-    from rlvr.cli import build_pools
+    from rlvr.app.cli import build_pools
     from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(write_split_config(tmp_path))
@@ -943,7 +943,7 @@ def test_build_pools_reads_the_screen_rows(tmp_path) -> None:
 
 
 def test_build_pools_rejects_a_screen_at_another_group_size(tmp_path) -> None:
-    from rlvr.cli import UsageError, build_pools
+    from rlvr.app.cli import UsageError, build_pools
     from rlvr.training.screening import ScreenRow, ScreenStore
 
     directory = tmp_path / "screen"
@@ -970,7 +970,7 @@ def test_build_pools_rejects_a_screen_at_another_group_size(tmp_path) -> None:
 
 
 def test_build_pools_accepts_the_rows_file(tmp_path) -> None:
-    from rlvr.cli import build_pools
+    from rlvr.app.cli import build_pools
     from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(write_split_config(tmp_path))
@@ -996,7 +996,7 @@ def test_build_pools_accepts_the_rows_file(tmp_path) -> None:
 
 
 def test_an_empty_screen_fails_loudly(tmp_path) -> None:
-    from rlvr.cli import UsageError, build_pools
+    from rlvr.app.cli import UsageError, build_pools
 
     config = load_config(write_split_config(tmp_path))
     train, _ = build_prompts(config)
@@ -1008,7 +1008,7 @@ def test_an_empty_screen_fails_loudly(tmp_path) -> None:
 
 
 def test_a_screen_row_outside_the_training_split_fails_loudly(tmp_path) -> None:
-    from rlvr.cli import UsageError, build_pools
+    from rlvr.app.cli import UsageError, build_pools
     from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(write_split_config(tmp_path))
@@ -1024,7 +1024,7 @@ def test_a_screen_row_outside_the_training_split_fails_loudly(tmp_path) -> None:
 
 
 def test_two_sample_counts_in_one_screen_fail_loudly(tmp_path) -> None:
-    from rlvr.cli import UsageError, build_pools
+    from rlvr.app.cli import UsageError, build_pools
     from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(write_split_config(tmp_path))
@@ -1047,7 +1047,7 @@ def test_two_sample_counts_in_one_screen_fail_loudly(tmp_path) -> None:
 
 
 def test_a_screen_path_must_be_a_folder_or_rows_file(tmp_path) -> None:
-    from rlvr.cli import UsageError, build_pools
+    from rlvr.app.cli import UsageError, build_pools
 
     config = load_config(write_split_config(tmp_path))
     train, _ = build_prompts(config)
@@ -1122,7 +1122,7 @@ def test_a_fake_run_uses_the_measured_pool_and_the_spread_schedule(
 def test_a_small_parked_pool_warns_about_the_short_block(tmp_path) -> None:
     from dataclasses import replace
 
-    from rlvr.cli import spread_share_warning
+    from rlvr.app.cli import spread_share_warning
     from rlvr.training.pools import Pools
 
     config = replace(
@@ -1155,7 +1155,7 @@ def test_a_small_parked_pool_warns_about_the_short_block(tmp_path) -> None:
 
 
 def test_a_partial_screen_fails_loudly(tmp_path) -> None:
-    from rlvr.cli import UsageError, build_pools
+    from rlvr.app.cli import UsageError, build_pools
     from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(write_split_config(tmp_path))
@@ -1177,7 +1177,7 @@ def test_a_partial_screen_fails_loudly(tmp_path) -> None:
 
 
 def test_training_steps_uses_the_schedule_prompt_count(tmp_path) -> None:
-    from rlvr.cli import training_steps
+    from rlvr.app.cli import training_steps
     from rlvr.training.pools import Pools
 
     path = tmp_path / "steps.toml"
@@ -1204,7 +1204,7 @@ def test_training_steps_uses_the_schedule_prompt_count(tmp_path) -> None:
 
 
 def test_training_steps_keeps_the_starting_batch_without_a_policy(tmp_path) -> None:
-    from rlvr.cli import training_steps
+    from rlvr.app.cli import training_steps
 
     config = load_config(write_split_config(tmp_path))
     prompts = [object() for _ in range(200)]
@@ -1217,7 +1217,7 @@ def test_dashboard_prints_the_remote_store(capsys, monkeypatch) -> None:
     def fail_exec(path: str, argv: list[str]) -> None:
         raise AssertionError("the remote path must not start a server")
 
-    monkeypatch.setattr("rlvr.cli.os.execv", fail_exec)
+    monkeypatch.setattr("rlvr.app.cli.os.execv", fail_exec)
     args = Namespace(local=False, port=None, runs_root=Path("runs"))
     assert dashboard_command(args) == 0
     assert "http://127.0.0.1:8081" in capsys.readouterr().out
@@ -1231,7 +1231,7 @@ def test_dashboard_prints_the_uri_for_a_namespace_with_a_port(
     def fail_exec(path: str, argv: list[str]) -> None:
         raise AssertionError("the remote path must not start a server")
 
-    monkeypatch.setattr("rlvr.cli.os.execv", fail_exec)
+    monkeypatch.setattr("rlvr.app.cli.os.execv", fail_exec)
     path = tmp_path / "config.toml"
     path.write_text(CONFIG, encoding="utf-8")
     args = Namespace(local=False, port=8081, runs_root=Path("runs"), config=path)
@@ -1245,7 +1245,7 @@ def test_dashboard_falls_back_when_the_packaged_config_cannot_be_read(
     def fail_load(path: str | Path):
         raise OSError("no packaged config")
 
-    monkeypatch.setattr("rlvr.cli.load_config", fail_load)
+    monkeypatch.setattr("rlvr.app.cli.load_config", fail_load)
     args = Namespace(local=False, port=None, runs_root=Path("runs"))
     assert dashboard_command(args) == 0
     assert "http://127.0.0.1:8081" in capsys.readouterr().out
@@ -1259,7 +1259,7 @@ def test_dashboard_reads_the_packaged_config_tracking_uri(
         CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9100"\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr("rlvr.cli.default_config_path", lambda: path)
+    monkeypatch.setattr("rlvr.app.cli.default_config_path", lambda: path)
     args = Namespace(local=False, port=None, runs_root=Path("runs"))
     assert dashboard_command(args) == 0
     assert "http://127.0.0.1:9100" in capsys.readouterr().out
@@ -1269,7 +1269,7 @@ def test_dashboard_prints_the_configured_store(tmp_path, capsys, monkeypatch) ->
     def fail_exec(path: str, argv: list[str]) -> None:
         raise AssertionError("the remote path must not start a server")
 
-    monkeypatch.setattr("rlvr.cli.os.execv", fail_exec)
+    monkeypatch.setattr("rlvr.app.cli.os.execv", fail_exec)
     path = tmp_path / "config.toml"
     path.write_text(
         CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9000"\n',
@@ -1298,7 +1298,7 @@ def test_dashboard_local_still_starts_a_server(tmp_path, monkeypatch) -> None:
     def fake_exec(path: str, argv: list[str]) -> None:
         seen.append((path, argv))
 
-    monkeypatch.setattr("rlvr.cli.os.execv", fake_exec)
+    monkeypatch.setattr("rlvr.app.cli.os.execv", fake_exec)
     runs_root = tmp_path / "runs"
 
     assert main(["dashboard", "--local", "--runs-root", str(runs_root)]) == 0
@@ -1321,7 +1321,7 @@ def test_dashboard_command_runs_mlflow_as_a_module(tmp_path, monkeypatch) -> Non
     def fake_exec(path: str, argv: list[str]) -> None:
         seen.append((path, argv))
 
-    monkeypatch.setattr("rlvr.cli.os.execv", fake_exec)
+    monkeypatch.setattr("rlvr.app.cli.os.execv", fake_exec)
     monkeypatch.setenv("PATH", "")
 
     runs_root = tmp_path / "runs"
@@ -1506,7 +1506,7 @@ def test_sync_mlflow_prints_the_store_it_used(
 ) -> None:
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     folder = make_run(tmp_path / "runs")
-    monkeypatch.setattr("rlvr.cli.import_run", lambda *args, **kwargs: "run-1")
+    monkeypatch.setattr("rlvr.app.cli.import_run", lambda *args, **kwargs: "run-1")
     args = Namespace(run_dir=folder, config=None)
 
     assert sync_mlflow_command(args) == 0
@@ -1607,7 +1607,7 @@ def test_run_uses_the_environment_tracking_uri(tmp_path, config_path, monkeypatc
         seen.append(tracking_uri)
         return NullMirror()
 
-    monkeypatch.setattr("rlvr.cli.open_mirror", fake_open_mirror)
+    monkeypatch.setattr("rlvr.app.cli.open_mirror", fake_open_mirror)
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://172.17.0.1:8081")
 
     assert run_command(run_args(tmp_path, config_path)) == 0
@@ -1624,7 +1624,7 @@ def test_a_config_tracking_uri_wins_over_the_environment(
         seen.append(tracking_uri)
         return NullMirror()
 
-    monkeypatch.setattr("rlvr.cli.open_mirror", fake_open_mirror)
+    monkeypatch.setattr("rlvr.app.cli.open_mirror", fake_open_mirror)
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://172.17.0.1:8081")
     config_path.write_text(
         CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9999"\n',
@@ -1638,7 +1638,7 @@ def test_a_config_tracking_uri_wins_over_the_environment(
 
 def test_run_starts_the_uploader_when_a_bucket_is_set(tmp_path, monkeypatch) -> None:
     StubUploader.calls = []
-    monkeypatch.setattr("rlvr.cli.RunUploader", StubUploader)
+    monkeypatch.setattr("rlvr.app.cli.RunUploader", StubUploader)
     config_path = write_bucket_config(tmp_path)
     runs_root = tmp_path / "runs"
 
@@ -1660,8 +1660,8 @@ def test_a_run_tags_the_checkpoints_uri_before_training_ends(
     """The tag must exist while the run is live, not after it closes."""
     TagReadingExperiment.seen = []
     StubUploader.calls = []
-    monkeypatch.setattr("rlvr.cli.RunUploader", StubUploader)
-    monkeypatch.setattr("rlvr.cli.Experiment", TagReadingExperiment)
+    monkeypatch.setattr("rlvr.app.cli.RunUploader", StubUploader)
+    monkeypatch.setattr("rlvr.app.cli.Experiment", TagReadingExperiment)
     config_path = write_bucket_config(tmp_path)
     args = run_args(tmp_path, config_path)
 
@@ -1678,7 +1678,7 @@ def test_a_broken_uploader_does_not_stop_the_run(tmp_path, monkeypatch) -> None:
         def __init__(self, *args, **kwargs) -> None:
             raise RuntimeError("no boto3 here")
 
-    monkeypatch.setattr("rlvr.cli.RunUploader", BrokenUploader)
+    monkeypatch.setattr("rlvr.app.cli.RunUploader", BrokenUploader)
     config_path = write_bucket_config(tmp_path)
     runs_root = tmp_path / "runs"
 
@@ -1701,8 +1701,8 @@ def test_a_broken_uploader_does_not_stop_the_run(tmp_path, monkeypatch) -> None:
 
 def test_a_close_that_raises_does_not_stop_the_run(tmp_path, monkeypatch) -> None:
     StubUploader.calls = []
-    monkeypatch.setattr("rlvr.cli.RunUploader", CloseFailsUploader)
-    monkeypatch.setattr("rlvr.cli.Experiment", QuietExperiment)
+    monkeypatch.setattr("rlvr.app.cli.RunUploader", CloseFailsUploader)
+    monkeypatch.setattr("rlvr.app.cli.Experiment", QuietExperiment)
     args = run_args(tmp_path, write_bucket_config(tmp_path))
 
     assert run_command(args) == 0
@@ -1711,8 +1711,8 @@ def test_a_close_that_raises_does_not_stop_the_run(tmp_path, monkeypatch) -> Non
 
 def test_the_uploader_closes_when_the_run_raises(tmp_path, monkeypatch) -> None:
     StubUploader.calls = []
-    monkeypatch.setattr("rlvr.cli.RunUploader", StubUploader)
-    monkeypatch.setattr("rlvr.cli.Experiment", FailingExperiment)
+    monkeypatch.setattr("rlvr.app.cli.RunUploader", StubUploader)
+    monkeypatch.setattr("rlvr.app.cli.Experiment", FailingExperiment)
     args = run_args(tmp_path, write_bucket_config(tmp_path))
 
     with pytest.raises(RuntimeError, match="training died"):

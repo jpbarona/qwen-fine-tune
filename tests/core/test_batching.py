@@ -27,8 +27,8 @@ from rlvr.training.experiment import Experiment, Generation, Outcome, Prompt
 from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 from rlvr.core.memory import MemoryReport
 from rlvr.engine.qwen import group_advantages
-from rlvr.resume import resume_batch_policy
-from rlvr.runs import RunStore
+from rlvr.app.resume import resume_batch_policy
+from rlvr.tracking.runs import RunStore
 
 TIMESTAMP = "20261112T000000Z"
 

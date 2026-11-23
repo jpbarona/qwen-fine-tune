@@ -15,8 +15,8 @@ os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 from mlflow.tracking import MlflowClient  # noqa: E402
 import pytest  # noqa: E402
 
-import rlvr.mlflow_log as mlflow_log  # noqa: E402
-from rlvr.mlflow_log import MlflowMirror  # noqa: E402
+import rlvr.tracking.mlflow_log as mlflow_log  # noqa: E402
+from rlvr.tracking.mlflow_log import MlflowMirror  # noqa: E402
 
 # MLflow's SQLAlchemy store configures its mappers with a loader option that
 # SQLAlchemy deprecates. The warning comes from the library, not this code.

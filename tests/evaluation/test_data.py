@@ -356,7 +356,7 @@ def test_name_ignores_a_module_attribute() -> None:
 
 def test_every_committed_row_names_exactly_one_common_function() -> None:
     """The cold check for the prompt contract, over every row we train on."""
-    from rlvr.cli import load_synthetic_rows
+    from rlvr.app.cli import load_synthetic_rows
 
     for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
         name = expected_function_name(question)
@@ -378,7 +378,7 @@ def test_no_row_needs_a_helper_the_prompt_never_provides() -> None:
     import builtins
     import re as _re
 
-    from rlvr.cli import load_synthetic_rows
+    from rlvr.app.cli import load_synthetic_rows
 
     call = _re.compile(r"([A-Za-z_]\w*)\s*\(")
     define = _re.compile(r"(?:def|class)\s+(\w+)")
@@ -402,7 +402,7 @@ def test_no_row_needs_a_helper_the_prompt_never_provides() -> None:
 
 def test_every_test_string_compiles() -> None:
     """A test that does not compile can never pass, whatever the model writes."""
-    from rlvr.cli import load_synthetic_rows
+    from rlvr.app.cli import load_synthetic_rows
 
     for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
         for index, test in enumerate(question.test_list):
@@ -420,14 +420,14 @@ KNOWN_DUPLICATE_TESTS = {37, 337, 508, 713, 862}
 
 
 def test_no_row_has_blank_tests() -> None:
-    from rlvr.cli import load_synthetic_rows
+    from rlvr.app.cli import load_synthetic_rows
 
     for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
         assert all(test.strip() for test in question.test_list), question.task_id
 
 
 def test_only_the_known_rows_repeat_a_test() -> None:
-    from rlvr.cli import load_synthetic_rows
+    from rlvr.app.cli import load_synthetic_rows
 
     repeated = set()
     for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
@@ -439,7 +439,7 @@ def test_only_the_known_rows_repeat_a_test() -> None:
 
 def test_the_prompt_never_carries_a_test_or_an_expected_value() -> None:
     """The model sees the name, never the assertion it has to satisfy."""
-    from rlvr.cli import load_synthetic_rows
+    from rlvr.app.cli import load_synthetic_rows
 
     for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
         prompt = format_prompt(question)
@@ -449,7 +449,7 @@ def test_the_prompt_never_carries_a_test_or_an_expected_value() -> None:
 
 
 def test_prompt_ids_are_unique_across_both_sets() -> None:
-    from rlvr.cli import load_synthetic_rows
+    from rlvr.app.cli import load_synthetic_rows
 
     ids = [
         prompt_id_for(question)
@@ -489,7 +489,7 @@ def test_the_arity_is_none_when_the_test_does_not_call_the_function() -> None:
 def test_every_row_states_the_arity_of_its_first_test_call() -> None:
     import ast as _ast
 
-    from rlvr.cli import load_synthetic_rows
+    from rlvr.app.cli import load_synthetic_rows
 
     for question in list(load_dataset(DEFAULT_DATA_PATH)) + list(load_synthetic_rows()):
         name = expected_function_name(question)

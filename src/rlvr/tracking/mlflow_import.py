@@ -15,8 +15,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterator
 
-from .dashboard_io import _read_json
-from .mlflow_log import IDS_NAME, MlflowMirror
+from rlvr.tracking.dashboard_io import _read_json
+from rlvr.tracking.mlflow_log import IDS_NAME, MlflowMirror
 
 __all__ = ["import_run", "run_dirs"]
 
