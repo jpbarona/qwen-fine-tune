@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.dashboard import collect_dashboard, render_html
+from rlvr.runread import collect_dashboard, render_html
 
 TIMESTAMP = "20261112T000000Z"
 
@@ -144,7 +144,7 @@ def test_reward_histogram_covers_negative_rewards(tmp_path) -> None:
 
 def test_stage_progress_and_band_rates_read_the_whole_rollout_file(tmp_path) -> None:
     """A prompt solved at the top of a long file still counts."""
-    from rlvr.dashboard import ROLLOUT_TAIL_BYTES
+    from rlvr.runread import ROLLOUT_TAIL_BYTES
 
     solved = [
         {
@@ -586,15 +586,15 @@ def test_an_unparsable_started_value_is_shown_as_is(tmp_path) -> None:
 
 
 def test_gpu_read_parses_the_csv_output(monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
     def fake_run(command, **kwargs):
-        return dashboard_module.subprocess.CompletedProcess(
+        return runread_module.subprocess.CompletedProcess(
             args=command, returncode=0, stdout="20, 19610, 49140, 41\n", stderr=""
         )
 
-    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
-    sample = dashboard_module._gpu_read()
+    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
+    sample = runread_module._gpu_read()
 
     assert sample is not None
     assert sample["utilization"] == 20
@@ -604,15 +604,15 @@ def test_gpu_read_parses_the_csv_output(monkeypatch) -> None:
 
 
 def test_gpu_read_returns_none_for_unsupported_fields(monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
     def fake_run(command, **kwargs):
-        return dashboard_module.subprocess.CompletedProcess(
+        return runread_module.subprocess.CompletedProcess(
             args=command, returncode=0, stdout="[N/A], [N/A], 49140, 41\n", stderr=""
         )
 
-    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
-    sample = dashboard_module._gpu_read()
+    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
+    sample = runread_module._gpu_read()
 
     assert sample is not None
     assert sample["utilization"] is None
@@ -623,15 +623,15 @@ def test_gpu_read_returns_none_for_unsupported_fields(monkeypatch) -> None:
 
 def test_gpu_read_keeps_a_real_zero_reading(monkeypatch) -> None:
     """A recorded sample from the A6000: an idle GPU is 0%, not a missing read."""
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
     def fake_run(command, **kwargs):
-        return dashboard_module.subprocess.CompletedProcess(
+        return runread_module.subprocess.CompletedProcess(
             args=command, returncode=0, stdout="0, 35, 49140, 24\n", stderr=""
         )
 
-    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
-    sample = dashboard_module._gpu_read()
+    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
+    sample = runread_module._gpu_read()
 
     assert sample == {
         "utilization": 0.0,
@@ -642,18 +642,18 @@ def test_gpu_read_keeps_a_real_zero_reading(monkeypatch) -> None:
 
 
 def test_gpu_read_handles_not_supported_and_units(monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
     def fake_run(command, **kwargs):
-        return dashboard_module.subprocess.CompletedProcess(
+        return runread_module.subprocess.CompletedProcess(
             args=command,
             returncode=0,
             stdout="[Not Supported], 0 MiB, 49140 MiB, [N/A]\n",
             stderr="",
         )
 
-    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
-    sample = dashboard_module._gpu_read()
+    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
+    sample = runread_module._gpu_read()
 
     assert sample is not None
     assert sample["utilization"] is None
@@ -663,33 +663,33 @@ def test_gpu_read_handles_not_supported_and_units(monkeypatch) -> None:
 
 
 def test_gpu_read_returns_none_when_no_field_can_be_read(monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
     def fake_run(command, **kwargs):
-        return dashboard_module.subprocess.CompletedProcess(
+        return runread_module.subprocess.CompletedProcess(
             args=command,
             returncode=0,
             stdout="[N/A], [Not Supported], [Unknown Error], [N/A]\n",
             stderr="",
         )
 
-    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
-    assert dashboard_module._gpu_read() is None
+    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
+    assert runread_module._gpu_read() is None
 
 
 def test_gpu_read_sums_memory_across_gpus_and_takes_the_hottest(monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
     def fake_run(command, **kwargs):
-        return dashboard_module.subprocess.CompletedProcess(
+        return runread_module.subprocess.CompletedProcess(
             args=command,
             returncode=0,
             stdout="85, 30000, 49140, 51\n10, 1000, 24570, 60\n",
             stderr="",
         )
 
-    monkeypatch.setattr(dashboard_module.subprocess, "run", fake_run)
-    sample = dashboard_module._gpu_read()
+    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
+    sample = runread_module._gpu_read()
 
     assert sample is not None
     assert sample["utilization"] == 85.0
@@ -699,37 +699,37 @@ def test_gpu_read_sums_memory_across_gpus_and_takes_the_hottest(monkeypatch) -> 
 
 
 def test_a_failed_gpu_read_is_not_counted_as_a_sample(monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    dashboard_module._gpu_history.clear()
-    monkeypatch.setattr(dashboard_module, "_gpu_read", lambda: None)
+    runread_module._gpu_history.clear()
+    monkeypatch.setattr(runread_module, "_gpu_read", lambda: None)
     try:
-        dashboard_module.sample_gpu(now=100.0)
-        state = dashboard_module._gpu_state(now=105.0)
+        runread_module.sample_gpu(now=100.0)
+        state = runread_module._gpu_state(now=105.0)
         assert state == {"current": None, "history": [], "age_seconds": None}
     finally:
-        dashboard_module._gpu_history.clear()
+        runread_module._gpu_history.clear()
 
 
 def test_the_gpu_state_reports_the_age_of_the_last_sample(monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    dashboard_module._gpu_history.clear()
+    runread_module._gpu_history.clear()
     sample = {
         "utilization": 80.0,
         "memory_used": 1000.0,
         "memory_total": 2000.0,
         "temperature": 50.0,
     }
-    monkeypatch.setattr(dashboard_module, "_gpu_read", lambda: dict(sample))
+    monkeypatch.setattr(runread_module, "_gpu_read", lambda: dict(sample))
     try:
-        dashboard_module.sample_gpu(now=100.0)
-        state = dashboard_module._gpu_state(now=107.5)
+        runread_module.sample_gpu(now=100.0)
+        state = runread_module._gpu_state(now=107.5)
         assert state["age_seconds"] == 7.5
         assert state["current"] == sample
         assert state["history"][0]["t"] == 100.0
     finally:
-        dashboard_module._gpu_history.clear()
+        runread_module._gpu_history.clear()
 
 
 def test_the_system_strip_shows_a_dash_when_no_sample_exists() -> None:
@@ -744,9 +744,9 @@ def test_the_system_strip_shows_a_dash_when_no_sample_exists() -> None:
 
 
 def test_gpu_sample_is_reused_when_younger_than_two_seconds(monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    dashboard_module._gpu_history.clear()
+    runread_module._gpu_history.clear()
     calls: list[int] = []
 
     def fake_read() -> dict:
@@ -758,24 +758,24 @@ def test_gpu_sample_is_reused_when_younger_than_two_seconds(monkeypatch) -> None
             "temperature": 40.0,
         }
 
-    monkeypatch.setattr(dashboard_module, "_gpu_read", fake_read)
+    monkeypatch.setattr(runread_module, "_gpu_read", fake_read)
     try:
-        dashboard_module.sample_gpu(now=100.0)
-        dashboard_module.sample_gpu(now=101.9)
+        runread_module.sample_gpu(now=100.0)
+        runread_module.sample_gpu(now=101.9)
         assert len(calls) == 1
 
-        dashboard_module.sample_gpu(now=102.0)
+        runread_module.sample_gpu(now=102.0)
         assert len(calls) == 2
-        assert len(dashboard_module._gpu_history) == 2
+        assert len(runread_module._gpu_history) == 2
     finally:
-        dashboard_module._gpu_history.clear()
+        runread_module._gpu_history.clear()
 
 
 def test_the_404_route_does_not_sample_the_gpu(monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    handler = dashboard_module._DashboardHandler.__new__(
-        dashboard_module._DashboardHandler
+    handler = runread_module._DashboardHandler.__new__(
+        runread_module._DashboardHandler
     )
     handler.path = "/missing"
     sent: list[tuple] = []
@@ -784,24 +784,24 @@ def test_the_404_route_does_not_sample_the_gpu(monkeypatch) -> None:
     def refuse() -> None:
         raise AssertionError("the 404 route must not sample the GPU")
 
-    monkeypatch.setattr(dashboard_module, "sample_gpu", refuse)
+    monkeypatch.setattr(runread_module, "sample_gpu", refuse)
     handler._route()
 
     assert sent and sent[0][0] == 404
 
 
 def test_the_data_route_samples_the_gpu(monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    handler = dashboard_module._DashboardHandler.__new__(
-        dashboard_module._DashboardHandler
+    handler = runread_module._DashboardHandler.__new__(
+        runread_module._DashboardHandler
     )
     handler.path = "/data.json"
     handler.paths = []
     sent: list[tuple] = []
     monkeypatch.setattr(handler, "_send", lambda *args: sent.append(args))
     calls: list[int] = []
-    monkeypatch.setattr(dashboard_module, "sample_gpu", lambda: calls.append(1))
+    monkeypatch.setattr(runread_module, "sample_gpu", lambda: calls.append(1))
 
     handler._route()
 
@@ -812,13 +812,13 @@ def test_the_data_route_samples_the_gpu(monkeypatch) -> None:
 def test_the_page_and_data_routes_forbid_caching(monkeypatch) -> None:
     from io import BytesIO
 
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    monkeypatch.setattr(dashboard_module, "sample_gpu", lambda: None)
+    monkeypatch.setattr(runread_module, "sample_gpu", lambda: None)
 
     for path in ("/", "/data.json"):
-        handler = dashboard_module._DashboardHandler.__new__(
-            dashboard_module._DashboardHandler
+        handler = runread_module._DashboardHandler.__new__(
+            runread_module._DashboardHandler
         )
         handler.path = path
         handler.paths = []
@@ -895,9 +895,9 @@ def test_the_page_carries_the_payload_as_parseable_json(tmp_path) -> None:
 
 
 def test_the_built_page_ships_in_the_package() -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    page = dashboard_module.WEB_DIR / dashboard_module.PAGE_NAME
+    page = runread_module.WEB_DIR / runread_module.PAGE_NAME
     assert page.is_file()
     assert "__RLVR_INITIAL_DATA__" in page.read_text(encoding="utf-8")
 
@@ -1252,7 +1252,7 @@ def test_questions_aggregate_per_prompt_and_only_full_pass_steps_are_solved(tmp_
 
 
 def test_questions_report_prompt_text_when_a_question_file_is_present(tmp_path, monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
@@ -1261,7 +1261,7 @@ def test_questions_report_prompt_text_when_a_question_file_is_present(tmp_path, 
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(dashboard_module, "QUESTION_SOURCES", (("mbpp", "mbpp_full.jsonl"),))
+    monkeypatch.setattr(runread_module, "QUESTION_SOURCES", (("mbpp", "mbpp_full.jsonl"),))
 
     rollouts = [
         {
@@ -1280,10 +1280,10 @@ def test_questions_report_prompt_text_when_a_question_file_is_present(tmp_path, 
 
 
 def test_questions_do_not_fail_when_a_question_file_is_absent(tmp_path, monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(dashboard_module, "QUESTION_SOURCES", (("mbpp", "missing.jsonl"),))
+    monkeypatch.setattr(runread_module, "QUESTION_SOURCES", (("mbpp", "missing.jsonl"),))
     run_dir = write_run(tmp_path / "runs", "code-score", rollouts=question_group(1, "mbpp-269", 8))
     row = collect_dashboard([run_dir])["runs"][0]["questions"]["rows"][0]
 
@@ -1348,9 +1348,9 @@ def test_a_slow_step_is_still_running(tmp_path, monkeypatch) -> None:
     import os
     import time
 
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    monkeypatch.setattr(dashboard_module, "_process_arms", lambda: {"code-score"})
+    monkeypatch.setattr(runread_module, "_process_arms", lambda: {"code-score"})
     run_dir = write_run(tmp_path / "runs", "code-score")
     metrics = run_dir / "metrics.jsonl"
     old = time.time() - 300
@@ -1366,9 +1366,9 @@ def test_a_run_without_a_process_is_stopped_after_the_grace(tmp_path, monkeypatc
     import os
     import time
 
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    monkeypatch.setattr(dashboard_module, "_process_arms", lambda: set())
+    monkeypatch.setattr(runread_module, "_process_arms", lambda: set())
     run_dir = write_run(tmp_path / "runs", "code-score")
     metrics = run_dir / "metrics.jsonl"
     old = time.time() - 300
@@ -1380,9 +1380,9 @@ def test_a_run_without_a_process_is_stopped_after_the_grace(tmp_path, monkeypatc
 
 
 def test_a_just_exited_process_does_not_flip_a_fresh_run_to_stopped(tmp_path, monkeypatch) -> None:
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    monkeypatch.setattr(dashboard_module, "_process_arms", lambda: set())
+    monkeypatch.setattr(runread_module, "_process_arms", lambda: set())
     run_dir = write_run(tmp_path / "runs", "code-score")
     (run_dir / "eval.json").unlink()
 
@@ -1394,9 +1394,9 @@ def test_an_unreadable_process_list_falls_back_to_the_metrics_age(tmp_path, monk
     import os
     import time
 
-    from rlvr import dashboard as dashboard_module
+    from rlvr import runread as runread_module
 
-    monkeypatch.setattr(dashboard_module, "_process_arms", lambda: None)
+    monkeypatch.setattr(runread_module, "_process_arms", lambda: None)
     run_dir = write_run(tmp_path / "runs", "code-score")
     metrics = run_dir / "metrics.jsonl"
     old = time.time() - 300
@@ -1526,22 +1526,22 @@ def test_the_page_has_the_dropped_wording(tmp_path) -> None:
 
 
 def test_unchanged_poll_reuses_rollout_summary_but_refreshes_process_status(tmp_path, monkeypatch):
-    import rlvr.dashboard as dashboard
+    import rlvr.runread as runread
 
     run_dir = write_run(tmp_path / "runs", evaluations=[])
     metrics = run_dir / "metrics.jsonl"
-    now = dashboard.time.time()
+    now = runread.time.time()
     import os
     os.utime(metrics, (now - 200, now - 200))
-    monkeypatch.setattr(dashboard, "_process_arms", lambda: {"code-score"})
+    monkeypatch.setattr(runread, "_process_arms", lambda: {"code-score"})
     first = collect_dashboard([run_dir])
     assert first["runs"][0]["status"] == "running"
 
     def refuse(*args, **kwargs):
         raise AssertionError("unchanged runs must reuse their full-file summary")
 
-    monkeypatch.setattr(dashboard, "_collect_run", refuse)
-    monkeypatch.setattr(dashboard, "_process_arms", lambda: set())
+    monkeypatch.setattr(runread, "_collect_run", refuse)
+    monkeypatch.setattr(runread, "_process_arms", lambda: set())
     second = collect_dashboard([run_dir])
     assert second["runs"][0]["status"] == "stopped"
     first["runs"][0]["series"]["steps"].append(999)
@@ -1560,12 +1560,12 @@ def test_changed_metrics_invalidate_dashboard_summary(tmp_path):
 
 
 def test_snapshot_cache_is_bounded(tmp_path, monkeypatch):
-    import rlvr.dashboard as dashboard
+    import rlvr.runread as runread
 
-    monkeypatch.setattr(dashboard, "_RUN_CACHE_LIMIT", 2)
+    monkeypatch.setattr(runread, "_RUN_CACHE_LIMIT", 2)
     for index in range(3):
         collect_dashboard([write_run(tmp_path / str(index))])
-    assert len(dashboard._run_cache) == 2
+    assert len(runread._run_cache) == 2
 
 
 def test_dashboard_tolerates_invalid_utf8_during_file_writes(tmp_path):
