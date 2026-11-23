@@ -35,7 +35,7 @@ comparable and a resume can be rejected.
 **2. The screen file.** It is not in git, because `screens/` is ignored.
 
 ```bash
-rclone copy hetzner-dumps:opencodeagent1/dumps/vm/rl-grpo-data/2026-11-21-lfm-screen \
+rclone copy hetzner-dumps:opencodeagent1/dumps/screens/2026-11-21-lfm-base \
   screens/mbpp-base
 ```
 

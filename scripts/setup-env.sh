@@ -299,12 +299,12 @@ shopt -u nullglob
 
 if [ "$screen_missing" -gt 0 ]; then
   echo "  restore the screen with:"
-  echo "  rclone copy hetzner-dumps:opencodeagent1/dumps/vm/rl-grpo-data/2026-11-21-lfm-screen \\"
+  echo "  rclone copy hetzner-dumps:opencodeagent1/dumps/screens/2026-11-21-lfm-base \\"
   echo "    \"$repo_root/screens/mbpp-base\""
   echo "  the two arm configs fail at load without it."
   if [ "$check_only" -eq 0 ] && command -v rclone >/dev/null 2>&1; then
     mkdir -p "$repo_root/screens/mbpp-base"
-    if rclone copy hetzner-dumps:opencodeagent1/dumps/vm/rl-grpo-data/2026-11-21-lfm-screen \
+    if rclone copy hetzner-dumps:opencodeagent1/dumps/screens/2026-11-21-lfm-base \
         "$repo_root/screens/mbpp-base" >/dev/null 2>&1; then
       echo "  fetched the screen with rclone"
       screen_missing=0

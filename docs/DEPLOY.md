@@ -35,7 +35,7 @@ copy the tree from this VM. `scp` and `rsync` both work.
 The screen file is not in git either. Restore it once:
 
 ```bash
-rclone copy hetzner-dumps:opencodeagent1/dumps/vm/rl-grpo-data/2026-11-21-lfm-screen \
+rclone copy hetzner-dumps:opencodeagent1/dumps/screens/2026-11-21-lfm-base \
   screens/mbpp-base
 ```
 
@@ -87,8 +87,8 @@ Then open `http://100.67.80.52:8083/`.
 Copy the run folders off. They exist only on the box.
 
 ```bash
-rclone copy <run folder> hetzner-dumps:opencodeagent1/dumps/gpu/<timestamp> --progress
-rclone check <run folder> hetzner-dumps:opencodeagent1/dumps/gpu/<timestamp>
+rclone copy <run folder> hetzner-dumps:opencodeagent1/dumps/runs/gpu/<timestamp> --progress
+rclone check <run folder> hetzner-dumps:opencodeagent1/dumps/runs/gpu/<timestamp>
 ```
 
 Delete the local copy only after the check reports zero differences. Update
