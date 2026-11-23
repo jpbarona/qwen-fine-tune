@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m venv .venv
-      - run: .venv/bin/python -m pip install -e '.[dev]'
+      - run: .venv/bin/python -m pip install -e '.[dev,tracking]'
       - run: .venv/bin/python -m pytest -q
 
   dashboard:
