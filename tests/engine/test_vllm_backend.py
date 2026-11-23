@@ -244,6 +244,88 @@ def test_a_completion_that_reaches_the_cap_is_truncated_and_scores_minus_one(
     assert record.reward == -1.0
 
 
+def _fake_vllm_module(monkeypatch):
+    """Install the three vllm names the engine touches and record the params."""
+    import types
+
+    module = types.ModuleType("vllm")
+
+    class TokensPrompt:
+        def __init__(self, prompt_token_ids):
+            self.prompt_token_ids = prompt_token_ids
+
+    class SamplingParams:
+        seen: list[dict] = []
+
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            SamplingParams.seen.append(kwargs)
+
+    class LLM:
+        def __init__(self, **kwargs):
+            self.options = kwargs
+
+        def generate(self, prompts, parameters, *, lora_request=None, use_tqdm=False):
+            return [
+                types.SimpleNamespace(
+                    outputs=[
+                        types.SimpleNamespace(token_ids=[index, 5])
+                        for _ in range(parameters.n)
+                    ]
+                )
+                for index, _ in enumerate(prompts)
+            ]
+
+    module.TokensPrompt = TokensPrompt
+    module.SamplingParams = SamplingParams
+    module.LLM = LLM
+    monkeypatch.setitem(sys.modules, "vllm", module)
+    return SamplingParams
+
+
+def test_the_training_seed_reaches_every_sampling_request(monkeypatch) -> None:
+    params_class = _fake_vllm_module(monkeypatch)
+    engine = VLLMEngine(
+        model_name="Qwen/Qwen3-0.6B",
+        revision="rev",
+        gpu_memory_utilisation=0.5,
+        max_model_len=64,
+        max_lora_rank=8,
+        seed=17,
+    )
+
+    engine.generate([[1, 2]], n=2, temperature=0.9, max_tokens=8)
+    engine.generate([[3, 4]], n=2, temperature=0.9, max_tokens=8)
+
+    assert engine.seed == 17
+    assert [kwargs["seed"] for kwargs in params_class.seen] == [17, 17]
+
+
+def test_two_runs_with_different_seeds_sample_with_different_seeds(monkeypatch) -> None:
+    params_class = _fake_vllm_module(monkeypatch)
+    first = VLLMEngine(
+        model_name="Qwen/Qwen3-0.6B",
+        revision="rev",
+        gpu_memory_utilisation=0.5,
+        max_model_len=64,
+        max_lora_rank=8,
+        seed=1,
+    )
+    second = VLLMEngine(
+        model_name="Qwen/Qwen3-0.6B",
+        revision="rev",
+        gpu_memory_utilisation=0.5,
+        max_model_len=64,
+        max_lora_rank=8,
+        seed=2,
+    )
+
+    first.generate([[1, 2]], n=1, temperature=0.9, max_tokens=8)
+    second.generate([[1, 2]], n=1, temperature=0.9, max_tokens=8)
+
+    assert [kwargs["seed"] for kwargs in params_class.seen] == [1, 2]
+
+
 def test_n_answers_per_prompt_stay_grouped_in_prompt_order(tmp_path) -> None:
     engine, trainer = FakeEngine(), FakeTrainer()
     generator = VLLMGenerator(trainer=trainer, engine=engine, adapter_dir=tmp_path)
@@ -358,6 +440,43 @@ def test_checkpoints_delegate_to_the_trainer_and_resync(tmp_path) -> None:
 
     assert trainer.checkpoint_calls == [("save", tmp_path), ("load", tmp_path)]
     assert len(engine.adapters) == 2
+
+
+def test_the_config_seed_reaches_the_engine_and_the_trainer(
+    write_config, monkeypatch
+) -> None:
+    import rlvr.engine.qwen
+    import rlvr.engine.vllm_backend as backend
+
+    engines: list[dict] = []
+    trainers: list[dict] = []
+
+    class StubTrainer:
+        def __init__(self, **kwargs) -> None:
+            trainers.append(kwargs)
+            self.trainable = True
+            self.max_completion_tokens = kwargs["max_completion_tokens"]
+
+    class StubEngine:
+        def __init__(self, **kwargs) -> None:
+            engines.append(kwargs)
+
+        def close(self) -> None:
+            pass
+
+    class StubGenerator:
+        def __init__(self, *, trainer, engine) -> None:
+            pass
+
+    monkeypatch.setattr(rlvr.engine.qwen, "QwenGenerator", StubTrainer)
+    monkeypatch.setattr(backend, "VLLMEngine", StubEngine)
+    monkeypatch.setattr(backend, "VLLMGenerator", StubGenerator)
+    config = load_config(write_config(CONFIG + '\n[training]\nseed = 41\n'))
+
+    build_generator(config, fake=False)
+
+    assert engines[0]["seed"] == 41
+    assert trainers[0]["seed"] == 41
 
 
 def test_missing_vllm_package_is_a_usage_error_naming_vllm(

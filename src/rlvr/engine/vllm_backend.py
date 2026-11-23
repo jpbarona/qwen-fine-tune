@@ -40,6 +40,9 @@ class VLLMEngine:
     a new `LoRARequest` pointing at it. This is vLLM's supported route for
     dynamic adapters. Each request uses a new integer id, so the engine cannot
     keep serving the previous adapter.
+
+    `seed` is the run's training seed. It goes into every request's sampling
+    parameters, so two runs with the same config draw the same sampling stream.
     """
 
     def __init__(
@@ -50,6 +53,7 @@ class VLLMEngine:
         gpu_memory_utilisation: float,
         max_model_len: int,
         max_lora_rank: int,
+        seed: int,
         max_num_seqs: int | None = None,
         enforce_eager: bool = False,
     ) -> None:
@@ -60,6 +64,7 @@ class VLLMEngine:
         self.gpu_memory_utilisation = float(gpu_memory_utilisation)
         self.max_model_len = int(max_model_len)
         self.max_lora_rank = int(max_lora_rank)
+        self.seed = int(seed)
         self._vllm = vllm
         self._lora_request: Any = None
         self._adapter_id = 0
@@ -101,7 +106,10 @@ class VLLMEngine:
             for ids in prompt_token_ids
         ]
         parameters = self._vllm.SamplingParams(
-            n=n, temperature=temperature, max_tokens=max_tokens
+            n=n,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            seed=self.seed,
         )
         outputs = self._llm.generate(
             prompts,
