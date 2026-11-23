@@ -1,9 +1,11 @@
 name: Checks
 
+# Manual only. Run it from the Actions tab or with:
+#   ~/.local/bin/gh workflow run Checks
+# Automatic runs on push and pull request are off on purpose: a full run costs
+# about eight minutes of paid minutes, and the owner starts it when wanted.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read

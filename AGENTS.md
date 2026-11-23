@@ -27,3 +27,5 @@ report. This file holds rules, not facts.
   A fake run with the default config needs the test caveat in
   [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
 - Open a pull request with `~/.local/bin/gh pr create`. The full path matters.
+- CI is manual on purpose. Nothing runs on push or pull request. Start it with
+  `~/.local/bin/gh workflow run Checks` only when the owner asks for it.

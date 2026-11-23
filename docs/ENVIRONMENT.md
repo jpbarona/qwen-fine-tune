@@ -9,14 +9,11 @@ file explains the machine. Every fact here has its only home here.
 ssh opencode@2.31.62.7
 ```
 
-Forward the MLflow UI to the Mac. The server binds loopback only, so the tunnel
-is the way in.
+The MLflow UI is on the tailnet. No tunnel is needed. Open
+`http://100.67.80.52:8081` from any device on the tailnet.
 
-```bash
-ssh -N -L 8081:127.0.0.1:8081 opencode@2.31.62.7
-```
-
-Then open `http://127.0.0.1:8081`.
+The SSH forward is no longer used. The server binds the tailnet address only,
+not loopback.
 
 ## No sudo
 
