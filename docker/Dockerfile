@@ -55,6 +55,22 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     /opt/venv/bin/uv pip install --python /opt/venv/bin/python \
         --no-build-isolation causal_conv1d
 
+# triton 3.8.0 compiles its C driver with the C++ compiler when CC is g++.
+# The CUDA 13 headers reject the int to enum conversions that follow, so the
+# first vLLM engine start fails. Compile the C source with gcc instead.
+RUN /opt/venv/bin/python - <<'PY'
+import pathlib
+
+path = pathlib.Path(
+    "/opt/venv/lib/python3.12/site-packages/triton/runtime/build.py"
+)
+text = path.read_text()
+old = "    cc = _find_compiler(language)\n"
+new = '    cc = "gcc" if language == "c" else _find_compiler(language)\n'
+if old in text:
+    path.write_text(text.replace(old, new))
+PY
+
 # The test runner shells out to `docker` and talks to the mounted host socket.
 # Without the client every rollout records runner_error.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
