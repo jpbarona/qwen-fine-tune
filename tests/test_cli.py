@@ -219,6 +219,26 @@ def test_run_writes_the_four_files(config_path, tmp_path) -> None:
     assert (run_dir / "meta.json").read_text(encoding="utf-8").startswith("{")
 
 
+def test_a_sampler_that_cannot_start_does_not_stop_the_run(
+    config_path, tmp_path, monkeypatch, capsys
+) -> None:
+    from rlvr import cli
+
+    def fail_start(self):
+        raise RuntimeError("cannot create a thread")
+
+    monkeypatch.setattr(cli.GpuSampler, "start", fail_start)
+    runs_root = tmp_path / "runs"
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+    captured = capsys.readouterr()
+    assert "gpu sampler did not start" in captured.err
+    run_dir = next((runs_root / "code-score").iterdir())
+    assert (run_dir / "metrics.jsonl").is_file()
+    assert not (run_dir / "gpu.jsonl").exists()
+
+
 def test_unknown_arm_is_reported_on_stderr(config_path, tmp_path, capsys) -> None:
     code = main(
         [

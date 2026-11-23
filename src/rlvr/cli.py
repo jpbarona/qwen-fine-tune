@@ -618,6 +618,20 @@ def build_screen_test_runner(questions, *, fake: bool):
     return DockerTestRunner(questions)
 
 
+def start_gpu_sampler(sampler: GpuSampler) -> GpuSampler | None:
+    """Start the sampler. A thread that cannot start leaves training running.
+
+    A host with no free threads, or a broken thread implementation, must not
+    stop a run. The caller gets None and skips the stop.
+    """
+    try:
+        sampler.start()
+    except Exception as error:  # noqa: BLE001 - the sampler must not stop training
+        print(f"gpu sampler did not start: {error}", file=sys.stderr)
+        return None
+    return sampler
+
+
 def run_command(args: argparse.Namespace) -> int:
     # PyTorch reads PYTORCH_CUDA_ALLOC_CONF once, at allocator startup, so set
     # it before anything can import torch. A value the user already set wins.
@@ -746,12 +760,13 @@ def run_command(args: argparse.Namespace) -> int:
         if mirror.gpu_run_id:
             mirror.gpu_sample(row)
 
-    sampler = GpuSampler(
-        store.run_dir / GPU_ROWS_NAME,
-        sample_gpu,
-        interval=config.mlflow.gpu_sample_seconds,
+    sampler = start_gpu_sampler(
+        GpuSampler(
+            store.run_dir / GPU_ROWS_NAME,
+            sample_gpu,
+            interval=config.mlflow.gpu_sample_seconds,
+        )
     )
-    sampler.start()
     failed = False
     try:
         summary = experiment.run()
@@ -759,7 +774,8 @@ def run_command(args: argparse.Namespace) -> int:
         failed = True
         raise
     finally:
-        sampler.stop()
+        if sampler is not None:
+            sampler.stop()
         mirror.close(status="FAILED" if failed else "FINISHED")
 
     print(f"arm={summary.arm} steps={summary.steps} rollouts={summary.rollouts}")
