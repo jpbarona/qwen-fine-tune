@@ -13,8 +13,9 @@ Every public call catches its own exceptions and appends one line to
 `mlflow-errors.log` in the run folder. A failed mirror never raises into the
 training loop.
 
-`eval` pushes the run tables and the `eval.json` artifact. `labels` and
-`rebuild` are placeholders until the resume rebuild and the importer land.
+`eval` pushes the run tables and the `eval.json` artifact. `rebuild` deletes
+the parent and child runs and replays the local files on resume. `close_dead`
+marks the stale runs of one arm as failed.
 """
 
 from __future__ import annotations
@@ -32,7 +33,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
 from .dashboard_io import _read_json, _read_jsonl
-from .runread import collect_dashboard
+from .gpu import GPU_ROWS_NAME
+from .runread import META_NAME, METRICS_NAME, SERIES_FIELDS, collect_dashboard
 
 __all__ = ["Mirror", "MlflowMirror", "NullMirror", "open_mirror"]
 
@@ -80,6 +82,10 @@ TABLE_WARNINGS: tuple[str, ...] = (
 SYSTEM_METRICS_INTERVAL_ENV = "MLFLOW_SYSTEM_METRICS_SAMPLING_INTERVAL"
 SYSTEM_METRICS_INTERVAL = "1"
 
+#: The tag that records when the mirror last copied a step. A run with no tag
+#: is left alone by `close_dead`, because an old run may predate the sweep.
+LAST_WRITE_TAG = "rlvr/last_write_utc"
+
 #: Fields copied from `meta.json` to a tag. The rest of the metadata goes to
 #: params, flattened with dots.
 TAG_FIELDS: tuple[tuple[str, str], ...] = (
@@ -108,6 +114,8 @@ class Mirror(Protocol):
 
     def rebuild(self) -> None: ...
 
+    def close_dead(self, arm: str, older_than_seconds: float = 600.0) -> None: ...
+
     def close(self, status: str = "FINISHED") -> None: ...
 
 
@@ -135,6 +143,21 @@ def _number(value: Any) -> float | None:
 
 def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _age_seconds(stamp: str, now: datetime) -> float | None:
+    """Seconds since an ISO 8601 stamp, or None when the stamp is not one.
+
+    A stamp with no timezone is read as UTC. A stamp that cannot be parsed is
+    treated as unknown, so the run is left alone rather than guessed at.
+    """
+    try:
+        written = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    if written.tzinfo is None:
+        written = written.replace(tzinfo=timezone.utc)
+    return (now - written).total_seconds()
 
 
 def _flatten(prefix: str, value: Any, into: dict[str, Any]) -> None:
@@ -331,6 +354,9 @@ class NullMirror:
     def rebuild(self) -> None:
         pass
 
+    def close_dead(self, arm: str, older_than_seconds: float = 600.0) -> None:
+        pass
+
     def close(self, status: str = "FINISHED") -> None:
         pass
 
@@ -416,6 +442,10 @@ class MlflowMirror:
             if value is not None:
                 tags[tag] = value
 
+        # A crashed run of this arm may still be marked RUNNING. Sweep it
+        # before the new run opens, so the old one does not stay green.
+        self.close_dead(arm)
+
         options: dict[str, Any] = {}
         if importlib.util.find_spec("psutil") is not None:
             options["log_system_metrics"] = True
@@ -429,8 +459,13 @@ class MlflowMirror:
             self._mlflow.log_params(params)
 
         # A new run has no tables yet, so the counts start at zero even when
-        # the folder carries counts from an earlier run.
+        # the folder carries counts from an earlier run. The per run sets and
+        # the GPU sample counter start fresh too, so a rebuild does not skip
+        # a table or step the child run past its first sample.
         self._logged_rows = {name: 0 for name in APPENDED_TABLES}
+        self._gpu_step = 0
+        self._question_steps.clear()
+        self._distribution_steps.clear()
 
         child = client.create_run(
             self.experiment_id,
@@ -452,7 +487,6 @@ class MlflowMirror:
         The stage progress and the per band pass rate are logged here too,
         because the spec sends them to metrics rather than to a table.
         """
-        client = self._require_client()
         if not self.run_id:
             raise RuntimeError("the parent run has not started")
         dashboard = collect_dashboard([self.run_dir])
@@ -462,17 +496,22 @@ class MlflowMirror:
         run = runs[0]
         series = run.get("series") or {}
         index = int(step)
-        for name, values in series.items():
-            if name == "steps" or not isinstance(values, list) or not values:
-                continue
-            value = _number(values[-1])
-            if value is None:
-                continue
-            client.log_metric(self.run_id, name, value, step=index)
+        row = {
+            name: values[-1]
+            for name, values in series.items()
+            if name != "steps" and isinstance(values, list) and values
+        }
+        self._log_row(row, index)
+        self._log_progress(index, run)
 
+    def _log_progress(self, step: int, run: Mapping[str, Any]) -> None:
+        """Log the stage progress and the per band pass rate at `step`."""
+        client = self._require_client()
+        if not self.run_id:
+            raise RuntimeError("the parent run has not started")
         stage_progress = run.get("stage_progress") or {}
         for point in stage_progress.get("points") or []:
-            if not isinstance(point, Mapping) or point.get("step") != index:
+            if not isinstance(point, Mapping) or point.get("step") != step:
                 continue
             band = _text(point.get("band"))
             if band is None:
@@ -481,7 +520,7 @@ class MlflowMirror:
                 value = _number(point.get(field))
                 if value is not None:
                     client.log_metric(
-                        self.run_id, f"stage/{_slug(band)}/{field}", value, step=index
+                        self.run_id, f"stage/{_slug(band)}/{field}", value, step=step
                     )
 
         for band_row in run.get("bands") or []:
@@ -492,8 +531,18 @@ class MlflowMirror:
             if band is None or value is None:
                 continue
             client.log_metric(
-                self.run_id, f"band/{_slug(band)}/pass_rate", value, step=index
+                self.run_id, f"band/{_slug(band)}/pass_rate", value, step=step
             )
+
+    def _log_row(self, row: Mapping[str, Any], step: int) -> None:
+        """Log the series values of one metrics row at `step`."""
+        client = self._require_client()
+        if not self.run_id:
+            raise RuntimeError("the parent run has not started")
+        for name in SERIES_FIELDS:
+            value = _number(row.get(name))
+            if value is not None:
+                client.log_metric(self.run_id, name, value, step=step)
 
     @_guarded
     def eval(self, payload: Mapping[str, Any]) -> None:
@@ -616,9 +665,95 @@ class MlflowMirror:
                 continue
             client.log_metric(self.gpu_run_id, name, value, step=index)
 
+    @_guarded
     def rebuild(self) -> None:
-        """Placeholder. The resume rebuild arrives with a later task."""
-        pass
+        """Replace the runs for this folder with a replay of the local files.
+
+        A resumed run deletes the parent and child runs and recreates them.
+        The local files are already truncated to the last checkpoint, so the
+        replay holds no point past it. The run ids come from `mlflow.json`,
+        which the previous mirror wrote. The active run this process owns is
+        ended first, so the new run can open.
+        """
+        meta = _read_json(self.run_dir / META_NAME)
+        arm = self._run_name(meta)[0]
+        self.close_dead(arm)
+
+        ids = _read_json(self.run_dir / IDS_NAME)
+        self.run_id = self.run_id or _text(ids.get("run_id")) or ""
+        self.gpu_run_id = self.gpu_run_id or _text(ids.get("gpu_run_id")) or ""
+
+        # End the active run this process owns, so the new run can open. The
+        # explicit end runs before close, because a failed child termination
+        # would otherwise leave the parent active.
+        active = self._mlflow.active_run()
+        if active is not None and active.info.run_id == self.run_id:
+            self._mlflow.end_run(status="FAILED")
+        self.close(status="FAILED")
+
+        client = self._require_client()
+        for run_id in (self.run_id, self.gpu_run_id):
+            if not run_id:
+                continue
+            try:
+                client.delete_run(run_id)
+            except Exception as error:  # noqa: BLE001 - a missing run is not fatal
+                self._write_error(error)
+
+        self.run_id = ""
+        self.gpu_run_id = ""
+        self.start(meta)
+        if not self.run_id:
+            return
+        self._replay()
+
+    def _replay(self) -> None:
+        """Push the local files into the runs `start` just opened."""
+        dashboard = collect_dashboard([self.run_dir])
+        runs = dashboard.get("runs") or []
+        run = runs[0] if runs else {}
+        for row in _read_jsonl(self.run_dir / METRICS_NAME):
+            step = row.get("step")
+            if not isinstance(step, int) or isinstance(step, bool):
+                continue
+            self._log_row(row, step)
+            self._log_progress(step, run)
+        payload = _read_json(self.run_dir / EVAL_NAME)
+        self.push_tables(_payload_step(payload))
+        for row in _read_jsonl(self.run_dir / GPU_ROWS_NAME):
+            self.gpu_sample(row)
+
+    @_guarded
+    def close_dead(self, arm: str, older_than_seconds: float = 600.0) -> None:
+        """Mark the stale RUNNING runs of one arm as FAILED.
+
+        A run is stale when its `rlvr/last_write_utc` tag is older than the
+        threshold. A run with no tag is left alone, because an old run may
+        predate the sweep and its age is unknown. The active run this process
+        owns is ended through `mlflow`, so the caller can open a new one.
+        """
+        client = self._require_client()
+        now = datetime.now(timezone.utc)
+        escaped = arm.replace("'", "\\'")
+        runs = client.search_runs(
+            experiment_ids=[self.experiment_id],
+            filter_string=(
+                f"tags.`{LAST_WRITE_TAG}` != '' and "
+                f"tags.`rlvr/arm` = '{escaped}' and attributes.status = 'RUNNING'"
+            ),
+        )
+        for run in runs:
+            stamp = _text(run.data.tags.get(LAST_WRITE_TAG))
+            if stamp is None:
+                continue
+            age = _age_seconds(stamp, now)
+            if age is None or age <= older_than_seconds:
+                continue
+            active = self._mlflow.active_run()
+            if active is not None and active.info.run_id == run.info.run_id:
+                self._mlflow.end_run(status="FAILED")
+            else:
+                client.set_terminated(run.info.run_id, "FAILED")
 
     @_guarded
     def close(self, status: str = "FINISHED") -> None:
