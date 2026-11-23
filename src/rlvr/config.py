@@ -156,6 +156,7 @@ __all__ = [
     "MlflowSettings",
     "default_config_path",
     "load_config",
+    "mlflow_settings_from_raw",
 ]
 
 #: Resource path of the config used when --config is not given.
@@ -455,6 +456,29 @@ def _optional_int_none(raw: dict[str, Any], dotted: str) -> int | None:
     return _positive_int(raw, dotted)
 
 
+def mlflow_settings_from_raw(raw: dict[str, Any]) -> MlflowSettings:
+    """The `[mlflow]` table of a raw config mapping.
+
+    `load_config` and a reader of the `config` snapshot in a run's `meta.json`
+    both call this, so the two paths use the same keys and defaults.
+    """
+    return MlflowSettings(
+        enabled=_optional_bool(raw, "mlflow.enabled", DEFAULT_MLFLOW_ENABLED),
+        gpu_sample_seconds=_optional_float(
+            raw,
+            "mlflow.gpu_sample_seconds",
+            DEFAULT_GPU_SAMPLE_SECONDS,
+            positive=True,
+        ),
+        tracking_uri=_optional_string(raw, "mlflow.tracking_uri", None),
+        artifact_root=_optional_string(raw, "mlflow.artifact_root", None),
+        bucket=_optional_string(raw, "mlflow.bucket", None),
+        upload_concurrency=_optional_positive_int(
+            raw, "mlflow.upload_concurrency", DEFAULT_UPLOAD_CONCURRENCY
+        ),
+    )
+
+
 def load_config(path: str | Path) -> Config:
     """Read and validate a config file. Raises ConfigError with a clear message."""
     file_path = Path(path)
@@ -581,19 +605,5 @@ def load_config(path: str | Path) -> Config:
         ),
         max_steps=_optional_int_none(raw, "budget.max_steps"),
         max_judge_calls=_optional_int_none(raw, "budget.max_judge_calls"),
-        mlflow=MlflowSettings(
-            enabled=_optional_bool(raw, "mlflow.enabled", DEFAULT_MLFLOW_ENABLED),
-            gpu_sample_seconds=_optional_float(
-                raw,
-                "mlflow.gpu_sample_seconds",
-                DEFAULT_GPU_SAMPLE_SECONDS,
-                positive=True,
-            ),
-            tracking_uri=_optional_string(raw, "mlflow.tracking_uri", None),
-            artifact_root=_optional_string(raw, "mlflow.artifact_root", None),
-            bucket=_optional_string(raw, "mlflow.bucket", None),
-            upload_concurrency=_optional_positive_int(
-                raw, "mlflow.upload_concurrency", DEFAULT_UPLOAD_CONCURRENCY
-            ),
-        ),
+        mlflow=mlflow_settings_from_raw(raw),
     )

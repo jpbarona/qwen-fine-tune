@@ -101,6 +101,10 @@ HEARTBEAT_TAG = "rlvr/heartbeat_seconds"
 #: count beside the dropped table.
 DROPPED_COUNT_TAG = "rlvr/dropped_count"
 
+#: The tag that links a run to the bucket prefix of its checkpoints. It is set
+#: at `start`, so a box that dies mid-run still leaves the pointer behind.
+CHECKPOINTS_URI_TAG = "rlvr/checkpoints_uri"
+
 #: The metric names for the pass@1 series. The spec keeps the checkpoint and
 #: final scores as separate series so a run can show both.
 PASS_AT_1_METRICS: tuple[str, ...] = ("checkpoint", "final")
@@ -403,11 +407,13 @@ class MlflowMirror:
         *,
         tracking_uri: str | None = None,
         artifact_root: str | None = None,
+        checkpoints_uri: str | None = None,
     ) -> None:
         self.runs_root = Path(runs_root)
         self.run_dir = Path(run_dir)
         self.tracking_uri = tracking_uri
         self.artifact_root = artifact_root
+        self.checkpoints_uri = checkpoints_uri
         self.run_id = ""
         self.gpu_run_id = ""
         self.experiment_id = ""
@@ -491,6 +497,8 @@ class MlflowMirror:
             "rlvr/timestamp": timestamp,
             "rlvr/run_dir": str(self.run_dir.resolve()),
         }
+        if self.checkpoints_uri:
+            tags[CHECKPOINTS_URI_TAG] = self.checkpoints_uri
         for source, tag in TAG_FIELDS:
             value = _text(meta.get(source))
             if value is not None:
@@ -979,6 +987,7 @@ def open_mirror(
     *,
     tracking_uri: str | None = None,
     artifact_root: str | None = None,
+    checkpoints_uri: str | None = None,
 ) -> Mirror:
     """The mirror for one run. A disabled or broken mirror does nothing.
 
@@ -994,6 +1003,7 @@ def open_mirror(
             run_dir,
             tracking_uri=tracking_uri,
             artifact_root=artifact_root,
+            checkpoints_uri=checkpoints_uri,
         )
     except Exception as error:  # noqa: BLE001 - the mirror must not stop training
         _write_error(Path(run_dir), error)

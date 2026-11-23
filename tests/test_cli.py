@@ -1278,23 +1278,66 @@ def make_run(runs_root: Path) -> Path:
 
 def count_runs() -> int:
     """The run count in the store the test mirror pointed MLflow at."""
+    return len(store_runs())
+
+
+def store_runs() -> list:
+    """Every run in the store the test mirror pointed MLflow at."""
     from mlflow.tracking import MlflowClient
 
     client = MlflowClient()
     experiment = client.get_experiment_by_name("rlvr")
     if experiment is None:
-        return 0
-    return len(client.search_runs([experiment.experiment_id]))
+        return []
+    return client.search_runs([experiment.experiment_id])
 
 
-def test_sync_mlflow_twice_leaves_one_run(tmp_path, capsys):
+def parents_and_children() -> tuple[list, list]:
+    """The parent runs and the GPU child runs in the test store."""
+    runs = store_runs()
+    parents = [run for run in runs if "rlvr/run_dir" in run.data.tags]
+    children = [run for run in runs if "mlflow.parentRunId" in run.data.tags]
+    return parents, children
+
+
+def test_sync_mlflow_twice_leaves_one_run(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     folder = make_run(tmp_path / "runs")
     args = Namespace(run_dir=folder, config=None)
     assert sync_mlflow_command(args) == 0
     first = count_runs()
     assert first > 0
     assert sync_mlflow_command(args) == 0
+
     assert count_runs() == first
+    parents, children = parents_and_children()
+    assert len(parents) == 1
+    assert len(children) == 1
+    assert children[0].data.tags["mlflow.parentRunId"] == parents[0].info.run_id
+
+
+def test_sync_mlflow_uses_the_tracking_uri_in_meta(tmp_path, monkeypatch):
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    folder = make_run(tmp_path / "runs")
+    payload = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    payload["config"] = {
+        "mlflow": {"tracking_uri": f"sqlite:///{remote / 'mlflow.db'}"}
+    }
+    (folder / "meta.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    args = Namespace(run_dir=folder, config=None)
+    assert sync_mlflow_command(args) == 0
+
+    assert (remote / "mlflow.db").is_file()
+    assert not (tmp_path / "runs" / "mlflow.db").exists()
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(tracking_uri=f"sqlite:///{remote / 'mlflow.db'}")
+    experiment = client.get_experiment_by_name("rlvr")
+    assert experiment is not None
+    assert len(client.search_runs([experiment.experiment_id])) == 2
 
 
 class StubUploader:
@@ -1312,10 +1355,74 @@ class StubUploader:
         StubUploader.calls.append(("close",))
 
 
+class CloseFailsUploader(StubUploader):
+    """An uploader whose close raises, like a bucket that went away."""
+
+    def close(self, timeout: float = 60.0) -> None:
+        StubUploader.calls.append(("close",))
+        raise RuntimeError("the bucket is gone")
+
+
+class QuietExperiment:
+    """A stand-in experiment that writes meta and returns at once."""
+
+    def __init__(self, **kwargs) -> None:
+        self.store = kwargs["store"]
+        self.arm = kwargs["arm"]
+
+    def run(self):
+        from rlvr.experiment import RunSummary
+
+        self.store.write_meta({"arm": self.arm, "timestamp": self.store.timestamp})
+        return RunSummary(
+            arm=self.arm,
+            run_dir=self.store.run_dir,
+            steps=0,
+            rollouts=0,
+            mean_reward=0.0,
+            pass_at_1=0.0,
+        )
+
+
+class TagReadingExperiment(QuietExperiment):
+    """Reads the checkpoints tag right after the mirror opens the run."""
+
+    seen: list[str] = []
+
+    def run(self):
+        summary = super().run()
+        from mlflow.tracking import MlflowClient
+
+        run = MlflowClient().get_run(self.store.mirror.run_id)
+        TagReadingExperiment.seen.append(run.data.tags.get("rlvr/checkpoints_uri", ""))
+        return summary
+
+
+class FailingExperiment:
+    """A stand-in experiment whose training raises."""
+
+    def __init__(self, **kwargs) -> None:
+        pass
+
+    def run(self):
+        raise RuntimeError("training died")
+
+
 def write_bucket_config(tmp_path: Path) -> Path:
     path = tmp_path / "bucket.toml"
     path.write_text(CONFIG + '\n[mlflow]\nbucket = "s3://bucket/runs/v1"\n', encoding="utf-8")
     return path
+
+
+def run_args(tmp_path: Path, config_path: Path) -> Namespace:
+    return Namespace(
+        arm="code-score",
+        config=config_path,
+        fake=True,
+        runs_root=tmp_path / "runs",
+        resume=False,
+        control=None,
+    )
 
 
 def test_run_starts_the_uploader_when_a_bucket_is_set(tmp_path, monkeypatch) -> None:
@@ -1336,30 +1443,23 @@ def test_run_starts_the_uploader_when_a_bucket_is_set(tmp_path, monkeypatch) -> 
     assert init[5]["concurrency"] == 2
 
 
-def test_a_run_tags_the_checkpoints_uri_when_a_bucket_is_set(
+def test_a_run_tags_the_checkpoints_uri_before_training_ends(
     tmp_path, monkeypatch
 ) -> None:
-    from mlflow.tracking import MlflowClient
-
+    """The tag must exist while the run is live, not after it closes."""
+    TagReadingExperiment.seen = []
     StubUploader.calls = []
     monkeypatch.setattr("rlvr.cli.RunUploader", StubUploader)
+    monkeypatch.setattr("rlvr.cli.Experiment", TagReadingExperiment)
     config_path = write_bucket_config(tmp_path)
-    runs_root = tmp_path / "runs"
+    args = run_args(tmp_path, config_path)
 
-    assert main(
-        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
-    ) == 0
+    assert run_command(args) == 0
 
-    started = next((runs_root / "code-score").iterdir()).name
-    client = MlflowClient()
-    experiment = client.get_experiment_by_name("rlvr")
-    assert experiment is not None
-    runs = client.search_runs([experiment.experiment_id])
-    parents = [run for run in runs if "rlvr/run_dir" in run.data.tags]
-    assert len(parents) == 1
-    assert parents[0].data.tags["rlvr/checkpoints_uri"] == (
+    started = next((args.runs_root / "code-score").iterdir()).name
+    assert TagReadingExperiment.seen == [
         f"s3://bucket/runs/v1/code-score/{started}"
-    )
+    ]
 
 
 def test_a_broken_uploader_does_not_stop_the_run(tmp_path, monkeypatch) -> None:
@@ -1381,3 +1481,30 @@ def test_a_broken_uploader_does_not_stop_the_run(tmp_path, monkeypatch) -> None:
     )
     assert run_command(args) == 0
     assert (runs_root / "code-score").is_dir()
+    # The prefix comes from the config, so it is tagged even with no uploader.
+    parents, _ = parents_and_children()
+    assert parents[0].data.tags["rlvr/checkpoints_uri"].startswith(
+        "s3://bucket/runs/v1/code-score/"
+    )
+
+
+def test_a_close_that_raises_does_not_stop_the_run(tmp_path, monkeypatch) -> None:
+    StubUploader.calls = []
+    monkeypatch.setattr("rlvr.cli.RunUploader", CloseFailsUploader)
+    monkeypatch.setattr("rlvr.cli.Experiment", QuietExperiment)
+    args = run_args(tmp_path, write_bucket_config(tmp_path))
+
+    assert run_command(args) == 0
+    assert [call[0] for call in StubUploader.calls] == ["init", "start", "close"]
+
+
+def test_the_uploader_closes_when_the_run_raises(tmp_path, monkeypatch) -> None:
+    StubUploader.calls = []
+    monkeypatch.setattr("rlvr.cli.RunUploader", StubUploader)
+    monkeypatch.setattr("rlvr.cli.Experiment", FailingExperiment)
+    args = run_args(tmp_path, write_bucket_config(tmp_path))
+
+    with pytest.raises(RuntimeError, match="training died"):
+        run_command(args)
+
+    assert [call[0] for call in StubUploader.calls] == ["init", "start", "close"]
