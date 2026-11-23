@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sqlite3
+import subprocess
 import tomllib
 from pathlib import Path
 from types import ModuleType
@@ -91,15 +93,58 @@ def test_env_example_lists_the_bucket_variables() -> None:
         assert name in text
 
 
-def test_docker_run_passes_the_bucket_credentials() -> None:
-    text = (REPO_ROOT / "scripts" / "docker-run.sh").read_text(encoding="utf-8")
-    for name in (
+def docker_run_records(tmp_path: Path) -> list[list[str]]:
+    """Run the launcher with a stub docker, and return each docker argv.
+
+    The stub records every call with a `---` record separator, so the
+    `docker image inspect` call and the `docker run` call stay separate.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "docker.argv"
+    stub = bin_dir / "docker"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "---" "$@" >> "$FAKE_DOCKER_ARGV"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    environment = dict(os.environ)
+    environment["PATH"] = f"{bin_dir}:{environment['PATH']}"
+    environment["FAKE_DOCKER_ARGV"] = str(log)
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts" / "docker-run.sh"), "code-score"],
+        capture_output=True,
+        text=True,
+        env=environment,
+        cwd=REPO_ROOT,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    records = log.read_text(encoding="utf-8").split("---\n")
+    return [
+        [argument for argument in record.splitlines() if argument]
+        for record in records
+        if record.strip()
+    ]
+
+
+def test_docker_run_passes_the_bucket_credentials(tmp_path: Path) -> None:
+    records = docker_run_records(tmp_path)
+    run = next(record for record in records if record[:1] == ["run"])
+    forwarded = {
+        run[index + 1]
+        for index, argument in enumerate(run)
+        if argument == "-e" and index + 1 < len(run)
+    }
+    assert {
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
         "MLFLOW_S3_ENDPOINT_URL",
         "AWS_DEFAULT_REGION",
-    ):
-        assert f"-e {name}" in text
+        "MLFLOW_TRACKING_URI",
+    } <= forwarded
 
 
 def test_the_box_configs_name_the_bucket() -> None:
