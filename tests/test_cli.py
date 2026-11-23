@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.cli import build_judge, build_prompts, main
+from rlvr.cli import build_judge, build_prompts, dashboard_argv, main
 from rlvr.config import load_config
 from rlvr.data import load_split, prompt_id_for
 from rlvr.fake import FakeJudge
@@ -1200,6 +1200,30 @@ def test_training_steps_keeps_the_starting_batch_without_a_policy(tmp_path) -> N
 
     # The old path starts at two prompts per step.
     assert training_steps(config, prompts, None) == config.epochs * 100
+
+
+def test_dashboard_command_runs_mlflow_as_a_module(tmp_path, monkeypatch) -> None:
+    seen: list[tuple[str, list[str]]] = []
+
+    def fake_exec(path: str, argv: list[str]) -> None:
+        seen.append((path, argv))
+
+    monkeypatch.setattr("rlvr.cli.os.execv", fake_exec)
+    monkeypatch.setenv("PATH", "")
+
+    runs_root = tmp_path / "runs"
+    assert main(["dashboard", "--runs-root", str(runs_root), "--port", "8081"]) == 0
+
+    assert len(seen) == 1
+    path, argv = seen[0]
+    assert path == sys.executable
+    assert argv[0] == sys.executable
+    assert argv[1:4] == ["-m", "mlflow", "server"]
+    assert argv[argv.index("--host") + 1] == "0.0.0.0"
+    assert argv[argv.index("--port") + 1] == "8081"
+    # The module form does not need the mlflow console script on PATH.
+    assert "mlflow" not in os.environ.get("PATH", "")
+    assert dashboard_argv(runs_root, 8081) == argv
 
 
 def test_dashboard_help_mentions_mlflow() -> None:

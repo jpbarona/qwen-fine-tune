@@ -62,7 +62,7 @@ def test_a_null_metric_is_skipped(tmp_path: Path) -> None:
     )
     mirror = MlflowMirror(tmp_path / "runs", run_dir)
     mirror.start({"arm": "code-score"})
-    mirror.step(2)
+    mirror.step({"step": 2, "pass_rate": 0.5, "grad_norm": None})
 
     client = MlflowClient()
     history = client.get_metric_history(mirror.run_id, "pass_rate")
@@ -100,14 +100,25 @@ def test_gpu_samples_land_on_the_child_run(tmp_path: Path) -> None:
     mirror.start({"arm": "code-score"})
 
     mirror.gpu_sample({"t": 1.0, "utilization": 50.0, "temperature": None})
-    mirror.gpu_sample({"t": 2.0, "utilization": 60.0})
+    mirror.gpu_sample(
+        {
+            "t": 2.0,
+            "utilization": 0.0,
+            "idle": 1,
+            "count": 2,
+            "age": 0.0,
+        }
+    )
 
     client = MlflowClient()
     history = client.get_metric_history(mirror.gpu_run_id, "utilization")
-    assert [point.value for point in history] == [50.0, 60.0]
+    assert [point.value for point in history] == [50.0, 0.0]
     assert [point.step for point in history] == [0, 1]
     assert client.get_metric_history(mirror.gpu_run_id, "t") == []
     assert client.get_metric_history(mirror.gpu_run_id, "temperature") == []
+    for name, value in (("idle", 1.0), ("count", 2.0), ("age", 0.0)):
+        points = client.get_metric_history(mirror.gpu_run_id, name)
+        assert [point.value for point in points] == [value]
     mirror.close()
 
 
@@ -116,11 +127,11 @@ def test_a_failure_is_logged_and_not_raised(tmp_path: Path, monkeypatch) -> None
     mirror = MlflowMirror(tmp_path / "runs", run_dir)
     mirror.start({"arm": "code-score"})
 
-    def explode(_paths):
+    def explode(self, _row, _step):
         raise RuntimeError("read exploded")
 
-    monkeypatch.setattr(mlflow_log, "collect_dashboard", explode)
-    mirror.step(1)
+    monkeypatch.setattr(mlflow_log.MlflowMirror, "_log_row", explode)
+    mirror.step({"step": 1, "pass_rate": 0.5})
 
     text = (run_dir / "mlflow-errors.log").read_text(encoding="utf-8")
     assert "read exploded" in text
@@ -137,7 +148,7 @@ def test_a_broken_store_is_logged_and_stays_quiet(tmp_path: Path, monkeypatch) -
     mirror = open_mirror(tmp_path / "runs", run_dir, True)
     assert isinstance(mirror, NullMirror)
     mirror.start({"arm": "code-score"})
-    mirror.step(1)
+    mirror.step({"step": 1})
     mirror.gpu_sample({"utilization": 50.0})
     mirror.close()
 
@@ -157,9 +168,45 @@ def test_open_mirror_respects_the_flag(tmp_path: Path) -> None:
 def test_the_null_mirror_accepts_every_call(tmp_path: Path) -> None:
     mirror = NullMirror()
     mirror.start({"arm": "code-score"})
-    mirror.step(1)
+    mirror.step({"step": 1})
     mirror.eval({"evaluations": []})
     mirror.labels()
     mirror.gpu_sample({"utilization": 50.0})
     mirror.rebuild()
+    mirror.close()
+
+
+def test_start_writes_the_step_target_as_max_steps(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start(
+        {
+            "arm": "code-score",
+            "mode": "fake",
+            "config": {"fake": {"steps": 5}},
+        }
+    )
+    run = MlflowClient().get_run(mirror.run_id)
+    assert run.data.params["max_steps"] == "5"
+    mirror.close()
+
+
+def test_eval_logs_both_pass_at_1_series(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score"})
+    payload = {
+        "step": 2,
+        "evaluations": [
+            {"step": 1, "kind": "checkpoint", "pass_at_1": 0.25},
+            {"step": 2, "kind": "final", "pass_at_1": 0.5},
+        ],
+    }
+    mirror.eval(payload)
+
+    client = MlflowClient()
+    checkpoint = client.get_metric_history(mirror.run_id, "pass_at_1/checkpoint")
+    final = client.get_metric_history(mirror.run_id, "pass_at_1/final")
+    assert [(point.step, point.value) for point in checkpoint] == [(1, 0.25)]
+    assert [(point.step, point.value) for point in final] == [(2, 0.5)]
     mirror.close()

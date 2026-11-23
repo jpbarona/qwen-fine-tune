@@ -34,7 +34,13 @@ from typing import Any, Callable, Mapping, Protocol
 
 from .dashboard_io import _read_json, _read_jsonl
 from .gpu import GPU_ROWS_NAME
-from .runread import META_NAME, METRICS_NAME, SERIES_FIELDS, collect_dashboard
+from .runread import (
+    META_NAME,
+    METRICS_NAME,
+    SERIES_FIELDS,
+    collect_dashboard,
+    target_steps,
+)
 
 __all__ = ["Mirror", "MlflowMirror", "NullMirror", "open_mirror"]
 
@@ -91,6 +97,14 @@ LAST_WRITE_TAG = "rlvr/last_write_utc"
 #: to a metric on the parent run and to a tag on both runs.
 HEARTBEAT_TAG = "rlvr/heartbeat_seconds"
 
+#: The tag that records how many prompts the run dropped. The spec puts the
+#: count beside the dropped table.
+DROPPED_COUNT_TAG = "rlvr/dropped_count"
+
+#: The metric names for the pass@1 series. The spec keeps the checkpoint and
+#: final scores as separate series so a run can show both.
+PASS_AT_1_METRICS: tuple[str, ...] = ("checkpoint", "final")
+
 #: Fields copied from `meta.json` to a tag. The rest of the metadata goes to
 #: params, flattened with dots.
 TAG_FIELDS: tuple[tuple[str, str], ...] = (
@@ -109,7 +123,7 @@ class Mirror(Protocol):
 
     def start(self, meta: Mapping[str, Any]) -> None: ...
 
-    def step(self, step: int) -> None: ...
+    def step(self, row: Mapping[str, Any]) -> None: ...
 
     def eval(self, payload: Mapping[str, Any]) -> None: ...
 
@@ -352,7 +366,7 @@ class NullMirror:
     def start(self, meta: Mapping[str, Any]) -> None:
         pass
 
-    def step(self, step: int) -> None:
+    def step(self, row: Mapping[str, Any]) -> None:
         pass
 
     def eval(self, payload: Mapping[str, Any]) -> None:
@@ -397,6 +411,9 @@ class MlflowMirror:
         self._client: Any = None
         self._question_steps: set[tuple[int, str]] = set()
         self._distribution_steps: set[tuple[int, str]] = set()
+        self._stage_steps: set[tuple[int, str]] = set()
+        self._band_steps: set[tuple[int, str]] = set()
+        self._pass_steps: set[tuple[int, str]] = set()
         # A mirror that found an existing `mlflow.json` only owns the table
         # counts, not the run ids an earlier mirror wrote.
         self._owns_ids = False
@@ -473,6 +490,9 @@ class MlflowMirror:
 
         self._mlflow.set_tags(tags)
         params = _params(meta)
+        target = target_steps(meta)
+        if target is not None:
+            params["max_steps"] = target
         if params:
             self._mlflow.log_params(params)
 
@@ -484,6 +504,9 @@ class MlflowMirror:
         self._gpu_step = 0
         self._question_steps.clear()
         self._distribution_steps.clear()
+        self._stage_steps.clear()
+        self._band_steps.clear()
+        self._pass_steps.clear()
 
         child = client.create_run(
             self.experiment_id,
@@ -497,39 +520,32 @@ class MlflowMirror:
         self.gpu_run_id = child.info.run_id
         self._gpu_started_at = _start_seconds(child.info)
         self._owns_ids = True
+        # A run that crashes before its first step must still carry a last
+        # write and a heartbeat, so the sweep can find it.
+        self._write_heartbeat(datetime.now(timezone.utc))
         self._write_ids()
 
     @_guarded
-    def step(self, step: int) -> None:
-        """Copy the newest value of each series at `step`. Nulls are skipped.
+    def step(self, row: Mapping[str, Any]) -> None:
+        """Copy the series values of one metrics row. Nulls are skipped.
 
-        The stage progress and the per band pass rate are logged here too,
-        because the spec sends them to metrics rather than to a table. The
-        heartbeat tags are refreshed on the parent and the child run, so a
-        crashed run leaves an old last write behind. The parent run also gets
-        the heartbeat as a metric, because the spec maps the name to a metric.
+        The caller passes the row it just wrote, so the mirror never reads the
+        run folder on a training step. The heartbeat tags are refreshed on the
+        parent and the child run, so a crashed run leaves an old last write
+        behind. The parent run also gets the heartbeat as a metric, because the
+        spec maps the name to a metric. The stage and band series move with the
+        evaluation, because they are not in a metrics row.
         """
         if not self.run_id:
             raise RuntimeError("the parent run has not started")
-        index = int(step)
+        index = row.get("step")
+        if isinstance(index, bool) or not isinstance(index, int):
+            return
         heartbeat = self._write_heartbeat(datetime.now(timezone.utc))
         self._require_client().log_metric(
             self.run_id, HEARTBEAT_TAG, heartbeat, step=index
         )
-        dashboard = collect_dashboard([self.run_dir])
-        runs = dashboard.get("runs") or []
-        if not runs:
-            return
-        run = runs[0]
-        series = run.get("series") or {}
-        row = {
-            name: values[-1]
-            for name, values in series.items()
-            if name != "steps" and isinstance(values, list) and values
-        }
         self._log_row(row, index)
-        self._log_stage(index, run)
-        self._log_bands(index, run)
 
     def _write_heartbeat(self, now: datetime) -> float:
         """Refresh the last write and heartbeat tags on the parent and child.
@@ -551,17 +567,25 @@ class MlflowMirror:
         client.set_tag(self.gpu_run_id, HEARTBEAT_TAG, f"{child_heartbeat:.3f}")
         return heartbeat
 
-    def _log_stage(self, step: int, run: Mapping[str, Any]) -> None:
-        """Log the stage progress points for one step."""
+    def _log_stage(self, run: Mapping[str, Any]) -> None:
+        """Log every stage progress point not logged yet.
+
+        The dashboard carries the whole stage series. A set keeps a later
+        evaluation from logging the same point twice.
+        """
         client = self._require_client()
         if not self.run_id:
             raise RuntimeError("the parent run has not started")
         stage_progress = run.get("stage_progress") or {}
         for point in stage_progress.get("points") or []:
-            if not isinstance(point, Mapping) or point.get("step") != step:
+            if not isinstance(point, Mapping):
                 continue
+            step = point.get("step")
             band = _text(point.get("band"))
-            if band is None:
+            if isinstance(step, bool) or not isinstance(step, int) or band is None:
+                continue
+            key = (step, band)
+            if key in self._stage_steps:
                 continue
             for field in ("solved", "total"):
                 value = _number(point.get(field))
@@ -569,13 +593,13 @@ class MlflowMirror:
                     client.log_metric(
                         self.run_id, f"stage/{_slug(band)}/{field}", value, step=step
                     )
+            self._stage_steps.add(key)
 
     def _log_bands(self, step: int, run: Mapping[str, Any]) -> None:
         """Log the band pass rates at `step`.
 
-        The rate is cumulative. A live run logs it at every step. A rebuild
-        logs it once, at the final step, because the dashboard only carries
-        the final summary and repeating it would flatten the chart.
+        The rate is cumulative. A later evaluation logs the same step once, so
+        two evaluations at one step do not draw two points on one line.
         """
         client = self._require_client()
         if not self.run_id:
@@ -587,9 +611,13 @@ class MlflowMirror:
             value = _number(band_row.get("pass_rate"))
             if band is None or value is None:
                 continue
+            key = (step, band)
+            if key in self._band_steps:
+                continue
             client.log_metric(
                 self.run_id, f"band/{_slug(band)}/pass_rate", value, step=step
             )
+            self._band_steps.add(key)
 
     def _log_row(self, row: Mapping[str, Any], step: int) -> None:
         """Log the series values of one metrics row at `step`."""
@@ -601,17 +629,69 @@ class MlflowMirror:
             if value is not None:
                 client.log_metric(self.run_id, name, value, step=step)
 
+    def _log_pass_at_1(self, payload: Mapping[str, Any]) -> None:
+        """Log the checkpoint and final pass@1 values from the eval payload.
+
+        A payload carries one point per evaluation. The checkpoint and final
+        points become separate metric series. A set keeps a later payload from
+        logging the same point twice.
+        """
+        client = self._require_client()
+        if not self.run_id:
+            raise RuntimeError("the parent run has not started")
+        evaluations = payload.get("evaluations")
+        if not isinstance(evaluations, list):
+            return
+        for point in evaluations:
+            if not isinstance(point, Mapping):
+                continue
+            kind = _text(point.get("kind"))
+            step = point.get("step")
+            value = _number(point.get("pass_at_1"))
+            if kind not in PASS_AT_1_METRICS:
+                continue
+            if isinstance(step, bool) or not isinstance(step, int) or value is None:
+                continue
+            key = (step, kind)
+            if key in self._pass_steps:
+                continue
+            client.log_metric(self.run_id, f"pass_at_1/{kind}", value, step=step)
+            self._pass_steps.add(key)
+
+    def _dashboard_run(self) -> Mapping[str, Any]:
+        """The dashboard payload for this run folder, or an empty mapping."""
+        dashboard = collect_dashboard([self.run_dir])
+        runs = dashboard.get("runs") or []
+        return runs[0] if runs else {}
+
     @_guarded
     def eval(self, payload: Mapping[str, Any]) -> None:
-        """Log the run tables for the evaluation in `payload`."""
-        self.push_tables(_payload_step(payload))
+        """Log the run tables and the evaluation metrics in `payload`.
+
+        The stage and band series come from the dashboard payload, read once at
+        the evaluation. The pass@1 series and the dropped count come from the
+        payload and the dashboard too.
+        """
+        run = self._dashboard_run()
+        step = _payload_step(payload)
+        if step == 0:
+            series = run.get("series") or {}
+            steps = series.get("steps") or []
+            if steps and isinstance(steps[-1], int):
+                step = steps[-1]
+        self._log_stage(run)
+        self._log_bands(step, run)
+        self._log_pass_at_1(payload)
+        self.push_tables(step, run)
 
     def labels(self) -> None:
         """Placeholder. The label table is pushed with the other tables."""
         pass
 
     @_guarded
-    def push_tables(self, step: int) -> None:
+    def push_tables(
+        self, step: int, run: Mapping[str, Any] | None = None
+    ) -> None:
         """Log the run tables for one evaluation.
 
         The questions and distributions tables get one file per step and kind,
@@ -619,15 +699,15 @@ class MlflowMirror:
         step both survive. The event tables append, and each call logs only the
         rows that arrived since the last call. A table with no rows is not
         written. One failed table is logged and the rest are still pushed. The
-        whole `eval.json` is logged as an artifact too.
+        whole `eval.json` is logged as an artifact too. A caller that already
+        read the dashboard passes `run`, so the folder is read once.
         """
-        self._require_client()
+        client = self._require_client()
         if not self.run_id:
             raise RuntimeError("the parent run has not started")
         index = int(step)
-        dashboard = collect_dashboard([self.run_dir])
-        runs = dashboard.get("runs") or []
-        run = runs[0] if runs else {}
+        if run is None:
+            run = self._dashboard_run()
         payload = _read_json(self.run_dir / EVAL_NAME)
         kind = _payload_kind(payload)
         key = (index, kind)
@@ -645,12 +725,14 @@ class MlflowMirror:
             if self._push(name, rows):
                 self._distribution_steps.add(key)
 
+        dropped = _dropped_rows(run.get("dropped") or {})
         self._push_appended(EVALUATIONS_TABLE, _evaluation_rows(payload))
         self._push_appended(LABELS_TABLE, _read_jsonl(self.run_dir / LABELS_NAME))
-        self._push_appended(DROPPED_TABLE, _dropped_rows(run.get("dropped") or {}))
+        self._push_appended(DROPPED_TABLE, dropped)
         self._push_appended(
             CONTROL_EVENTS_TABLE, _read_jsonl(self.run_dir / CONTROL_EVENTS_NAME)
         )
+        client.set_tag(self.run_id, DROPPED_COUNT_TAG, str(len(dropped)))
         self._log_artifact(self.run_dir / EVAL_NAME)
 
     def _push(self, artifact_file: str, rows: list[Mapping[str, Any]]) -> bool:
@@ -722,15 +804,44 @@ class MlflowMirror:
                 continue
             client.log_metric(self.gpu_run_id, name, value, step=index)
 
+    def _runs_for_folder(self) -> list[str]:
+        """Every run in the experiment whose `rlvr/run_dir` tag is this folder.
+
+        A crash between `start_run` and the ids write leaves a run that
+        `mlflow.json` does not name. The tag finds it. The child runs of each
+        matching parent are included too, so a rebuild leaves no GPU run
+        behind.
+        """
+        client = self._require_client()
+        escaped = str(self.run_dir.resolve()).replace("'", "\\'")
+        runs = client.search_runs(
+            experiment_ids=[self.experiment_id],
+            filter_string=f"tags.`rlvr/run_dir` = '{escaped}'",
+        )
+        found: list[str] = []
+        for run in runs:
+            parent = run.info.run_id
+            if parent not in found:
+                found.append(parent)
+            children = client.search_runs(
+                experiment_ids=[self.experiment_id],
+                filter_string=f"tags.`mlflow.parentRunId` = '{parent}'",
+            )
+            for child in children:
+                if child.info.run_id not in found:
+                    found.append(child.info.run_id)
+        return found
+
     @_guarded
     def rebuild(self) -> None:
         """Replace the runs for this folder with a replay of the local files.
 
-        A resumed run deletes the parent and child runs and recreates them.
-        The local files are already truncated to the last checkpoint, so the
-        replay holds no point past it. The run ids come from `mlflow.json`,
-        which the previous mirror wrote. The active run this process owns is
-        ended first, so the new run can open.
+        A resumed run deletes every run whose `rlvr/run_dir` tag names this
+        folder, then recreates the parent and child runs. The tag finds a run
+        left by a crash before `mlflow.json` was written. The local files are
+        already truncated to the last checkpoint, so the replay holds no point
+        past it. The active run this process owns is ended first, so the new
+        run can open.
         """
         meta = _read_json(self.run_dir / META_NAME)
         arm = self._run_name(meta)[0]
@@ -749,9 +860,9 @@ class MlflowMirror:
         self.close(status="FAILED")
 
         client = self._require_client()
-        for run_id in (self.run_id, self.gpu_run_id):
-            if not run_id:
-                continue
+        doomed = set(self._runs_for_folder())
+        doomed.update(run_id for run_id in (self.run_id, self.gpu_run_id) if run_id)
+        for run_id in doomed:
             try:
                 client.delete_run(run_id)
             except Exception as error:  # noqa: BLE001 - a missing run is not fatal
@@ -766,23 +877,10 @@ class MlflowMirror:
 
     def _replay(self) -> None:
         """Push the local files into the runs `start` just opened."""
-        dashboard = collect_dashboard([self.run_dir])
-        runs = dashboard.get("runs") or []
-        run = runs[0] if runs else {}
-        final_step: int | None = None
         for row in _read_jsonl(self.run_dir / METRICS_NAME):
-            step = row.get("step")
-            if not isinstance(step, int) or isinstance(step, bool):
-                continue
-            self._log_row(row, step)
-            self._log_stage(step, run)
-            final_step = step
-        # The band table is a final summary, not a per step series. Log it
-        # once at the last step so the chart does not repeat one value.
-        if final_step is not None:
-            self._log_bands(final_step, run)
+            self.step(row)
         payload = _read_json(self.run_dir / EVAL_NAME)
-        self.push_tables(_payload_step(payload))
+        self.eval(payload)
         for row in _read_jsonl(self.run_dir / GPU_ROWS_NAME):
             self.gpu_sample(row)
         self._write_heartbeat(datetime.now(timezone.utc))

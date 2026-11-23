@@ -30,7 +30,7 @@ from .dashboard_io import _all_rollout_records, _read_json, _read_jsonl, _read_t
 from .memory import MEMORY_METRIC_FIELDS
 from .stages import BANDS, UNSTAGED_STAGE
 
-__all__ = ["collect_dashboard"]
+__all__ = ["collect_dashboard", "target_steps"]
 
 METRICS_NAME = "metrics.jsonl"
 EVAL_NAME = "eval.json"
@@ -301,7 +301,7 @@ def _fake_target_steps(config: Mapping[str, Any]) -> int | None:
     return _positive_int(fake.get("steps"))
 
 
-def _target_steps(meta: Mapping[str, Any]) -> int | None:
+def target_steps(meta: Mapping[str, Any]) -> int | None:
     """Target steps derivable from meta.json, or None when it is not recorded.
 
     `mode` picks the formula. A fake run stops after `[fake] steps`, so it must
@@ -338,7 +338,7 @@ def _prompt_sample_target(meta: Mapping[str, Any]) -> int | None:
         return None
     schedule_step = _schedule_step_prompts(meta)
     if schedule_step is not None:
-        target = _target_steps(meta)
+        target = target_steps(meta)
         if target is None:
             return None
         return target * schedule_step
@@ -1036,7 +1036,7 @@ def _collect_run(
         "status": _status(eval_payload, run_dir / METRICS_NAME, now, alive),
         "metrics_age_seconds": _metrics_age(run_dir / METRICS_NAME, now),
         "steps_done": _steps_done(rows),
-        "target_steps": _target_steps(meta),
+        "target_steps": target_steps(meta),
         "start_batch_prompts": _start_batch_prompts(meta),
         "prompt_samples": _prompt_samples(rows),
         "prompt_sample_target": _prompt_sample_target(meta),

@@ -96,7 +96,8 @@ Use this when a container is not available.
 
 `setup.sh` installs what is missing and skips what is present. It checks Python
 3.12, the headers, `g++`, ninja, the CUDA toolkit that matches torch, and the
-screen. It fails with the exact fix command.
+screen. It fails with the exact fix command. The install uses the `vllm` and
+`tracking` extras, so `rlvr dashboard` can start MLflow from the same venv.
 
 `./setup.sh --check` reports without changing anything. `./setup.sh --fast`
 skips the optional convolution kernel.
@@ -201,12 +202,17 @@ The view is MLflow. `rlvr dashboard` starts the MLflow server on the runs root:
 .venv/bin/rlvr dashboard --runs-root runs --port 8081
 ```
 
-It serves `http://127.0.0.1:8081`. The store is `runs/mlflow.db` and the
+The server binds `0.0.0.0:8081`. The store is `runs/mlflow.db` and the
 artifacts are under `runs/mlartifacts`. The step series, the GPU child run and
 the tables are in the MLflow UI. A run writes its folder into the store as it
-trains. A failed store loses a copy and never stops training.
+trains. A failed store loses a copy and never stops training. A venv made
+before tracking was an extra needs one install:
 
-The tunnel is the same as before:
+```bash
+.venv/bin/python -m pip install -e '.[tracking]'
+```
+
+The tunnel points at `127.0.0.1:8081` on the host:
 
 ```bash
 ssh -N -L 100.67.80.52:8083:127.0.0.1:8081 -i ~/.ssh/id_ed25519 Ubuntu@<host>

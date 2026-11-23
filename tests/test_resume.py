@@ -117,8 +117,8 @@ def test_a_resumed_store_routes_writes_to_an_attached_mirror(tmp_path) -> None:
         def start(self, meta) -> None:
             self.started += 1
 
-        def step(self, step) -> None:
-            self.steps.append(step)
+        def step(self, row) -> None:
+            self.steps.append(row["step"])
 
         def eval(self, payload) -> None:
             pass

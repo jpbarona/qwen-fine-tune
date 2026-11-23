@@ -62,11 +62,11 @@ def test_rebuild_replays_the_local_files_without_duplicate_steps(
     old_gpu_run_id = mirror.gpu_run_id
 
     append_metric(run_dir, {"step": 1, "pass_rate": 0.25})
-    mirror.step(1)
+    mirror.step({"step": 1, "pass_rate": 0.25})
     append_metric(run_dir, {"step": 2, "pass_rate": 0.5})
-    mirror.step(2)
+    mirror.step({"step": 2, "pass_rate": 0.5})
     append_metric(run_dir, {"step": 3, "pass_rate": 0.75})
-    mirror.step(3)
+    mirror.step({"step": 3, "pass_rate": 0.75})
 
     # The store truncated the local files to the last checkpoint. The stale
     # step 3 must not survive the rebuild.
@@ -141,7 +141,7 @@ def test_step_writes_the_heartbeat_tags_on_both_runs(tmp_path: Path) -> None:
     mirror.start({"arm": "code-score", "timestamp": RUN_NAME})
 
     append_metric(run_dir, {"step": 1, "pass_rate": 0.25})
-    mirror.step(1)
+    mirror.step({"step": 1, "pass_rate": 0.25})
 
     client = MlflowClient()
     parent_tags = client.get_run(mirror.run_id).data.tags
@@ -190,6 +190,80 @@ def test_close_dead_sweeps_a_stale_child_run(tmp_path: Path) -> None:
     assert client.get_run(child.info.run_id).info.status == "FAILED"
     # The parent has no last write tag, so it is left alone.
     assert client.get_run(parent.info.run_id).info.status == "RUNNING"
+
+
+def test_start_writes_the_heartbeat_tags_on_both_runs(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score", "timestamp": RUN_NAME})
+
+    client = MlflowClient()
+    for run_id in (mirror.run_id, mirror.gpu_run_id):
+        tags = client.get_run(run_id).data.tags
+        assert tags.get("rlvr/last_write_utc")
+        assert tags.get("rlvr/heartbeat_seconds")
+    mirror.close()
+
+
+def test_rebuild_deletes_a_run_with_no_ids_file(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score", "timestamp": RUN_NAME})
+    old_run_id = mirror.run_id
+    old_gpu_run_id = mirror.gpu_run_id
+
+    append_metric(run_dir, {"step": 1, "pass_rate": 0.25})
+    mirror.step({"step": 1, "pass_rate": 0.25})
+    (run_dir / "mlflow.json").unlink()
+
+    mirror.rebuild()
+
+    client = MlflowClient()
+    ids = [
+        run.info.run_id
+        for run in client.search_runs(experiment_ids=[mirror.experiment_id])
+    ]
+    assert old_run_id not in ids
+    assert old_gpu_run_id not in ids
+    assert mirror.run_id in ids
+    mirror.close()
+
+
+def test_rebuild_deletes_the_old_runs_and_replays_the_tables(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    payload = {
+        "arm": "code-score",
+        "timestamp": RUN_NAME,
+        "step": 1,
+        "stop_reason": "max_steps",
+        "evaluations": [
+            {"step": 1, "kind": "final", "pass_at_1": 1.0, "count": 1}
+        ],
+    }
+    (run_dir / "eval.json").write_text(json.dumps(payload), encoding="utf-8")
+    (run_dir / "labels.jsonl").write_text(
+        json.dumps({"step": 1, "prompt_id": "p1", "label": "train"}) + "\n",
+        encoding="utf-8",
+    )
+
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score", "timestamp": RUN_NAME})
+    old_run_id = mirror.run_id
+    old_gpu_run_id = mirror.gpu_run_id
+
+    mirror.rebuild()
+
+    client = MlflowClient()
+    ids = [
+        run.info.run_id
+        for run in client.search_runs(experiment_ids=[mirror.experiment_id])
+    ]
+    assert old_run_id not in ids
+    assert old_gpu_run_id not in ids
+    assert mirror.run_id in ids
+    names = {item.path for item in client.list_artifacts(mirror.run_id)}
+    assert "labels.json" in names
+    mirror.close()
 
 
 def test_rebuild_logs_one_band_point_for_two_steps(

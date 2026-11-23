@@ -21,6 +21,9 @@ ROW_KEYS = {
     "fragmented_mib",
     "unaccounted_mib",
     "total_mib",
+    "idle",
+    "count",
+    "age",
 }
 
 
@@ -220,6 +223,44 @@ def test_read_gpu_parses_the_csv_output(monkeypatch) -> None:
         "memory_total": 49140.0,
         "temperature": 41.0,
     }
+
+
+def test_the_sample_carries_idle_count_and_age(tmp_path: Path) -> None:
+    readings = iter(
+        [None, None, {"utilization": 0.0}, {"utilization": 50.0}, None]
+    )
+    sampler = GpuSampler(
+        tmp_path / "gpu.jsonl",
+        None,
+        read=lambda: next(readings),
+        memory=fake_memory,
+    )
+
+    first = sampler._sample()
+    assert first["idle"] == 1
+    assert first["count"] == 1
+    assert first["age"] is None
+
+    second = sampler._sample()
+    assert second["idle"] == 1
+    assert second["count"] == 2
+    assert second["age"] is None
+
+    third = sampler._sample()
+    assert third["idle"] == 1
+    assert third["count"] == 3
+    assert third["age"] == 0.0
+
+    fourth = sampler._sample()
+    assert fourth["idle"] == 0
+    assert fourth["count"] == 4
+    assert fourth["age"] == 0.0
+
+    fifth = sampler._sample()
+    assert fifth["idle"] == 1
+    assert fifth["count"] == 5
+    assert fifth["age"] is not None
+    assert fifth["age"] >= 0.0
 
 
 def test_read_gpu_returns_none_when_the_binary_is_missing(monkeypatch) -> None:

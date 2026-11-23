@@ -259,7 +259,7 @@ class RunStore:
             self.metrics_path,
             json.dumps(dict(row), ensure_ascii=False, allow_nan=False),
         )
-        self.mirror.step(row["step"])
+        self.mirror.step(row)
 
     def append_control_event(self, event: Mapping[str, Any]) -> None:
         """Append one control-file event, so an edit is never silent."""

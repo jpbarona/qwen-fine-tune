@@ -164,6 +164,11 @@ class GpuSampler:
         self.rows: list[dict[str, Any]] = []
         self._stop = Event()
         self._thread: Thread | None = None
+        # The sample count and the last time a real utilization reading arrived.
+        # The age field measures from that reading, so a stretch of failed reads
+        # shows how long the strip has been blind.
+        self._samples = 0
+        self._last_good_at: float | None = None
 
     def start(self) -> None:
         """Start the sampling thread. A second call does nothing."""
@@ -205,12 +210,25 @@ class GpuSampler:
             remaining -= slice_seconds
 
     def _sample(self) -> dict[str, Any]:
-        """One row: the nvidia-smi reading, the allocator split and the time."""
+        """One row: the nvidia-smi reading, the allocator split and the time.
+
+        `idle` is 1 when utilization is zero or missing. `count` is the number
+        of samples this sampler has taken. `age` is seconds since the last good
+        utilization reading, or None when there has not been one yet.
+        """
         sample = self.read() or {}
         report = self.memory()
+        now = time.time()
+        utilization = sample.get("utilization")
+        if utilization is None:
+            age = None if self._last_good_at is None else now - self._last_good_at
+        else:
+            self._last_good_at = now
+            age = 0.0
+        self._samples += 1
         return {
-            "t": time.time(),
-            "utilization": sample.get("utilization"),
+            "t": now,
+            "utilization": utilization,
             "memory_used": sample.get("memory_used"),
             "memory_total": sample.get("memory_total"),
             "temperature": sample.get("temperature"),
@@ -219,6 +237,9 @@ class GpuSampler:
             "fragmented_mib": report.fragmented_mib,
             "unaccounted_mib": report.unaccounted_mib,
             "total_mib": report.total_mib,
+            "idle": 1 if utilization is None or utilization == 0 else 0,
+            "count": self._samples,
+            "age": age,
         }
 
     def _write(self, row: Mapping[str, Any]) -> None:

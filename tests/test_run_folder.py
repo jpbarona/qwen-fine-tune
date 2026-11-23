@@ -328,9 +328,9 @@ def test_a_metric_row_reaches_the_mirror(tmp_path: Path) -> None:
     from rlvr.runs import RunStore
 
     class Recorder:
-        steps = []
+        rows = []
         def start(self, meta): pass
-        def step(self, step): self.steps.append(step)
+        def step(self, row): self.rows.append(row)
         def eval(self, payload): pass
         def labels(self): pass
         def gpu_sample(self, row): pass
@@ -340,7 +340,7 @@ def test_a_metric_row_reaches_the_mirror(tmp_path: Path) -> None:
     recorder = Recorder()
     store = RunStore(tmp_path, "code-score", mirror=recorder)
     store.append_metric({"step": 3, "pass_rate": 0.5})
-    assert recorder.steps == [3]
+    assert recorder.rows == [{"step": 3, "pass_rate": 0.5}]
 
 
 def test_an_unterminated_complete_label_line_is_rewritten(tmp_path) -> None:

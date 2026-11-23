@@ -198,7 +198,7 @@ def test_two_evals_at_one_step_write_two_questions_files(tmp_path: Path) -> None
     mirror.close()
 
 
-def test_step_logs_stage_and_band_metrics(tmp_path: Path) -> None:
+def test_eval_logs_stage_and_band_metrics(tmp_path: Path) -> None:
     run_dir = make_run(tmp_path)
     rollout = {
         "step": 1,
@@ -214,7 +214,7 @@ def test_step_logs_stage_and_band_metrics(tmp_path: Path) -> None:
 
     mirror = MlflowMirror(tmp_path / "runs", run_dir)
     mirror.start({"arm": "code-score"})
-    mirror.step(1)
+    mirror.eval({"step": 1, "evaluations": [{"step": 1, "kind": "final"}]})
 
     client = MlflowClient()
     solved = client.get_metric_history(mirror.run_id, "stage/unstaged/solved")
@@ -364,6 +364,8 @@ def test_control_events_and_dropped_prompts_are_logged(tmp_path: Path) -> None:
         client, mirror.run_id, "control-events.json", tmp_path / "download"
     )
     assert [row["action"] for row in control] == ["apply"]
+    run = client.get_run(mirror.run_id)
+    assert run.data.tags["rlvr/dropped_count"] == "1"
     mirror.close()
 
 

@@ -13,10 +13,10 @@ imports without pushing tables. The walker only takes folders that hold a
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from .dashboard_io import _read_json
-from .mlflow_log import MlflowMirror
+from .mlflow_log import IDS_NAME, MlflowMirror
 
 __all__ = ["import_run", "run_dirs"]
 
@@ -43,18 +43,36 @@ def run_dirs(runs_root: Path, arm: str | None = None) -> Iterator[Path]:
                 yield run_dir
 
 
-def import_run(runs_root: Path, run_dir: Path) -> str:
+def _run_exists(client: Any, run_id: str) -> bool:
+    """True when the store still holds an active run with this id."""
+    try:
+        run = client.get_run(run_id)
+    except Exception:  # noqa: BLE001 - a missing or deleted run is not fatal
+        return False
+    return getattr(run.info, "lifecycle_stage", "active") != "deleted"
+
+
+def import_run(runs_root: Path, run_dir: Path) -> str | None:
     """Replay one old run folder into the store and return its MLflow run id.
 
     The mirror opens the parent run and the GPU child run. The replay copies
     every `metrics.jsonl` row at its step, pushes the tables once and closes the
     run. The replay helper is the same one a resumed run uses, so an old run and
     a rebuilt run follow one code path.
+
+    A folder whose `mlflow.json` names a run that still exists is skipped and
+    returns None. A second import of the same folder therefore adds no rows.
     """
     root = Path(runs_root)
     folder = Path(run_dir)
     meta = _read_json(folder / META_NAME)
+    ids = _read_json(folder / IDS_NAME)
     mirror = MlflowMirror(root, folder)
+    existing = ids.get("run_id")
+    if not isinstance(existing, str) or not existing:
+        existing = ""
+    if mirror._client is not None and existing and _run_exists(mirror._client, existing):
+        return None
     mirror.start(meta)
     if not mirror.run_id:
         raise RuntimeError(

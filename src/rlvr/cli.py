@@ -115,6 +115,7 @@ __all__ = [
     "build_prompts",
     "build_screen_test_runner",
     "build_test_runner",
+    "dashboard_argv",
     "eval_band_command",
     "load_synthetic_rows",
     "main",
@@ -952,18 +953,24 @@ def import_mlflow_command(args: argparse.Namespace) -> int:
             run_id = import_run(runs_root, run_dir)
         except Exception as error:  # noqa: BLE001 - report the folder and stop
             raise UsageError(f"cannot import {run_dir}: {error}") from error
-        print(f"imported {run_dir.parent.name}/{run_dir.name} -> {run_id}")
+        label = f"{run_dir.parent.name}/{run_dir.name}"
+        if run_id is None:
+            print(f"skipped {label} (already imported)")
+        else:
+            print(f"imported {label} -> {run_id}")
     return 0
 
 
-def dashboard_command(args: argparse.Namespace) -> int:
-    """Start the MLflow server on the runs root."""
-    if not 0 < args.port <= 65535:
-        raise UsageError(f"invalid port {args.port}")
-    runs_root = args.runs_root
-    runs_root.mkdir(parents=True, exist_ok=True)
-    (runs_root / "mlartifacts").mkdir(parents=True, exist_ok=True)
-    command = [
+def dashboard_argv(runs_root: Path, port: int) -> list[str]:
+    """The command that starts the MLflow server.
+
+    The interpreter that runs `rlvr` also runs MLflow as a module. The `mlflow`
+    console script is not on PATH on a bare host, so the module form is the one
+    that works from `.venv/bin/rlvr`.
+    """
+    return [
+        sys.executable,
+        "-m",
         "mlflow",
         "server",
         "--backend-store-uri",
@@ -973,11 +980,21 @@ def dashboard_command(args: argparse.Namespace) -> int:
         "--host",
         "0.0.0.0",
         "--port",
-        str(args.port),
+        str(port),
     ]
+
+
+def dashboard_command(args: argparse.Namespace) -> int:
+    """Start the MLflow server on the runs root."""
+    if not 0 < args.port <= 65535:
+        raise UsageError(f"invalid port {args.port}")
+    runs_root = args.runs_root
+    runs_root.mkdir(parents=True, exist_ok=True)
+    (runs_root / "mlartifacts").mkdir(parents=True, exist_ok=True)
+    command = dashboard_argv(runs_root, args.port)
     print(f"dashboard: http://0.0.0.0:{args.port}  (Ctrl+C to stop)")
     try:
-        os.execvp(command[0], command)
+        os.execv(command[0], command)
     except OSError as error:
         raise UsageError(f"cannot start mlflow server: {error}") from error
     return 0

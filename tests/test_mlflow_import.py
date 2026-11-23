@@ -73,6 +73,35 @@ def test_import_mlflow_walks_every_arm(tmp_path: Path) -> None:
     assert {run.data.tags["rlvr/arm"] for run in runs} == {"code-score", "hybrid"}
 
 
+def test_importing_the_same_folder_twice_skips_it(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_dir = make_run(runs_root, "code-score")
+
+    first = import_run(runs_root, run_dir)
+    second = import_run(runs_root, run_dir)
+
+    assert first is not None
+    assert second is None
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("rlvr")
+    assert experiment is not None
+    runs = client.search_runs([experiment.experiment_id])
+    parents = [run for run in runs if "rlvr/run_dir" in run.data.tags]
+    assert len(parents) == 1
+
+
+def test_import_mlflow_prints_a_skip_line(tmp_path: Path, capsys) -> None:
+    runs_root = tmp_path / "runs"
+    make_run(runs_root, "code-score")
+
+    assert main(["import-mlflow", "--runs-root", str(runs_root)]) == 0
+    capsys.readouterr()
+    assert main(["import-mlflow", "--runs-root", str(runs_root)]) == 0
+
+    out = capsys.readouterr().out
+    assert "skipped" in out
+
+
 def test_import_mlflow_honors_the_arm_filter(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     make_run(runs_root, "code-score")
