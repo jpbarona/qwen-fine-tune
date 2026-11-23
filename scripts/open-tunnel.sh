@@ -43,6 +43,11 @@ probe_interval="${RLVR_PROBE_INTERVAL:-2}"
 
 # The box is reached as Ubuntu@<host>. A caller that already supplied a user
 # keeps it. The cache key drops the user, so Ubuntu@box and box share a tunnel.
+# The server binds the tailnet address on this VM, not loopback. Read the
+# address from the interface so a changed tailnet address needs no edit here.
+bind_host="${MLFLOW_BIND_HOST:-$(ip -4 -o addr show tailscale0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)}"
+bind_host="${bind_host:-127.0.0.1}"
+
 target="$host"
 case "$target" in
   *@*) ;;
@@ -140,7 +145,7 @@ tunnel_loop() {
       -o ExitOnForwardFailure=yes \
       -o ServerAliveInterval=15 \
       -o ServerAliveCountMax=3 \
-      -R "$gateway:$port:127.0.0.1:$port" "$target" >>"$log_file" 2>&1 &
+      -R "$gateway:$port:$bind_host:$port" "$target" >>"$log_file" 2>&1 &
     current_child=$!
     wait "$current_child"
     current_child=""
@@ -153,7 +158,7 @@ tunnel_loop() {
 
 export -f tunnel_loop
 export -f cleanup_files
-export running_file pid_file state_file log_file gateway port target retry key_path
+export running_file pid_file state_file log_file gateway port bind_host target retry key_path
 
 start_ns="$(date +%s%N)"
 setsid bash -c tunnel_loop >/dev/null 2>&1 &
@@ -217,4 +222,4 @@ fi
 printf 'gateway=%s\nport=%s\n' "$gateway" "$port" >"$state_file"
 printf '%s\n' "$loop_pid" >"$pid_file"
 
-echo "tunnel to $bare_host forwards $gateway:$port to 127.0.0.1:$port (pid $loop_pid)"
+echo "tunnel to $bare_host forwards $gateway:$port to $bind_host:$port (pid $loop_pid)"

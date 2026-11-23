@@ -127,9 +127,8 @@ box. Run `open-tunnel.sh` again to reuse an open tunnel.
 .venv/bin/rlvr dashboard
 ```
 
-Open the UI through the Mac to VM tunnel on port 8081. That tunnel forwards
-`8081` on the Mac to `127.0.0.1:8081` on this VM. Then open
-`http://127.0.0.1:8081/`.
+Open the UI on the tailnet at `http://100.67.80.52:8081/`. On this VM the
+server binds the tailnet address, so no SSH tunnel is needed.
 
 `rlvr dashboard --local` starts the old local server on port 8099 with the store
 under the runs root. It starts a server from the local venv and needs no tunnel.

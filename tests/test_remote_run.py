@@ -98,6 +98,8 @@ def fake_environment(
     environment["FAKE_HEALTH_MODE"] = health_mode
     environment["FAKE_LAUNCH_STATUS"] = str(launch_status)
     environment["FAKE_DOCKER_LOG"] = str(tmp_path / "docker.log")
+    # Pin the forwarded address so the test never depends on this host's tailnet.
+    environment["MLFLOW_BIND_HOST"] = "127.0.0.1"
     environment["FAKE_DOCKER_ENV_LOG"] = str(tmp_path / "docker.env")
     environment["FAKE_CURL_LOG"] = str(tmp_path / "curl.log")
     environment["SSH_KEY"] = str(tmp_path / "id_ed25519")
