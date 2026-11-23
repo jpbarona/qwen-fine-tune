@@ -14,6 +14,7 @@ os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 from mlflow.tracking import MlflowClient  # noqa: E402
 import pytest  # noqa: E402
 
+import rlvr.mlflow_log as mlflow_log  # noqa: E402
 from rlvr.mlflow_log import MlflowMirror  # noqa: E402
 
 # MLflow's SQLAlchemy store configures its mappers with a loader option that
@@ -131,4 +132,95 @@ def test_start_closes_a_stale_run_for_the_same_arm(tmp_path: Path) -> None:
     mirror.start({"arm": "code-score", "timestamp": RUN_NAME})
 
     assert client.get_run(stale.info.run_id).info.status == "FAILED"
+    mirror.close()
+
+
+def test_step_writes_the_heartbeat_tags_on_both_runs(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score", "timestamp": RUN_NAME})
+
+    append_metric(run_dir, {"step": 1, "pass_rate": 0.25})
+    mirror.step(1)
+
+    client = MlflowClient()
+    for run_id in (mirror.run_id, mirror.gpu_run_id):
+        tags = client.get_run(run_id).data.tags
+        stamp = tags.get("rlvr/last_write_utc")
+        assert stamp is not None
+        written = datetime.fromisoformat(stamp)
+        assert written.tzinfo is not None
+        heartbeat = tags.get("rlvr/heartbeat_seconds")
+        assert heartbeat is not None
+        assert float(heartbeat) >= 0.0
+    mirror.close()
+
+
+def test_close_dead_sweeps_a_stale_child_run(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    client = MlflowClient()
+
+    parent = client.create_run(
+        mirror.experiment_id,
+        run_name="code-score-parent",
+        tags={"rlvr/arm": "code-score"},
+    )
+    child = client.create_run(
+        mirror.experiment_id,
+        run_name="code-score-parent-gpu",
+        tags={
+            "rlvr/arm": "code-score",
+            "rlvr/role": "gpu",
+            "mlflow.parentRunId": parent.info.run_id,
+        },
+    )
+    client.set_tag(child.info.run_id, "rlvr/last_write_utc", old_stamp())
+
+    mirror.close_dead("code-score")
+
+    assert client.get_run(child.info.run_id).info.status == "FAILED"
+    # The parent has no last write tag, so it is left alone.
+    assert client.get_run(parent.info.run_id).info.status == "RUNNING"
+
+
+def test_rebuild_logs_one_band_point_for_two_steps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = make_run(tmp_path)
+    write_metrics(
+        run_dir,
+        [
+            {"step": 1, "pass_rate": 0.25},
+            {"step": 2, "pass_rate": 0.5},
+        ],
+    )
+    dashboard = {
+        "runs": [
+            {
+                "series": {"steps": [1, 2], "pass_rate": [0.25, 0.5]},
+                "bands": [{"band": "easy", "pass_rate": 0.75}],
+                "stage_progress": {
+                    "points": [
+                        {"step": 1, "band": "easy", "solved": 1, "total": 4},
+                        {"step": 2, "band": "easy", "solved": 2, "total": 4},
+                    ]
+                },
+                "questions": {"rows": []},
+                "distributions": {},
+                "dropped": {},
+            }
+        ]
+    }
+    monkeypatch.setattr(mlflow_log, "collect_dashboard", lambda paths: dashboard)
+
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score", "timestamp": RUN_NAME})
+    mirror.rebuild()
+
+    client = MlflowClient()
+    band = client.get_metric_history(mirror.run_id, "band/easy/pass_rate")
+    assert [(point.step, point.value) for point in band] == [(2, 0.75)]
+    solved = client.get_metric_history(mirror.run_id, "stage/easy/solved")
+    assert [(point.step, point.value) for point in solved] == [(1, 1.0), (2, 2.0)]
     mirror.close()

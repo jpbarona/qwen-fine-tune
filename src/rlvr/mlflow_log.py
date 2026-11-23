@@ -86,6 +86,10 @@ SYSTEM_METRICS_INTERVAL = "1"
 #: is left alone by `close_dead`, because an old run may predate the sweep.
 LAST_WRITE_TAG = "rlvr/last_write_utc"
 
+#: The tag that records how long the run has been going. The value is a
+#: decimal string of seconds since the run started.
+HEARTBEAT_TAG = "rlvr/heartbeat_seconds"
+
 #: Fields copied from `meta.json` to a tag. The rest of the metadata goes to
 #: params, flattened with dots.
 TAG_FIELDS: tuple[tuple[str, str], ...] = (
@@ -143,6 +147,14 @@ def _number(value: Any) -> float | None:
 
 def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _start_seconds(info: Any) -> float:
+    """The run's start time as Unix seconds. A missing time falls back to now."""
+    started = getattr(info, "start_time", None)
+    if isinstance(started, (int, float)) and not isinstance(started, bool):
+        return float(started) / 1000.0
+    return datetime.now(timezone.utc).timestamp()
 
 
 def _age_seconds(stamp: str, now: datetime) -> float | None:
@@ -376,6 +388,10 @@ class MlflowMirror:
         self.gpu_run_id = ""
         self.experiment_id = ""
         self._gpu_step = 0
+        # The heartbeat is measured from the run's start time. A mirror that
+        # has not opened a run yet falls back to its construction time.
+        self._started_at = datetime.now(timezone.utc).timestamp()
+        self._gpu_started_at = self._started_at
         self._mlflow: Any = None
         self._client: Any = None
         self._question_steps: set[tuple[int, str]] = set()
@@ -452,6 +468,7 @@ class MlflowMirror:
         self._mlflow.set_experiment(EXPERIMENT_NAME)
         active = self._mlflow.start_run(run_name=name, **options)
         self.run_id = active.info.run_id
+        self._started_at = _start_seconds(active.info)
 
         self._mlflow.set_tags(tags)
         params = _params(meta)
@@ -477,6 +494,7 @@ class MlflowMirror:
             },
         )
         self.gpu_run_id = child.info.run_id
+        self._gpu_started_at = _start_seconds(child.info)
         self._owns_ids = True
         self._write_ids()
 
@@ -485,10 +503,13 @@ class MlflowMirror:
         """Copy the newest value of each series at `step`. Nulls are skipped.
 
         The stage progress and the per band pass rate are logged here too,
-        because the spec sends them to metrics rather than to a table.
+        because the spec sends them to metrics rather than to a table. The
+        heartbeat tags are refreshed on the parent and the child run, so a
+        crashed run leaves an old last write behind.
         """
         if not self.run_id:
             raise RuntimeError("the parent run has not started")
+        self._write_heartbeat(datetime.now(timezone.utc))
         dashboard = collect_dashboard([self.run_dir])
         runs = dashboard.get("runs") or []
         if not runs:
@@ -502,10 +523,29 @@ class MlflowMirror:
             if name != "steps" and isinstance(values, list) and values
         }
         self._log_row(row, index)
-        self._log_progress(index, run)
+        self._log_stage(index, run)
+        self._log_bands(index, run)
 
-    def _log_progress(self, step: int, run: Mapping[str, Any]) -> None:
-        """Log the stage progress and the per band pass rate at `step`."""
+    def _write_heartbeat(self, now: datetime) -> None:
+        """Refresh the last write and heartbeat tags on the parent and child.
+
+        The last write is an ISO 8601 UTC string. The heartbeat is a decimal
+        string of seconds since the run started. The child run gets its own
+        heartbeat, measured from the child's start time.
+        """
+        client = self._require_client()
+        stamp = now.isoformat()
+        heartbeat = max(0.0, now.timestamp() - self._started_at)
+        client.set_tag(self.run_id, LAST_WRITE_TAG, stamp)
+        client.set_tag(self.run_id, HEARTBEAT_TAG, f"{heartbeat:.3f}")
+        if not self.gpu_run_id:
+            return
+        child_heartbeat = max(0.0, now.timestamp() - self._gpu_started_at)
+        client.set_tag(self.gpu_run_id, LAST_WRITE_TAG, stamp)
+        client.set_tag(self.gpu_run_id, HEARTBEAT_TAG, f"{child_heartbeat:.3f}")
+
+    def _log_stage(self, step: int, run: Mapping[str, Any]) -> None:
+        """Log the stage progress points for one step."""
         client = self._require_client()
         if not self.run_id:
             raise RuntimeError("the parent run has not started")
@@ -523,6 +563,11 @@ class MlflowMirror:
                         self.run_id, f"stage/{_slug(band)}/{field}", value, step=step
                     )
 
+    def _log_bands(self, step: int, run: Mapping[str, Any]) -> None:
+        """Log the band pass rates once, at the final step."""
+        client = self._require_client()
+        if not self.run_id:
+            raise RuntimeError("the parent run has not started")
         for band_row in run.get("bands") or []:
             if not isinstance(band_row, Mapping):
                 continue
@@ -712,16 +757,23 @@ class MlflowMirror:
         dashboard = collect_dashboard([self.run_dir])
         runs = dashboard.get("runs") or []
         run = runs[0] if runs else {}
+        final_step: int | None = None
         for row in _read_jsonl(self.run_dir / METRICS_NAME):
             step = row.get("step")
             if not isinstance(step, int) or isinstance(step, bool):
                 continue
             self._log_row(row, step)
-            self._log_progress(step, run)
+            self._log_stage(step, run)
+            final_step = step
+        # The band table is a final summary, not a per step series. Log it
+        # once at the last step so the chart does not repeat one value.
+        if final_step is not None:
+            self._log_bands(final_step, run)
         payload = _read_json(self.run_dir / EVAL_NAME)
         self.push_tables(_payload_step(payload))
         for row in _read_jsonl(self.run_dir / GPU_ROWS_NAME):
             self.gpu_sample(row)
+        self._write_heartbeat(datetime.now(timezone.utc))
 
     @_guarded
     def close_dead(self, arm: str, older_than_seconds: float = 600.0) -> None:
