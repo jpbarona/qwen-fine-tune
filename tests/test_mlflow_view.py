@@ -32,22 +32,83 @@ pytestmark = pytest.mark.filterwarnings(
     "ignore:The ``noload`` loader strategy is deprecated:sqlalchemy.exc.SADeprecationWarning"
 )
 
-CORE = ["mean_reward", "pass_rate", "advantage_share"]
-SECTIONS = ["core", "quality", "optim", "speed", "data", "gpu"]
+#: The section order and membership from the spec, written out by hand so a
+#: change to the module fails here.
+EXPECTED: dict[str, list[str]] = {
+    "core": ["mean_reward", "pass_rate", "advantage_share"],
+    "quality": [
+        "pass_at_1/checkpoint",
+        "pass_at_1/final",
+        "mean_entropy",
+        "truncation_rate",
+        "group_spread",
+        "group_sd",
+    ],
+    "optim": ["grad_norm", "update_norm"],
+    "speed": [
+        "step_seconds",
+        "generation_seconds",
+        "scoring_seconds",
+        "scoring_wait_seconds",
+        "update_seconds",
+        "completion_tokens_per_second",
+        "sequences_per_second",
+    ],
+    "data": [
+        "prompts",
+        "train_prompts",
+        "parked_prompts",
+        "sequences",
+        "cache_hits",
+        "mean_completion_tokens",
+    ],
+    "gpu": [
+        "gpu_live_mib",
+        "gpu_cached_mib",
+        "gpu_fragmented_mib",
+        "gpu_total_mib",
+        "gpu_unaccounted_mib",
+    ],
+    "band": [
+        "band/very_easy/pass_rate",
+        "band/medium/pass_rate",
+        "band/hard/pass_rate",
+        "band/very_hard/pass_rate",
+    ],
+    "stage": [
+        "stage/very_easy/solved",
+        "stage/very_easy/total",
+        "stage/medium/solved",
+        "stage/medium/total",
+        "stage/hard/solved",
+        "stage/hard/total",
+        "stage/very_hard/solved",
+        "stage/very_hard/total",
+    ],
+}
 
 
 def test_build_view_state_puts_the_core_first() -> None:
     state = build_view_state()
 
     sections = state["compareRunSections"]
-    assert [section["name"] for section in sections] == SECTIONS
+    assert [section["name"] for section in sections] == list(EXPECTED)
     assert all(section["display"] is True for section in sections)
     assert all(section["isReordered"] is True for section in sections)
 
-    core_id = sections[0]["uuid"]
     cards = state["compareRunCharts"]
+    section_ids = {section["name"]: section["uuid"] for section in sections}
+    for name, metrics in EXPECTED.items():
+        found = [
+            card["metricKey"]
+            for card in cards
+            if card["metricSectionId"] == section_ids[name]
+        ]
+        assert found == metrics
+    assert len(cards) == sum(len(metrics) for metrics in EXPECTED.values())
+
+    core_id = section_ids["core"]
     core = [card for card in cards if card["metricSectionId"] == core_id]
-    assert [card["metricKey"] for card in core] == CORE
     assert all(card["type"] == "LINE" for card in core)
     assert all(card["xAxisKey"] == "step" for card in core)
     assert all(card["yAxisKey"] == "metric" for card in core)

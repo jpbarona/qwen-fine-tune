@@ -55,7 +55,16 @@ FILTER = "tags.`rlvr/run_dir` != ''"
 
 #: Section order on the page. The UI keeps this order because each section
 #: sets `isReordered`.
-_SECTIONS = ("core", "quality", "optim", "speed", "data", "gpu")
+_SECTIONS = (
+    "core",
+    "quality",
+    "optim",
+    "speed",
+    "data",
+    "gpu",
+    "band",
+    "stage",
+)
 
 #: The three headline charts, in order. Their ranges are fixed below.
 _CORE = ("mean_reward", "pass_rate", "advantage_share")
@@ -88,36 +97,35 @@ _SECTION_METRICS: dict[str, tuple[str, ...]] = {
     "quality": (
         "pass_at_1/checkpoint",
         "pass_at_1/final",
-        *_stage_metrics(),
-        *_band_metrics(),
-    ),
-    "optim": (
         "mean_entropy",
-        "grad_norm",
-        "update_norm",
+        "truncation_rate",
         "group_spread",
         "group_sd",
     ),
+    "optim": (
+        "grad_norm",
+        "update_norm",
+    ),
     "speed": (
+        "step_seconds",
         "generation_seconds",
         "scoring_seconds",
         "scoring_wait_seconds",
         "update_seconds",
-        "step_seconds",
         "completion_tokens_per_second",
         "sequences_per_second",
-        "rlvr/heartbeat_seconds",
     ),
     "data": (
-        "mean_completion_tokens",
-        "truncation_rate",
-        "cache_hits",
         "prompts",
-        "sequences",
         "train_prompts",
         "parked_prompts",
+        "sequences",
+        "cache_hits",
+        "mean_completion_tokens",
     ),
     "gpu": MEMORY_METRIC_FIELDS,
+    "band": _band_metrics(),
+    "stage": _stage_metrics(),
 }
 
 
