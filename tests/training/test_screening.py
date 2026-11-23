@@ -15,9 +15,9 @@ import pytest
 
 from rlvr.cli import build_generator, main
 from rlvr.core.config import load_config
-from rlvr.experiment import Generation, Outcome, Prompt
+from rlvr.training.experiment import Generation, Outcome, Prompt
 from rlvr.evaluation.fake import FakeGenerator, FakeTestRunner
-from rlvr.screening import (
+from rlvr.training.screening import (
     DEFAULT_SCREEN_SAMPLES,
     HISTOGRAM_LABELS,
     ROWS_NAME,
@@ -327,7 +327,7 @@ def test_the_screen_defaults_to_sixteen_samples(tmp_path: Path) -> None:
 
 
 def test_written_rows_keep_the_four_pool_fields(tmp_path: Path) -> None:
-    from rlvr.pools import from_rows
+    from rlvr.training.pools import from_rows
 
     result = screen(
         QUESTIONS,

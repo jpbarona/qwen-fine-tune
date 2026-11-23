@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from rlvr.reward import (
+from rlvr.training.reward import (
     ARM_REWARDS,
     ARMS,
     CLOSE_REWARD,

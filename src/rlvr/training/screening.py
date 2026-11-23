@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
 from rlvr.core.values import Prompt
-from .reward import all_tests_passed
+from rlvr.training.reward import all_tests_passed
 
 __all__ = [
     "DEFAULT_SCREEN_SAMPLES",

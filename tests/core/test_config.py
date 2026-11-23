@@ -722,7 +722,7 @@ def test_the_parked_pool_arm_configs_checkpoint_every_ten_steps(name: str) -> No
 
 
 def test_the_half_size_step_keeps_the_planned_parked_arithmetic() -> None:
-    from rlvr.schedule import Spread, Sweep
+    from rlvr.training.schedule import Spread, Sweep
 
     spread = load_config(REPO_ROOT / "configs" / "lfm-spread.toml")
     sweep = load_config(REPO_ROOT / "configs" / "lfm-sweep.toml")
@@ -743,7 +743,7 @@ def test_the_arm_config_accepts_a_screen_for_every_trained_prompt(
 
     from rlvr.cli import build_pools, build_prompts
     from rlvr.evaluation.data import load_split, prompt_id_for
-    from rlvr.screening import ScreenRow, ScreenStore
+    from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(REPO_ROOT / "configs" / "lfm-spread.toml")
     split = load_split(seed=config.split_seed)

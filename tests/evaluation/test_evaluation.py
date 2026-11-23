@@ -15,7 +15,7 @@ from rlvr.evaluation.evaluation import (
     select_eval_subset,
     subset_selector,
 )
-from rlvr.experiment import Prompt
+from rlvr.training.experiment import Prompt
 
 
 def make_prompts(count: int) -> list[Prompt]:

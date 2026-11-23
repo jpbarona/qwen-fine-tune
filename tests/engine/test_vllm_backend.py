@@ -14,7 +14,7 @@ import pytest
 
 from rlvr.cli import UsageError, build_generator
 from rlvr.core.config import ConfigError, load_config
-from rlvr.experiment import Generation
+from rlvr.training.experiment import Generation
 from rlvr.engine.vllm_backend import VLLMEngine, VLLMGenerator
 
 CONFIG = """\
@@ -34,7 +34,7 @@ steps = 1
 
 
 def prompt(index: int):
-    from rlvr.experiment import Prompt
+    from rlvr.training.experiment import Prompt
 
     return Prompt(prompt_id=f"p-{index}", problem=f"problem {index}")
 
@@ -205,7 +205,7 @@ def test_a_completion_that_reaches_the_cap_is_truncated_and_scores_minus_one(
     from types import SimpleNamespace
 
     from rlvr.core.config import load_config
-    from rlvr.experiment import Experiment, Outcome
+    from rlvr.training.experiment import Experiment, Outcome
 
     config = load_config(
         Path(__file__).resolve().parents[2] / "configs" / "lfm-spread.toml"

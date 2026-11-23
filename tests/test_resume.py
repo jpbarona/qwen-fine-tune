@@ -16,7 +16,7 @@ from rlvr.core.checkpoint import (
     write_checkpoint_manifest,
 )
 from rlvr.core.config import load_config
-from rlvr.experiment import Experiment, Prompt
+from rlvr.training.experiment import Experiment, Prompt
 from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner
 from rlvr.resume import ResumeError, validate_resume
 from rlvr.runs import RunStore

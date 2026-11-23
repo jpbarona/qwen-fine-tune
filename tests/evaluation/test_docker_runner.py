@@ -17,8 +17,8 @@ from rlvr.evaluation.docker_runner import (
     DockerTestRunner,
     docker_command,
 )
-from rlvr.experiment import Prompt
-from rlvr.experiment import Outcome
+from rlvr.training.experiment import Prompt
+from rlvr.training.experiment import Outcome
 
 PROMPT_ID = "mbpp-1"
 

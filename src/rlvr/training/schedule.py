@@ -44,8 +44,8 @@ import random
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence
 
-from .pools import DEFAULT_PROMOTION_BAR
-from .queues import PromptQueue
+from rlvr.training.pools import DEFAULT_PROMOTION_BAR
+from rlvr.training.queues import PromptQueue
 
 if TYPE_CHECKING:  # pragma: no cover - import used only by type checkers
     from rlvr.core.values import Prompt

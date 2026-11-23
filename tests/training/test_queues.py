@@ -9,9 +9,9 @@ resume.
 from __future__ import annotations
 
 from rlvr.core.config import load_config
-from rlvr.experiment import Experiment, Prompt
-from rlvr.pools import Pools
-from rlvr.queues import PromptQueue, queues_from_row, restore_queue
+from rlvr.training.experiment import Experiment, Prompt
+from rlvr.training.pools import Pools
+from rlvr.training.queues import PromptQueue, queues_from_row, restore_queue
 
 CONFIG_TEXT = """\
 [model]

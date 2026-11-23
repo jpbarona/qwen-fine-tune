@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from rlvr.core.config import ConfigError, default_config_path, load_config
-from rlvr.experiment import JudgeResult, Prompt
+from rlvr.training.experiment import JudgeResult, Prompt
 from rlvr.engine.judge import (
     DEFAULT_CONCURRENCY,
     DEFAULT_ENDPOINT,

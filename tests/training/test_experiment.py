@@ -15,7 +15,7 @@ import pytest
 
 from rlvr.core.batching import BatchSizePolicy
 from rlvr.core.config import load_config
-from rlvr.experiment import (
+from rlvr.training.experiment import (
     Experiment,
     Generation,
     JudgeResult,
@@ -25,7 +25,7 @@ from rlvr.experiment import (
 )
 from rlvr.engine.judge import UnrecoverableJudgeError
 from rlvr.core.memory import MemoryReport
-from rlvr.reward import RewardError
+from rlvr.training.reward import RewardError
 from rlvr.core.schema import RolloutRecord
 
 CONFIG_TEXT = """\
@@ -1418,7 +1418,7 @@ def test_records_metrics_and_evaluations_carry_the_unstaged_value(tmp_path) -> N
 
 
 def test_the_pool_train_members_are_the_only_prompts_trained(tmp_path) -> None:
-    from rlvr.pools import Pools
+    from rlvr.training.pools import Pools
 
     prompts = make_prompts(3)
     pools = Pools(
@@ -1435,7 +1435,7 @@ def test_the_pool_train_members_are_the_only_prompts_trained(tmp_path) -> None:
 
 
 def test_the_pool_holds_no_retired_prompt(tmp_path) -> None:
-    from rlvr.pools import Pools
+    from rlvr.training.pools import Pools
 
     prompts = make_prompts(3)
     pools = Pools(
@@ -1454,7 +1454,7 @@ def test_the_pool_holds_no_retired_prompt(tmp_path) -> None:
 
 
 def test_meta_records_the_pool_and_the_label_file(tmp_path) -> None:
-    from rlvr.pools import Pools
+    from rlvr.training.pools import Pools
 
     labels = tmp_path / "labels.jsonl"
     pools = Pools(
@@ -1581,8 +1581,8 @@ THREE_STEP_CONFIG = ONE_STEP_CONFIG.replace("steps = 1", "steps = 3")
 
 
 def test_a_spread_step_puts_train_and_parked_groups_in_one_update(tmp_path) -> None:
-    from rlvr.pools import Pools
-    from rlvr.schedule import Spread
+    from rlvr.training.pools import Pools
+    from rlvr.training.schedule import Spread
 
     prompts = make_prompts(2)
     pools = Pools(
@@ -1615,8 +1615,8 @@ def test_a_spread_step_puts_train_and_parked_groups_in_one_update(tmp_path) -> N
 
 
 def test_a_step_row_records_the_counts_and_the_advantage_share(tmp_path) -> None:
-    from rlvr.pools import Pools
-    from rlvr.schedule import Spread
+    from rlvr.training.pools import Pools
+    from rlvr.training.schedule import Spread
 
     prompts = make_prompts(2)
     pools = Pools(train=("mbpp-0000", "mbpp-0001"), retired=(), parked=(), samples=16)
@@ -1647,7 +1647,7 @@ def test_a_step_row_records_the_counts_and_the_advantage_share(tmp_path) -> None
 
 
 def test_the_group_signal_matches_the_binding_values() -> None:
-    from rlvr.experiment import _mean_group_signal
+    from rlvr.training.experiment import _mean_group_signal
 
     assert _mean_group_signal([[0.5, 0.5]]) == pytest.approx((0.0, 0.0))
     assert _mean_group_signal([[0.0, 1.0]]) == pytest.approx((0.5, 0.5))
@@ -1655,7 +1655,7 @@ def test_the_group_signal_matches_the_binding_values() -> None:
 
 
 def test_the_group_signal_treats_one_reward_as_zero_and_skips_a_missing_one() -> None:
-    from rlvr.experiment import _mean_group_signal
+    from rlvr.training.experiment import _mean_group_signal
 
     assert _mean_group_signal([[0.7]]) == pytest.approx((0.0, 0.0))
     assert _mean_group_signal([]) == (0.0, 0.0)
@@ -1665,8 +1665,8 @@ def test_the_group_signal_treats_one_reward_as_zero_and_skips_a_missing_one() ->
 
 
 def test_a_group_with_one_reward_counts_zero_advantage(tmp_path) -> None:
-    from rlvr.pools import Pools
-    from rlvr.schedule import Spread
+    from rlvr.training.pools import Pools
+    from rlvr.training.schedule import Spread
 
     prompts = make_prompts(1)
     pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
@@ -1687,8 +1687,8 @@ def test_a_group_with_one_reward_counts_zero_advantage(tmp_path) -> None:
 
 
 def test_promotion_at_two_passes_writes_a_label_and_moves_the_prompt(tmp_path) -> None:
-    from rlvr.pools import Pools
-    from rlvr.schedule import Spread
+    from rlvr.training.pools import Pools
+    from rlvr.training.schedule import Spread
 
     prompts = make_prompts(2)
     pools = Pools(
@@ -1730,8 +1730,8 @@ def test_promotion_at_two_passes_writes_a_label_and_moves_the_prompt(tmp_path) -
 
 
 def test_demotion_after_three_full_failure_groups(tmp_path) -> None:
-    from rlvr.pools import Pools
-    from rlvr.schedule import Spread
+    from rlvr.training.pools import Pools
+    from rlvr.training.schedule import Spread
 
     prompts = make_prompts(1)
     pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
@@ -1769,8 +1769,8 @@ def test_demotion_after_three_full_failure_groups(tmp_path) -> None:
 
 
 def test_a_resume_replays_the_label_file(tmp_path) -> None:
-    from rlvr.pools import Pools
-    from rlvr.schedule import Spread
+    from rlvr.training.pools import Pools
+    from rlvr.training.schedule import Spread
 
     prompts = make_prompts(2)
     pools = Pools(
@@ -1813,7 +1813,7 @@ def test_a_resume_replays_the_label_file(tmp_path) -> None:
 
 
 def test_the_config_builds_the_spread_schedule(tmp_path) -> None:
-    from rlvr.pools import Pools
+    from rlvr.training.pools import Pools
 
     prompts = make_prompts(2)
     pools = Pools(
@@ -1850,9 +1850,9 @@ def test_the_config_builds_the_spread_schedule(tmp_path) -> None:
 
 
 def test_a_schedule_run_writes_the_label_file_in_the_run_folder(tmp_path) -> None:
-    from rlvr.pools import Pools
+    from rlvr.training.pools import Pools
     from rlvr.runs import RunStore
-    from rlvr.schedule import Spread
+    from rlvr.training.schedule import Spread
 
     prompts = make_prompts(2)
     pools = Pools(
@@ -1884,8 +1884,8 @@ def test_a_schedule_run_writes_the_label_file_in_the_run_folder(tmp_path) -> Non
 
 
 def test_a_resume_continues_the_demotion_streak(tmp_path) -> None:
-    from rlvr.pools import Pools
-    from rlvr.schedule import Spread
+    from rlvr.training.pools import Pools
+    from rlvr.training.schedule import Spread
 
     prompts = make_prompts(1)
     pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
@@ -1918,8 +1918,8 @@ def test_a_resume_continues_the_demotion_streak(tmp_path) -> None:
 
 
 def test_a_saved_streak_below_the_bar_does_not_demote(tmp_path) -> None:
-    from rlvr.pools import Pools
-    from rlvr.schedule import Spread
+    from rlvr.training.pools import Pools
+    from rlvr.training.schedule import Spread
 
     prompts = make_prompts(1)
     pools = Pools(train=("mbpp-0000",), retired=(), parked=(), samples=16)
@@ -1945,7 +1945,7 @@ FOUR_STEP_CONFIG = ONE_STEP_CONFIG.replace("steps = 1", "steps = 4")
 
 
 def test_the_config_builds_the_sweep_schedule(tmp_path) -> None:
-    from rlvr.pools import Pools
+    from rlvr.training.pools import Pools
 
     prompts = make_prompts(2)
     pools = Pools(
@@ -1991,8 +1991,8 @@ def test_the_config_builds_the_sweep_schedule(tmp_path) -> None:
 
 
 def test_a_resume_mid_sweep_stays_in_the_sweep(tmp_path) -> None:
-    from rlvr.pools import Pools
-    from rlvr.schedule import Sweep
+    from rlvr.training.pools import Pools
+    from rlvr.training.schedule import Sweep
 
     prompts = make_prompts(4)
     pools = Pools(

@@ -23,7 +23,7 @@ from rlvr.core.batching import (
 )
 from rlvr.core.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
 from rlvr.core.config import default_config_path, load_config
-from rlvr.experiment import Experiment, Generation, Outcome, Prompt
+from rlvr.training.experiment import Experiment, Generation, Outcome, Prompt
 from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 from rlvr.core.memory import MemoryReport
 from rlvr.engine.qwen import group_advantages

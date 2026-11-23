@@ -17,7 +17,7 @@ import pytest
 from rlvr.core.batching import BatchSizePolicy
 from rlvr.core.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
 from rlvr.core.config import load_config
-from rlvr.experiment import Experiment, Generation, Outcome, Prompt
+from rlvr.training.experiment import Experiment, Generation, Outcome, Prompt
 from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 from rlvr.runs import RunStore
 from rlvr.core.schema import RolloutRecord

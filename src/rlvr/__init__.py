@@ -8,9 +8,9 @@ from __future__ import annotations
 
 __version__ = "0.1.0"
 
-from .experiment import Experiment, RunSummary
+from rlvr.training.experiment import Experiment, RunSummary
 from rlvr.core.values import Generation, JudgeResult, Outcome, Prompt
-from .reward import ARMS
+from rlvr.training.reward import ARMS
 from .runs import RunStore
 from rlvr.core.schema import RolloutRecord
 

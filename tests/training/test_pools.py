@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from rlvr.pools import DEFAULT_PROMOTION_BAR, Pools, PoolsError, from_rows
-from rlvr.screening import ScreenRow
+from rlvr.training.pools import DEFAULT_PROMOTION_BAR, Pools, PoolsError, from_rows
+from rlvr.training.screening import ScreenRow
 
 
 def row(prompt_id: str, passed: int, *, samples: int = 16) -> ScreenRow:

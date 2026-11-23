@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rlvr.budget import DEFAULT_THINKING_BUDGET
+from rlvr.training.budget import DEFAULT_THINKING_BUDGET
 
 
 def test_the_default_budget_is_one_fixed_value() -> None:

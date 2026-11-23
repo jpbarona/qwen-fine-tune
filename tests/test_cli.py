@@ -912,7 +912,7 @@ def test_build_pools_returns_none_without_screen_rows(tmp_path) -> None:
 
 def test_build_pools_reads_the_screen_rows(tmp_path) -> None:
     from rlvr.cli import build_pools
-    from rlvr.screening import ScreenRow, ScreenStore
+    from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(write_split_config(tmp_path))
     train, _ = build_prompts(config)
@@ -944,7 +944,7 @@ def test_build_pools_reads_the_screen_rows(tmp_path) -> None:
 
 def test_build_pools_rejects_a_screen_at_another_group_size(tmp_path) -> None:
     from rlvr.cli import UsageError, build_pools
-    from rlvr.screening import ScreenRow, ScreenStore
+    from rlvr.training.screening import ScreenRow, ScreenStore
 
     directory = tmp_path / "screen"
     store = ScreenStore(directory)
@@ -971,7 +971,7 @@ def test_build_pools_rejects_a_screen_at_another_group_size(tmp_path) -> None:
 
 def test_build_pools_accepts_the_rows_file(tmp_path) -> None:
     from rlvr.cli import build_pools
-    from rlvr.screening import ScreenRow, ScreenStore
+    from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(write_split_config(tmp_path))
     train, _ = build_prompts(config)
@@ -1009,7 +1009,7 @@ def test_an_empty_screen_fails_loudly(tmp_path) -> None:
 
 def test_a_screen_row_outside_the_training_split_fails_loudly(tmp_path) -> None:
     from rlvr.cli import UsageError, build_pools
-    from rlvr.screening import ScreenRow, ScreenStore
+    from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(write_split_config(tmp_path))
     train, _ = build_prompts(config)
@@ -1025,7 +1025,7 @@ def test_a_screen_row_outside_the_training_split_fails_loudly(tmp_path) -> None:
 
 def test_two_sample_counts_in_one_screen_fail_loudly(tmp_path) -> None:
     from rlvr.cli import UsageError, build_pools
-    from rlvr.screening import ScreenRow, ScreenStore
+    from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(write_split_config(tmp_path))
     train, _ = build_prompts(config)
@@ -1061,7 +1061,7 @@ def test_a_screen_path_must_be_a_folder_or_rows_file(tmp_path) -> None:
 def test_a_fake_run_uses_the_measured_pool_and_the_spread_schedule(
     tmp_path, capsys
 ) -> None:
-    from rlvr.screening import ScreenRow, ScreenStore
+    from rlvr.training.screening import ScreenRow, ScreenStore
 
     directory = tmp_path / "screen"
     path = tmp_path / "measured.toml"
@@ -1123,7 +1123,7 @@ def test_a_small_parked_pool_warns_about_the_short_block(tmp_path) -> None:
     from dataclasses import replace
 
     from rlvr.cli import spread_share_warning
-    from rlvr.pools import Pools
+    from rlvr.training.pools import Pools
 
     config = replace(
         load_config(write_split_config(tmp_path)),
@@ -1156,7 +1156,7 @@ def test_a_small_parked_pool_warns_about_the_short_block(tmp_path) -> None:
 
 def test_a_partial_screen_fails_loudly(tmp_path) -> None:
     from rlvr.cli import UsageError, build_pools
-    from rlvr.screening import ScreenRow, ScreenStore
+    from rlvr.training.screening import ScreenRow, ScreenStore
 
     config = load_config(write_split_config(tmp_path))
     train, _ = build_prompts(config)
@@ -1178,7 +1178,7 @@ def test_a_partial_screen_fails_loudly(tmp_path) -> None:
 
 def test_training_steps_uses_the_schedule_prompt_count(tmp_path) -> None:
     from rlvr.cli import training_steps
-    from rlvr.pools import Pools
+    from rlvr.training.pools import Pools
 
     path = tmp_path / "steps.toml"
     path.write_text(
@@ -1545,7 +1545,7 @@ class QuietExperiment:
         self.arm = kwargs["arm"]
 
     def run(self):
-        from rlvr.experiment import RunSummary
+        from rlvr.training.experiment import RunSummary
 
         self.store.write_meta({"arm": self.arm, "timestamp": self.store.timestamp})
         return RunSummary(

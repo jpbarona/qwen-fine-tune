@@ -75,9 +75,9 @@ from rlvr.core.checkpoint import (
 from rlvr.core.config import Config
 from rlvr.evaluation.evaluation import pass_at_1, select_eval_subset, subset_selector
 from rlvr.core.memory import MemoryReport
-from .pools import DEFAULT_PROMOTION_BAR, Pools
-from .queues import queues_from_row, restore_queue
-from .schedule import (
+from rlvr.training.pools import DEFAULT_PROMOTION_BAR, Pools
+from rlvr.training.queues import queues_from_row, restore_queue
+from rlvr.training.schedule import (
     GroupOutcome,
     LabelUpdate,
     Schedule,
@@ -90,7 +90,7 @@ from .schedule import (
     sweep_position_from_row,
     sweep_steps_from_row,
 )
-from .reward import (
+from rlvr.training.reward import (
     SYNTAX_ERROR_CLASS,
     all_tests_passed,
     check_arm_implemented,

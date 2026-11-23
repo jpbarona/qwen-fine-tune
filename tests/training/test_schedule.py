@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from rlvr.experiment import Prompt
-from rlvr.queues import queues_from_row, restore_queue
-from rlvr.schedule import (
+from rlvr.training.experiment import Prompt
+from rlvr.training.queues import queues_from_row, restore_queue
+from rlvr.training.schedule import (
     DEFAULT_DEMOTE_AFTER,
     DEFAULT_PROMOTION_BAR,
     GroupOutcome,
@@ -431,7 +431,7 @@ def test_a_bad_saved_streak_is_ignored() -> None:
 
 
 def test_streak_from_row_reads_a_saved_streak() -> None:
-    from rlvr.schedule import streak_from_row
+    from rlvr.training.schedule import streak_from_row
 
     assert streak_from_row({"prompt_id": "p", "streak": 9}) == ("p", 9)
     assert streak_from_row({"prompt_id": "p", "streak": -1}) is None

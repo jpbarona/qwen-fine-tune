@@ -518,7 +518,7 @@ def test_lfm_requires_its_transformers_5_tokenizer_runtime() -> None:
 
 
 def test_prompt_template_owns_tokenization_and_lfm_always_thinks() -> None:
-    from rlvr.experiment import Prompt
+    from rlvr.training.experiment import Prompt
     from rlvr.engine.model_profiles import LFM2, QWEN3
     from rlvr.engine.qwen import QwenGenerator
 
@@ -686,7 +686,7 @@ def test_cached_logprobs_match_masked_rollout_batch(monkeypatch, family) -> None
         pytest.skip("LFM2.5 requires the optional Transformers 5 environment")
     from types import SimpleNamespace
     from transformers import AutoModelForCausalLM
-    from rlvr.experiment import Prompt
+    from rlvr.training.experiment import Prompt
     from rlvr.engine.model_profiles import LFM2, QWEN3
     from rlvr.engine.qwen import CausalLMGenerator
 
@@ -787,7 +787,7 @@ def test_tiny_model_update_and_resume(tmp_path, family) -> None:
     from tokenizers.models import WordLevel
     from tokenizers.pre_tokenizers import Whitespace
     from transformers import AutoModelForCausalLM, PreTrainedTokenizerFast
-    from rlvr.experiment import Prompt
+    from rlvr.training.experiment import Prompt
     from rlvr.engine.qwen import CausalLMGenerator
 
     vocabulary = {
