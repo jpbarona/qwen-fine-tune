@@ -1108,3 +1108,20 @@ the `v1` segment lets a later layout change without breaking old prefixes.
 
 `rlvr import-mlflow` still replays an old folder by hand when one specific run
 has to appear.
+
+## D52. The modules live in packages, one layer each
+
+Status: implemented 23 November 2026.
+
+The flat module list made every module look equally related to every other.
+Nine modules imported the seam values from the training loop, which made the
+import graph cyclic. `config` imported five domain modules for constants, and
+the summary imported the reward module for an arm list.
+
+Decision: the package is split into `core`, `evaluation`, `engine`, `training`,
+`tracking`, `report` and `app`. The seam values live in `core.values`. Shared
+constants live in `core.constants`. The layers point one way, and `.importlinter`
+fails CI on an upward import. Tests mirror the packages.
+
+The training loop is still the orchestration point. The split moves code and
+breaks the cycles. It does not change the step loop.
