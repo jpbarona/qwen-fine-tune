@@ -6,6 +6,10 @@ files to a small pool of daemon worker threads. `close` stops the scan, runs
 one last scan, drains the queue, uploads the small run files, then writes
 `manifest.json` last.
 
+Every transfer, checkpoint or run file, holds one of two slots shared through
+`flock` files under `<runs root>/.upload-slots/`. Four arms on one box therefore
+run at most two uploads at once, whatever their per process concurrency.
+
 A checkpoint file is queued only when its step directory holds
 `checkpoint.json`. The trainer writes that manifest last, so a half written
 adapter or optimizer file is never uploaded. A file that fails its retries is
@@ -26,6 +30,7 @@ boto3 is not needed to run them.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import io
 import json
@@ -34,8 +39,9 @@ import queue
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 __all__ = [
     "MANIFEST_NAME",
@@ -49,6 +55,10 @@ MANIFEST_NAME = "manifest.json"
 
 #: Failure log written in the run folder when an upload gave up.
 UPLOAD_ERRORS_NAME = "upload-errors.log"
+
+#: Upload slots shared by every process that writes under one runs root.
+SLOT_DIR_NAME = ".upload-slots"
+SLOT_COUNT = 2
 
 #: Version of the manifest layout. Bump it when a reader would need new code.
 MANIFEST_SCHEMA = 1
@@ -137,6 +147,9 @@ class RunUploader:
         self.prefix = upload_prefix(destination, arm, started)
         self.bucket, key_prefix = _split_destination(self.prefix)
         self.key_prefix = key_prefix
+        # The run folder is <runs root>/<arm>/<started>. Four arms share one
+        # runs root, so the slots under it cap the whole box, not one process.
+        self.slot_dir = self.run_dir.parent.parent / SLOT_DIR_NAME
 
         self.errors: list[str] = []
 
@@ -365,9 +378,10 @@ class RunUploader:
             if attempt:
                 time.sleep(self.backoff * (2 ** (attempt - 1)))
             try:
-                self._client.put_object(
-                    Bucket=self.bucket, Key=key, Body=io.BytesIO(data)
-                )
+                with self._upload_slot():
+                    self._client.put_object(
+                        Bucket=self.bucket, Key=key, Body=io.BytesIO(data)
+                    )
             except Exception as error:
                 last = error
                 continue
@@ -375,6 +389,31 @@ class RunUploader:
         detail = f"{type(last).__name__}: {last}" if last is not None else "no attempt"
         self._record(f"{key}: {detail}")
         return False
+
+    @contextmanager
+    def _upload_slot(self) -> Iterator[None]:
+        """Hold one of the shared upload slots for the duration of the block.
+
+        The lock is a `flock` on a file under `<runs root>/.upload-slots/`, so
+        it holds across processes. A slot frees when the file handle closes,
+        and the kernel drops it if the process dies.
+        """
+        self.slot_dir.mkdir(parents=True, exist_ok=True)
+        while True:
+            for index in range(SLOT_COUNT):
+                handle = open(self.slot_dir / f"slot-{index}", "a")
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    handle.close()
+                    continue
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                    handle.close()
+                return
+            time.sleep(0.01)
 
     def _upload_manifest(self) -> None:
         with self._lock:

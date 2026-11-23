@@ -46,6 +46,27 @@ class StubS3:
             return [when for key, when in self.attempts if key.endswith(suffix)]
 
 
+class CountingStub(StubS3):
+    """A stub that records how many transfers run at the same moment."""
+
+    def __init__(self, delay: float = 0.05):
+        super().__init__()
+        self.delay = delay
+        self.active = 0
+        self.max_active = 0
+
+    def put_object(self, Bucket, Key, Body):
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            time.sleep(self.delay)
+            return super().put_object(Bucket, Key, Body)
+        finally:
+            with self.lock:
+                self.active -= 1
+
+
 class BlockingStub(StubS3):
     """A stub that holds one checkpoint upload until the test releases it."""
 
@@ -506,6 +527,52 @@ def test_close_marks_itself_closed_after_a_failure(tmp_path: Path, monkeypatch) 
 
     assert any("manifest boom" in error for error in uploader.errors)
     assert len(keys_of(client)) == calls
+
+
+def test_two_uploaders_share_two_cross_process_slots(tmp_path: Path) -> None:
+    first = make_run(tmp_path)
+    second = tmp_path / "runs" / "hybrid" / RUN_NAME
+    second.mkdir(parents=True)
+    for name in ("meta.json", "metrics.jsonl"):
+        (second / name).write_bytes((first / name).read_bytes())
+    for step in ("000010", "000011", "000012"):
+        make_checkpoint(first, step=step)
+        make_checkpoint(second, step=step)
+
+    client = CountingStub()
+    uploaders = [
+        RunUploader(
+            first,
+            "code-score",
+            RUN_NAME,
+            DESTINATION,
+            client=client,
+            concurrency=2,
+            interval=0.01,
+            retries=0,
+        ),
+        RunUploader(
+            second,
+            "hybrid",
+            RUN_NAME,
+            DESTINATION,
+            client=client,
+            concurrency=2,
+            interval=0.01,
+            retries=0,
+        ),
+    ]
+    for uploader in uploaders:
+        uploader.start()
+    for uploader in uploaders:
+        uploader.wait_for_idle(20.0)
+    for uploader in uploaders:
+        uploader.close()
+
+    assert client.max_active <= 2
+    assert client.max_active >= 2
+    assert (tmp_path / "runs" / ".upload-slots").is_dir()
+    assert all(not uploader.errors for uploader in uploaders)
 
 
 def test_worker_threads_are_daemons(tmp_path: Path) -> None:
