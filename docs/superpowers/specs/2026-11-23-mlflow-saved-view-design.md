@@ -7,8 +7,9 @@ Status: implemented on `feat/mlflow-saved-view`.
 
 The MLflow run page puts every model metric in one default section. The list is
 alphabetical. The axes auto-scale to the data. The three numbers that matter,
-mean reward, pass rate and advantage share, sit in the middle of 29 charts. A
-pass rate around 0.2 fills the chart, so the reader cannot tell that it is low.
+mean reward, pass rate and advantage share, sit in the middle of 29 model
+charts. A pass rate around 0.2 fills the chart, so the reader cannot tell that
+it is low.
 
 The run page layout lives in the browser, keyed by the run id. A second browser
 starts blank, and every new run starts blank.
