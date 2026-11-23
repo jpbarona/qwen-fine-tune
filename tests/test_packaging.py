@@ -36,8 +36,13 @@ def test_the_old_environment_extras_are_gone() -> None:
 def test_the_tracking_extra_pins_mlflow() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     extras = pyproject["project"]["optional-dependencies"]
-
-    assert extras["tracking"] == ["mlflow==3.18.0"]
+    expected = {"mlflow": "3.18.0", "boto3": "1.44.9"}
+    pins = {}
+    for requirement in extras["tracking"]:
+        name, _, version = requirement.partition("==")
+        assert version, f"{requirement!r} must pin an exact version"
+        pins[name] = version
+    assert pins == expected
 
 
 def test_no_extra_pins_torch_via_a_range() -> None:
