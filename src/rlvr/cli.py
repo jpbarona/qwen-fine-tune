@@ -58,6 +58,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping, Sequence
@@ -66,6 +67,7 @@ from .batching import START_PROMPTS, BatchSizePolicy
 from .config import (
     Config,
     ConfigError,
+    MlflowSettings,
     default_config_path,
     load_config,
     mlflow_settings_from_raw,
@@ -144,7 +146,7 @@ __all__ = [
     "screen_command",
     "spread_share_warning",
     "sync_mlflow_command",
-    "sync_tracking_uri",
+    "sync_mlflow_settings",
     "training_steps",
 ]
 
@@ -732,8 +734,6 @@ def run_command(args: argparse.Namespace) -> int:
     # train pool. Without a schedule the step size is the starting batch. The
     # fake path keeps the small `[fake] steps` count.
     if not args.fake:
-        from dataclasses import replace
-
         config = replace(
             config, steps=training_steps(config, train_prompts, pools)
         )
@@ -1047,27 +1047,32 @@ def import_mlflow_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def sync_tracking_uri(
+def sync_mlflow_settings(
     config_path: Path | None, meta: Mapping[str, Any]
-) -> str | None:
-    """The tracking URI for `sync-mlflow`, or None for the local store.
+) -> MlflowSettings:
+    """The `[mlflow]` settings for `sync-mlflow`.
 
     A `--config` file wins. Without one the `config` snapshot in `meta.json` is
     read through the same `[mlflow]` parser the run used, so a copied folder
-    points back at the store it came from. After that the
-    `MLFLOW_TRACKING_URI` environment variable is used. With none of the three,
-    the mirror writes to `mlflow.db` under the runs root.
+    points back at the store and the bucket it came from. When neither names a
+    tracking URI, `MLFLOW_TRACKING_URI` is used, and with none of those the
+    mirror writes to `mlflow.db` under the runs root.
     """
     if config_path is not None:
-        uri = load_config(config_path).mlflow.tracking_uri
-        if uri:
-            return uri
-    snapshot = meta.get("config")
-    if isinstance(snapshot, Mapping):
-        uri = mlflow_settings_from_raw(dict(snapshot)).tracking_uri
-        if uri:
-            return uri
-    return os.environ.get("MLFLOW_TRACKING_URI") or None
+        settings = load_config(config_path).mlflow
+    else:
+        snapshot = meta.get("config")
+        settings = (
+            mlflow_settings_from_raw(dict(snapshot))
+            if isinstance(snapshot, Mapping)
+            else MlflowSettings()
+        )
+    if settings.tracking_uri:
+        return settings
+    env_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if not env_uri:
+        return settings
+    return replace(settings, tracking_uri=env_uri)
 
 
 def sync_mlflow_command(args: argparse.Namespace) -> int:
@@ -1078,10 +1083,24 @@ def sync_mlflow_command(args: argparse.Namespace) -> int:
         raise UsageError(f"not a run folder (no meta.json): {run_dir}")
     meta = _read_json(meta_path)
     runs_root = run_dir.parent.parent
-    tracking_uri = sync_tracking_uri(args.config, meta)
+    settings = sync_mlflow_settings(args.config, meta)
+    # The same arm and timestamp source the mirror's own `start` uses.
+    arm = meta.get("arm")
+    if not isinstance(arm, str) or not arm:
+        arm = run_dir.parent.name
+    timestamp = meta.get("timestamp")
+    if not isinstance(timestamp, str) or not timestamp:
+        timestamp = run_dir.name
+    checkpoints_uri = (
+        upload_prefix(settings.bucket, arm, timestamp) if settings.bucket else None
+    )
     try:
         run_id = import_run(
-            runs_root, run_dir, rebuild=True, tracking_uri=tracking_uri
+            runs_root,
+            run_dir,
+            rebuild=True,
+            tracking_uri=settings.tracking_uri,
+            checkpoints_uri=checkpoints_uri,
         )
     except Exception as error:  # noqa: BLE001 - report the folder and stop
         raise UsageError(f"cannot sync {run_dir}: {error}") from error

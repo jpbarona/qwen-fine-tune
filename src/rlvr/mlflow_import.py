@@ -58,6 +58,7 @@ def import_run(
     *,
     rebuild: bool = False,
     tracking_uri: str | None = None,
+    checkpoints_uri: str | None = None,
 ) -> str | None:
     """Replay one old run folder into the store and return its MLflow run id.
 
@@ -73,12 +74,16 @@ def import_run(
 
     `tracking_uri` points the mirror at a store other than the local SQLite file
     under the runs root. Without it the mirror uses that local file.
+    `checkpoints_uri` is the bucket prefix the rebuilt run records in its
+    `rlvr/checkpoints_uri` tag, so a repair does not drop the pointer.
     """
     root = Path(runs_root)
     folder = Path(run_dir)
     meta = _read_json(folder / META_NAME)
     ids = _read_json(folder / IDS_NAME)
-    mirror = MlflowMirror(root, folder, tracking_uri=tracking_uri)
+    mirror = MlflowMirror(
+        root, folder, tracking_uri=tracking_uri, checkpoints_uri=checkpoints_uri
+    )
     existing = ids.get("run_id")
     if not isinstance(existing, str) or not existing:
         existing = ""

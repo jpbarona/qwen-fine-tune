@@ -1340,6 +1340,26 @@ def test_sync_mlflow_uses_the_tracking_uri_in_meta(tmp_path, monkeypatch):
     assert len(client.search_runs([experiment.experiment_id])) == 2
 
 
+def test_sync_mlflow_keeps_the_checkpoints_tag(tmp_path, monkeypatch):
+    """A repaired run must keep the bucket pointer its files live under."""
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    folder = make_run(tmp_path / "runs")
+    payload = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    payload["config"] = {"mlflow": {"bucket": "s3://bucket/runs/v1"}}
+    (folder / "meta.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    args = Namespace(run_dir=folder, config=None)
+    assert sync_mlflow_command(args) == 0
+    assert sync_mlflow_command(args) == 0
+
+    parents, children = parents_and_children()
+    assert len(parents) == 1
+    assert len(children) == 1
+    assert parents[0].data.tags["rlvr/checkpoints_uri"] == (
+        f"s3://bucket/runs/v1/code-score/{IMPORT_TIMESTAMP}"
+    )
+
+
 class StubUploader:
     """Records the calls a run makes on the uploader."""
 
