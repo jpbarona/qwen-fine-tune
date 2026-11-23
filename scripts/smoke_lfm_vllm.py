@@ -172,7 +172,7 @@ def main() -> int:
 
     import torch
 
-    from rlvr.vllm_backend import VLLMEngine
+    from rlvr.engine.vllm_backend import VLLMEngine
 
     free_bytes, total_bytes = torch.cuda.mem_get_info()
     budget = free_bytes - MEMORY_HEADROOM_BYTES

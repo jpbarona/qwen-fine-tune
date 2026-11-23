@@ -10,10 +10,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from rlvr.batching import BatchSizePolicy
-from rlvr.config import load_config
-from rlvr.control import ControlWatcher
-from rlvr.experiment import Experiment, Outcome, Prompt
+from rlvr.core.batching import BatchSizePolicy
+from rlvr.core.config import load_config
+from rlvr.core.control import ControlWatcher
+from rlvr.training.experiment import Experiment, Outcome, Prompt
 
 CONFIG_TEXT = """\
 [model]
@@ -43,7 +43,7 @@ class WritingGenerator:
         self.on_accumulate = None
 
     def generate(self, prompt, *, n, temperature):
-        from rlvr.experiment import Generation
+        from rlvr.training.experiment import Generation
 
         return [
             Generation(

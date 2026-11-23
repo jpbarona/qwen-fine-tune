@@ -90,7 +90,9 @@ binds `127.0.0.1:8081`, keeps its SQLite store at
 sudo deploy/install.sh
 ```
 
-`deploy/README.md` covers the install, the health check and the restore.
+`deploy/README.md` covers the install, the health check and the restore. The
+install needs sudo, which this VM does not allow. See [ENVIRONMENT.md](ENVIRONMENT.md) for
+how the server actually runs here.
 
 The box reaches the server through an SSH reverse tunnel opened by this VM. The
 tunnel binds the Docker bridge gateway on the box, so the training container
@@ -125,9 +127,9 @@ box. Run `open-tunnel.sh` again to reuse an open tunnel.
 .venv/bin/rlvr dashboard
 ```
 
-Open the UI through the Mac to VM tunnel on port 8083. That tunnel already
-forwards `8083` on the Mac to `127.0.0.1:8081` on this VM. Then open
-`http://127.0.0.1:8083/`.
+Open the UI through the Mac to VM tunnel on port 8081. That tunnel forwards
+`8081` on the Mac to `127.0.0.1:8081` on this VM. Then open
+`http://127.0.0.1:8081/`.
 
 `rlvr dashboard --local` starts the old local server on port 8099 with the store
 under the runs root. It starts a server from the local venv and needs no tunnel.

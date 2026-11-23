@@ -173,3 +173,7 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 155. rlvr saved-view writes the tag and prints the Chart view route
 156. The tag holds eight sections and fixed ranges on the core three
 157. A second saved-view run replaces the tag, so the store keeps one view
+158. Docs get one home per fact, so AGENTS.md and README cannot drift
+159. SPEC, PLAN and SMOKE are deleted as superseded history
+160. README test duration is corrected to five minutes
+161. A test checks every relative Markdown link resolves

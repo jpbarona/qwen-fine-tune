@@ -1,0 +1,13 @@
+[importlinter]
+root_package = rlvr
+
+[importlinter:contract:layers]
+name = The package layers point one way
+type = layers
+layers =
+    rlvr.app
+    rlvr.report
+    rlvr.tracking
+    rlvr.training
+    rlvr.engine | rlvr.evaluation
+    rlvr.core

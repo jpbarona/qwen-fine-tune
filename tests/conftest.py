@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.batching import BatchSizePolicy
-from rlvr.config import load_config
-from rlvr.experiment import Experiment, Prompt
-from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
-from rlvr.runs import RunStore
+from rlvr.core.batching import BatchSizePolicy
+from rlvr.core.config import load_config
+from rlvr.training.experiment import Experiment, Prompt
+from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
+from rlvr.tracking.runs import RunStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

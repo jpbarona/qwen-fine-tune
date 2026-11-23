@@ -3,6 +3,7 @@
 Start at `docs/INDEX.md`. It points at every design, plan, report and data
 file.
 
+- `docs/ENVIRONMENT.md`: this VM. Tool paths, tokens, MLflow, the test caveat.
 - `docs/DECISIONS.md`: numbered decisions, newest last.
 - `docs/journal.md`: one line per problem and fix.
 - `deploy/`: the server unit, the backup timer and the install script.

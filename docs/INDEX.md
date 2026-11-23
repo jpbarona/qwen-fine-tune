@@ -3,18 +3,22 @@
 The study compares GRPO training on a small code model across two parked-prompt
 schedules. Code sits in the repository root. This folder holds the reasoning.
 
-## Current work
-
-- [PR #4](https://github.com/jpbarona/qwen-fine-tune/pull/4): the store moves to
-  this VM, live metrics over one SSH tunnel, checkpoints to the bucket.
-
 ## Start here
 
-- [../README.md](../README.md): install, run, MLflow dashboard, data layout, contracts.
-- `DECISIONS.md`: choices as they were made, newest last. D25 onward covers the
-  parked-pool study, and D47 onward covers the remote store.
+- [../README.md](../README.md): what the study is, install, run, data layout,
+  contracts, the code map.
+- [../AGENTS.md](../AGENTS.md): rules for an agent working in this repository.
+- `ENVIRONMENT.md`: this VM. Tool paths, tokens, MLflow, the test caveat.
+- `DECISIONS.md`: choices as they were made, newest last.
 - `IDEAS.md`: proposals, two chunks each, newest first inside a topic.
 - `journal.md`: one line per problem and fix, newest at the bottom.
+
+## Current work
+
+- [PR #5](https://github.com/jpbarona/qwen-fine-tune/pull/5): the flat modules
+  split into layered packages.
+- [PR #4](https://github.com/jpbarona/qwen-fine-tune/pull/4): the store moved to
+  this VM, live metrics over one SSH tunnel, checkpoints to the bucket.
 
 ## Designs and plans
 
@@ -27,7 +31,7 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 - [superpowers/plans/2026-11-23-mlflow-saved-view.md](superpowers/plans/2026-11-23-mlflow-saved-view.md):
   the task breakdown for that change.
 - [superpowers/specs/2026-11-23-mlflow-design.md](superpowers/specs/2026-11-23-mlflow-design.md):
-  the MLflow store, the parent and child runs, the tables and the importer.
+  the store, the parent and child runs, the tables and the importer.
 - [superpowers/plans/2026-11-23-mlflow.md](superpowers/plans/2026-11-23-mlflow.md):
   the task breakdown for that change.
 - [superpowers/specs/2026-11-22-parked-and-train-queues-design.md](superpowers/specs/2026-11-22-parked-and-train-queues-design.md):
@@ -35,13 +39,14 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 - [superpowers/plans/2026-11-22-parked-and-train-queues.md](superpowers/plans/2026-11-22-parked-and-train-queues.md):
   the task breakdown for that change.
 - [superpowers/plans/2026-11-21-parked-pools.md](superpowers/plans/2026-11-21-parked-pools.md):
-  the earlier breakdown for measured pools and the two arms.
+  measured pools and the two arms.
 - [../issues/19-parked-pools-spec.md](../issues/19-parked-pools-spec.md): the
   pool spec. Tickets `20` to `26` cover that build.
 - [superpowers/specs/2026-11-19-lfm-all-linear-lora-design.md](superpowers/specs/2026-11-19-lfm-all-linear-lora-design.md):
   all-linear LoRA on LFM.
-- `SPEC.md`: the deferred four-arm sampling study.
-- `PLAN.md`: the original ticket breakdown.
+
+Older plans and specs stay in place as the record of what was decided. Paths
+inside them name the flat module layout that PR #5 replaced.
 
 ## Deploy and scripts
 
@@ -61,13 +66,14 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 
 ## Reports
 
-- `postmortem-run17.md` and `postmortem-run17.pdf`: why the 313-step curve looked
-  flat.
-- `6.1-sol-xhigh-pass.md`: repository layout, LFM support, throughput, and the
-  validation record.
-- `SMOKE.md`: the smoke run result.
-- `DEPLOY.md`: host, user, key, and run commands.
-- `JUDGE_MODEL.md`: judge model research, kept local.
+Reports are historical. Numbers and paths inside them describe the day they
+were written.
+
+- `postmortem-run17.md` and `postmortem-run17.pdf`: why the 313-step curve
+  looked flat.
+- `DEPLOY.md`: the GPU box workflow. Host, user, keys, tunnel and run commands.
+- `JUDGE_MODEL.md`: judge model research. Kept local, ignored by git, and not
+  linked from here.
 
 ## Data
 
@@ -77,7 +83,7 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 - `../data/difficulty_labels.jsonl`: one band per training row.
 - `../screens/mbpp-base/`: the base-model screen. Ignored by git, restored from
   the bucket. See the README.
-- `../runs/`: the box run folders. The live store is
+- `../runs/`: local run folders. The live store is
   `/home/opencode/Work/rl-grpo-data/mlflow/mlflow.db` and is rebuildable from
   these folders.
 - `../configs/`: arm configs, starting with `lfm-spread.toml` and
@@ -88,6 +94,3 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 - `/home/opencode/Work/rl-grpo-data/`: the data index and two reports. The bulk
   of the run data is in the Hetzner bucket under `dumps/`, and new runs upload
   under `runs/v1/`.
-
-To refresh the docs, bring `DECISIONS.md` and `journal.md` up to date, fix this
-index, and leave the code alone.

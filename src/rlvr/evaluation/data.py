@@ -1,0 +1,557 @@
+"""The MBPP dataset, the fixed train/test split, and the prompt format.
+
+The committed file `data/mbpp_full.jsonl` holds the MBPP `full` configuration:
+373 train, 88 validation, and 500 test rows, 961 in total. Three very easy rows
+were removed on 2026-11-19 because every attempt on them failed: `mbpp-535`,
+`mbpp-536`, `mbpp-679`. The 10 few-shot
+prompt rows from the same configuration are not part of the file. They are
+skipped by the loader if a raw export still carries them.
+
+The split comes from `data/split_seed1234.json`, the id lists cut from the
+original dataset with seed 1234. Every arm calls `load_split` and reads the same
+711 train and 250 test questions. Removing a row cannot move a held-out
+question, so past evaluations stay comparable.
+
+The prompt format is one function, `format_prompt`, used by every arm through
+`prompt_for_question`. It is deliberately short: the problem text, the name of
+the function the hidden tests call, and a request for a Python function. The
+name comes from the first test, because the MBPP problem text often omits it and
+a wrong name fails every test with `NameError`. Test bodies and expected values
+never go into the prompt.
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+import random
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable
+
+from rlvr.core.values import Prompt
+from rlvr.core.stages import BANDS, DEFAULT_LABELS_PATH
+
+__all__ = [
+    "DEFAULT_DATA_PATH",
+    "DEFAULT_LABELS_PATH",
+    "DEFAULT_SPLIT_PATH",
+    "PROMPT_TEMPLATE",
+    "TEST_SIZE",
+    "TOTAL_QUESTIONS",
+    "TRAIN_SIZE",
+    "DatasetError",
+    "DatasetSplit",
+    "MBPPQuestion",
+    "expected_call_arity",
+    "expected_function_name",
+    "format_prompt",
+    "load_dataset",
+    "load_difficulty_labels",
+    "load_split",
+    "pinned_split",
+    "prompt_for_question",
+    "prompt_id_for",
+    "prompts_for_questions",
+    "split_questions",
+]
+
+#: Repo-relative path of the committed offline dataset.
+DEFAULT_DATA_PATH = Path(__file__).resolve().parents[3] / "data" / "mbpp_full.jsonl"
+
+#: Counts for the full MBPP configuration.
+TOTAL_QUESTIONS = 961
+TRAIN_SIZE = 711
+TEST_SIZE = 250
+
+#: The held-out cut is pinned to its first assignment. Three questions were
+#: removed from the training pool on 2026-11-19 because the model could never
+#: pass them. Re-shuffling the remaining rows would have replaced most of the
+#: held-out set, so the ids are stored instead. Produced from seed 1234 over
+#: the original 964 rows, with the three removed ids dropped from the training
+#: side. No held-out id changed.
+DEFAULT_SPLIT_PATH = Path(__file__).resolve().parents[3] / "data" / "split_seed1234.json"
+
+#: The seed the pinned split was cut with. A config that asks for another seed
+#: gets a fresh cut, so a label file built for the pinned one fails its check.
+PINNED_SPLIT_SEED = 1234
+
+#: Splits that belong in the merged dataset. `prompt` holds the 10 few-shot
+#: examples and is always skipped.
+SOURCE_SPLITS: tuple[str, ...] = ("train", "validation", "test")
+
+#: The single prompt format used by every arm. The problem text is inserted
+#: verbatim. Do not add tests, hints, or example solutions here.
+PROMPT_TEMPLATE = (
+    "Write a Python function that solves the problem below.\n\n"
+    "Problem: {text}\n\n"
+    "Output only the function definition. No prose and no code fences."
+)
+
+#: The same prompt, with the name the hidden tests call. Without the name the
+#: model invents one and every test fails with `NameError`.
+NAMED_PROMPT_TEMPLATE = (
+    "Write a Python function named `{name}` that solves the problem below.\n\n"
+    "Problem: {text}\n\n"
+    "Output only the function definition. No prose and no code fences."
+)
+
+#: The same prompt, with the name and the argument count. A missing count made
+#: the model write one parameter where the tests pass two, which fails every
+#: test with `TypeError`. The wording names the tests as the source, so the
+#: model cannot read it as a claim about its own signature and argue with it.
+ARITY_PROMPT_TEMPLATE = (
+    "Write a Python function named `{name}`. The tests call it with exactly "
+    "{arity} {noun}.\n\n"
+    "Problem: {text}\n\n"
+    "Output only the function definition. No prose and no code fences."
+)
+
+#: Keywords that can be followed by a bracket, for example `assert (`.
+_KEYWORDS = frozenset(
+    {
+        "assert", "if", "elif", "while", "for", "return", "not", "and", "or",
+        "in", "is", "lambda", "with", "except", "yield", "raise", "del",
+    }
+)
+
+#: Any call in a test, for example `do_thing(` in `assert do_thing(1) == 2`.
+_CALL = re.compile(r"([A-Za-z_]\w*)\s*\(")
+
+#: Names that can appear in a test but are rarely the function under test.
+_BUILTIN_NAMES = frozenset(
+    {
+        "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes",
+        "callable", "chr", "classmethod", "complex", "dict", "dir", "divmod",
+        "enumerate", "eval", "exec", "filter", "float", "format", "frozenset",
+        "getattr", "globals", "hasattr", "hash", "help", "hex", "id", "input",
+        "int", "isinstance", "issubclass", "iter", "len", "list", "locals",
+        "map", "max", "memoryview", "min", "next", "object", "oct", "open",
+        "ord", "pow", "print", "property", "range", "repr", "reversed", "round",
+        "set", "setattr", "slice", "sorted", "staticmethod", "str", "sum",
+        "super", "tuple", "type", "vars", "zip",
+        # Exceptions and assertion helpers a test may raise or call.
+        "AssertionError", "Exception", "ValueError", "TypeError",
+        "isclose", "assertEqual", "assertAlmostEqual", "assertRaises",
+        "assertTrue", "assertFalse",
+    }
+)
+
+
+class DatasetError(ValueError):
+    """The dataset file or split request is invalid."""
+
+
+@dataclass(frozen=True)
+class MBPPQuestion:
+    """One MBPP row. The tests stay on the runner side, never in the prompt.
+
+    `prompt_id` is empty for an MBPP row and derived from the task id. A
+    synthetic row sets it, because its numeric id lives in its own range and
+    the prompt id must say where it came from.
+    """
+
+    task_id: int
+    text: str
+    test_list: tuple[str, ...]
+    test_setup_code: str = ""
+    source_split: str = ""
+    prompt_id: str = ""
+
+
+@dataclass(frozen=True)
+class DatasetSplit:
+    """The fixed train and test cut. Every arm reads this same object."""
+
+    train: tuple[MBPPQuestion, ...]
+    test: tuple[MBPPQuestion, ...]
+
+
+def _question_from_row(row: object, line_number: int) -> MBPPQuestion | None:
+    if not isinstance(row, dict):
+        raise DatasetError(f"line {line_number}: row must be an object")
+
+    source_split = row.get("source_split", "")
+    if not isinstance(source_split, str):
+        raise DatasetError(f"line {line_number}: 'source_split' must be a string")
+    if source_split == "prompt":
+        return None
+    if source_split not in SOURCE_SPLITS:
+        raise DatasetError(
+            f"line {line_number}: unknown source_split {source_split!r}, "
+            f"expected one of {', '.join(SOURCE_SPLITS)} or 'prompt'"
+        )
+
+    task_id = row.get("task_id")
+    if isinstance(task_id, bool) or not isinstance(task_id, int):
+        raise DatasetError(f"line {line_number}: 'task_id' must be an integer")
+
+    text = row.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise DatasetError(f"line {line_number}: 'text' must be a non-empty string")
+
+    tests = row.get("test_list")
+    if not isinstance(tests, list) or not all(isinstance(test, str) for test in tests):
+        raise DatasetError(f"line {line_number}: 'test_list' must be a list of strings")
+
+    setup = row.get("test_setup_code", "")
+    if not isinstance(setup, str):
+        raise DatasetError(f"line {line_number}: 'test_setup_code' must be a string")
+
+    return MBPPQuestion(
+        task_id=task_id,
+        text=text,
+        test_list=tuple(tests),
+        test_setup_code=setup,
+        source_split=source_split,
+    )
+
+
+def load_dataset(path: str | Path = DEFAULT_DATA_PATH) -> tuple[MBPPQuestion, ...]:
+    """Read the merged dataset in train, validation, test order.
+
+    Raises DatasetError on a missing file, a bad row, or a duplicate task id.
+    """
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise DatasetError(f"dataset file not found: {file_path}")
+
+    questions: list[MBPPQuestion] = []
+    seen: set[int] = set()
+    ordering = {name: index for index, name in enumerate(SOURCE_SPLITS)}
+    try:
+        with file_path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise DatasetError(
+                        f"line {line_number}: not valid JSON: {error}"
+                    ) from error
+                question = _question_from_row(row, line_number)
+                if question is None:
+                    continue
+                if question.task_id in seen:
+                    raise DatasetError(
+                        f"line {line_number}: duplicate task_id {question.task_id}"
+                    )
+                seen.add(question.task_id)
+                questions.append(question)
+    except OSError as error:
+        raise DatasetError(f"cannot read dataset file {file_path}: {error}") from error
+
+    questions.sort(key=lambda question: (ordering[question.source_split], question.task_id))
+    return tuple(questions)
+
+
+def split_questions(
+    questions: tuple[MBPPQuestion, ...] | list[MBPPQuestion],
+    seed: int,
+    train_size: int = TRAIN_SIZE,
+    test_size: int = TEST_SIZE,
+) -> DatasetSplit:
+    """Cut the fixed split. The same questions and seed always give the same cut.
+
+    Sorting by task id before shuffling makes the result independent of the
+    input order, so a different file order cannot change an arm's data.
+    """
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise DatasetError(f"seed must be an integer, got {seed!r}")
+    if train_size < 0 or test_size < 0:
+        raise DatasetError("split sizes must not be negative")
+
+    expected = train_size + test_size
+    if len(questions) != expected:
+        raise DatasetError(
+            f"expected {expected} questions for a {train_size}/{test_size} split, "
+            f"got {len(questions)}"
+        )
+
+    ids = [question.task_id for question in questions]
+    if len(set(ids)) != len(ids):
+        raise DatasetError("questions contain duplicate task ids")
+
+    ordered = sorted(questions, key=lambda question: question.task_id)
+    random.Random(seed).shuffle(ordered)
+    return DatasetSplit(
+        train=tuple(ordered[:train_size]),
+        test=tuple(ordered[train_size:expected]),
+    )
+
+
+def load_split(
+    path: str | Path = DEFAULT_DATA_PATH,
+    *,
+    seed: int,
+    train_size: int = TRAIN_SIZE,
+    test_size: int = TEST_SIZE,
+    split_path: str | Path | None = None,
+) -> DatasetSplit:
+    """Load the merged dataset and cut it. The entry point every arm uses.
+
+    The committed dataset uses the pinned split file when the seed is the
+    pinned one. A missing pinned file is an error, because a fresh cut would
+    move the held-out questions and break past evaluations. Any other dataset
+    path gets a fresh cut unless the caller passes `split_path`.
+    """
+    questions = load_dataset(path)
+    if split_path is None:
+        if Path(path).resolve() != DEFAULT_DATA_PATH:
+            return split_questions(questions, seed, train_size, test_size)
+        pinned = DEFAULT_SPLIT_PATH
+    else:
+        pinned = Path(split_path)
+    if seed != PINNED_SPLIT_SEED:
+        return split_questions(questions, seed, train_size, test_size)
+    if not pinned.is_file():
+        raise DatasetError(f"split file not found: {pinned}")
+    return pinned_split(questions, pinned, train_size, test_size)
+
+
+def pinned_split(
+    questions: tuple[MBPPQuestion, ...] | list[MBPPQuestion],
+    split_path: str | Path,
+    train_size: int = TRAIN_SIZE,
+    test_size: int = TEST_SIZE,
+) -> DatasetSplit:
+    """Cut the dataset using the stored id lists.
+
+    Every pinned id must exist in the dataset and every dataset id must be
+    pinned. A mismatch means the two disagree, which would silently change a
+    run's data.
+    """
+    try:
+        raw = json.loads(Path(split_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DatasetError(f"cannot read split file {split_path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise DatasetError("split file must hold an object with train and test")
+    train_ids = raw.get("train")
+    test_ids = raw.get("test")
+    for name, ids in (("train", train_ids), ("test", test_ids)):
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise DatasetError(f"split file field {name!r} must be a list of ids")
+        if len(set(ids)) != len(ids):
+            raise DatasetError(f"split file field {name!r} repeats an id")
+
+    if len(train_ids) != train_size or len(test_ids) != test_size:
+        raise DatasetError(
+            f"split file must hold {train_size} train and {test_size} test ids, "
+            f"got {len(train_ids)} and {len(test_ids)}"
+        )
+
+    by_id = {prompt_id_for(question): question for question in questions}
+    for name, ids in (("train", train_ids), ("test", test_ids)):
+        missing = [i for i in ids if i not in by_id]
+        if missing:
+            raise DatasetError(
+                f"{len(missing)} {name} ids are absent from the dataset, "
+                f"first {missing[0]}"
+            )
+    overlap = set(train_ids) & set(test_ids)
+    if overlap:
+        raise DatasetError(f"{len(overlap)} ids appear in both halves")
+
+    covered = set(train_ids) | set(test_ids)
+    uncovered = sorted(set(by_id) - covered)
+    if uncovered:
+        raise DatasetError(
+            f"{len(uncovered)} dataset ids are absent from the split file, "
+            f"first {uncovered[0]}"
+        )
+    if len(covered) != train_size + test_size:
+        raise DatasetError(
+            f"split file must cover {train_size + test_size} ids, "
+            f"got {len(covered)}"
+        )
+
+    return DatasetSplit(
+        train=tuple(by_id[i] for i in train_ids),
+        test=tuple(by_id[i] for i in test_ids),
+    )
+
+
+def load_difficulty_labels(
+    split: DatasetSplit,
+    path: str | Path = DEFAULT_LABELS_PATH,
+) -> dict[str, str]:
+    """Read the band label file and check it against the training split.
+
+    The file holds one row per training prompt id, in the same order as
+    `split.train`. Every training id must appear exactly once and no other id
+    may appear. Bands come from `BANDS`. The returned mapping keeps the split
+    order, so a caller that iterates it sees the same order as the split.
+    """
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise DatasetError(f"difficulty label file not found: {file_path}")
+
+    expected = [prompt_id_for(question) for question in split.train]
+    expected_set = set(expected)
+
+    labels: dict[str, str] = {}
+    try:
+        lines = file_path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise DatasetError(
+            f"cannot read difficulty labels {file_path}: {error}"
+        ) from error
+
+    for line_number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise DatasetError(
+                f"difficulty labels line {line_number}: not valid JSON: {error}"
+            ) from error
+        if not isinstance(row, dict):
+            raise DatasetError(
+                f"difficulty labels line {line_number}: row must be an object"
+            )
+
+        prompt_id = row.get("prompt_id")
+        if not isinstance(prompt_id, str) or not prompt_id.strip():
+            raise DatasetError(
+                f"difficulty labels line {line_number}: 'prompt_id' must be a "
+                f"non-empty string"
+            )
+        band = row.get("band")
+        if not isinstance(band, str) or band not in BANDS:
+            raise DatasetError(
+                f"difficulty labels line {line_number}: unknown band {band!r}, "
+                f"expected one of {', '.join(BANDS)}"
+            )
+        if prompt_id in labels:
+            raise DatasetError(
+                f"difficulty labels line {line_number}: duplicate prompt id "
+                f"{prompt_id!r}"
+            )
+        if prompt_id not in expected_set:
+            raise DatasetError(
+                f"difficulty labels line {line_number}: unknown prompt id "
+                f"{prompt_id!r}, it is not a training question"
+            )
+        position = len(labels)
+        if expected[position] != prompt_id:
+            raise DatasetError(
+                f"difficulty labels line {line_number}: prompt id {prompt_id!r} "
+                f"is out of split order, expected {expected[position]!r}"
+            )
+        labels[prompt_id] = band
+
+    missing = [prompt_id for prompt_id in expected if prompt_id not in labels]
+    if missing:
+        shown = ", ".join(missing[:5])
+        more = "" if len(missing) <= 5 else f" and {len(missing) - 5} more"
+        raise DatasetError(
+            f"difficulty labels are missing {len(missing)} training id(s): "
+            f"{shown}{more}"
+        )
+
+    return labels
+
+
+def prompt_id_for(question: MBPPQuestion) -> str:
+    """The stable prompt id for one question."""
+    if question.prompt_id:
+        return question.prompt_id
+    return f"mbpp-{question.task_id}"
+
+
+def expected_call_arity(question: MBPPQuestion) -> int | None:
+    """How many arguments the first test passes to the function under test.
+
+    Counts positional and keyword arguments. Returns None when the first test
+    does not call the function, when the call cannot be parsed, or when the
+    call uses a starred argument whose size is only known at run time.
+    """
+    name = expected_function_name(question)
+    if name is None or not question.test_list:
+        return None
+    try:
+        tree = ast.parse(question.test_list[0])
+    except SyntaxError:
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != name:
+            continue
+        if any(isinstance(argument, ast.Starred) for argument in node.args):
+            return None
+        return len(node.args) + len(node.keywords)
+    return None
+
+
+def expected_function_name(question: MBPPQuestion) -> str | None:
+    """The function name the hidden tests call, or None when no test calls one.
+
+    Every identifier used as a call in every test is collected. Builtins and
+    keywords are dropped, because a test for the area of a circle reads
+    `assert abs(circle_area(1) - 3.14) < 1e-9` and `abs` is not the answer. A
+    name followed by a dot is a module attribute and is dropped too. Names that
+    appear in every test win, so a helper called in one test cannot stand in for
+    the function under test.
+    """
+    called: list[list[str]] = []
+    for test in question.test_list:
+        names: list[str] = []
+        for match in _CALL.finditer(test):
+            name = match.group(1)
+            before = test[match.start() - 1] if match.start() else ""
+            if before == "." or name in _KEYWORDS:
+                continue
+            if name not in names:
+                names.append(name)
+        called.append(names)
+
+    if not called:
+        return None
+    if all(called):
+        common = [
+            name for name in called[0] if all(name in names for names in called[1:])
+        ]
+        if len(common) == 1:
+            return common[0]
+        for name in common:
+            if name not in _BUILTIN_NAMES:
+                return name
+        if common:
+            return common[0]
+    for names in called:
+        for name in names:
+            if name not in _BUILTIN_NAMES:
+                return name
+    for names in called:
+        if names:
+            return names[0]
+    return None
+
+
+def format_prompt(question: MBPPQuestion) -> str:
+    """The exact text sent to the model. One format for every arm."""
+    name = expected_function_name(question)
+    if name is None:
+        return PROMPT_TEMPLATE.format(text=question.text)
+    arity = expected_call_arity(question)
+    if arity is None:
+        return NAMED_PROMPT_TEMPLATE.format(name=name, text=question.text)
+    noun = "argument" if arity == 1 else "arguments"
+    return ARITY_PROMPT_TEMPLATE.format(
+        name=name, arity=arity, noun=noun, text=question.text
+    )
+
+
+def prompt_for_question(question: MBPPQuestion) -> Prompt:
+    """The Experiment prompt for one question."""
+    return Prompt(prompt_id=prompt_id_for(question), problem=format_prompt(question))
+
+
+def prompts_for_questions(questions: Iterable[MBPPQuestion]) -> list[Prompt]:
+    """The single path from questions to prompts. Arms must use this function."""
+    return [prompt_for_question(question) for question in questions]

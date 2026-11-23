@@ -17,6 +17,10 @@ reaches it through an SSH reverse tunnel.
 
 ## Install
 
+This VM cannot run the install: `sudo` fails with `The "no new privileges" flag
+is set`. The units here apply on a host where sudo works. For how the server
+runs on this VM, see [../docs/ENVIRONMENT.md](../docs/ENVIRONMENT.md).
+
 First install the tracking extra into the repo venv. The server and the backup
 both need `boto3`, which is pinned there. The install script refuses to run
 without it.

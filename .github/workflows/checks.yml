@@ -18,4 +18,5 @@ jobs:
           python-version: '3.12'
       - run: python -m venv .venv
       - run: .venv/bin/python -m pip install -e '.[dev,tracking]'
+      - run: .venv/bin/lint-imports
       - run: .venv/bin/python -m pytest -q

@@ -14,13 +14,13 @@ from threading import Event, get_ident
 
 import pytest
 
-from rlvr.batching import BatchSizePolicy
-from rlvr.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
-from rlvr.config import load_config
-from rlvr.experiment import Experiment, Generation, Outcome, Prompt
-from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
-from rlvr.runs import RunStore
-from rlvr.schema import RolloutRecord
+from rlvr.core.batching import BatchSizePolicy
+from rlvr.core.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
+from rlvr.core.config import load_config
+from rlvr.training.experiment import Experiment, Generation, Outcome, Prompt
+from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
+from rlvr.tracking.runs import RunStore
+from rlvr.core.schema import RolloutRecord
 
 CONFIG_TEXT = """\
 [model]
@@ -343,7 +343,7 @@ def test_each_group_keeps_its_own_rewards(tmp_path) -> None:
 
 
 def test_pooling_the_groups_would_invent_an_advantage() -> None:
-    from rlvr.qwen import group_advantages
+    from rlvr.engine.qwen import group_advantages
 
     # Both groups are uniform, so neither holds a signal for GRPO.
     first, second = [1.0] * 8, [0.25] * 8

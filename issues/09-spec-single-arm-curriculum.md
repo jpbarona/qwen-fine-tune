@@ -2,8 +2,8 @@
 
 **Status:** ready-for-agent
 
-Supersedes the four-arm design in `../docs/SPEC.md` for now. The arms are deferred, not
-deleted.
+Supersedes the earlier four-arm design, which is deleted and kept in git
+history. The arms are deferred, not removed.
 
 ## Problem Statement
 
@@ -69,7 +69,7 @@ code, on a curriculum that starts at the easiest questions.
 
 ## Implementation Decisions
 
-- One arm runs for now. The arm dispatch table stays, the code arm is the default, and the other three remain implemented but unused. `../docs/SPEC.md` gets a note that the four-arm comparison is deferred, and `../docs/DECISIONS.md` remains the record of why.
+- One arm runs for now. The arm dispatch table stays, the code arm is the default, and the other three remain implemented but unused. `../docs/DECISIONS.md` is the record of why the comparison is deferred.
 - The completion cap becomes 2,048, counted over reasoning plus code.
 - `output_scores` is removed from generation. Entropy is computed during the update pass, every `entropy_every` updates, default 500, zero disables. The entropy chart becomes sparse points rather than one per step.
 - The reward is one pure function of a rollout outcome plus token count. Cases: truncated -1.0, syntax error or no code -0.5, compiles but fails every test 0.0, partial 0.45 to 0.75, all passed 1.0. A closed reasoning block pays up to 0.4 when no test passed, capped below one test, so one pass always beats closing alone. With three tests it pays 0.3. Partial answers are unchanged. Length term is 0.001 per token above 900, floor 0.2. The sum is clipped to -1 to 1.
