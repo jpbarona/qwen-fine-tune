@@ -77,7 +77,16 @@ def test_start_writes_the_run_ids_file(tmp_path: Path) -> None:
     mirror.start({"arm": "code-score"})
 
     payload = json.loads((run_dir / "mlflow.json").read_text(encoding="utf-8"))
-    assert payload == {"run_id": mirror.run_id, "gpu_run_id": mirror.gpu_run_id}
+    assert payload == {
+        "run_id": mirror.run_id,
+        "gpu_run_id": mirror.gpu_run_id,
+        "tables": {
+            "evaluations.json": 0,
+            "labels.json": 0,
+            "dropped.json": 0,
+            "control-events.json": 0,
+        },
+    }
 
     child = MlflowClient().get_run(mirror.gpu_run_id)
     assert child.data.tags["mlflow.parentRunId"] == mirror.run_id

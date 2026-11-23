@@ -6,15 +6,15 @@ else. Training keeps running.
 
 The store is one SQLite file under the runs root, with one experiment named
 `rlvr`. A run gets a parent run for the step series and a nested child run for
-the GPU samples. The two run ids are written to `mlflow.json` in the run
-folder, so `meta.json` stays immutable.
+the GPU samples. The two run ids and the table append counts are written to
+`mlflow.json` in the run folder, so `meta.json` stays immutable.
 
 Every public call catches its own exceptions and appends one line to
 `mlflow-errors.log` in the run folder. A failed mirror never raises into the
 training loop.
 
-`eval` pushes the run tables. `labels` and `rebuild` are placeholders until the
-resume rebuild and the importer land.
+`eval` pushes the run tables and the `eval.json` artifact. `labels` and
+`rebuild` are placeholders until the resume rebuild and the importer land.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import tempfile
 import warnings
 from datetime import datetime, timezone
@@ -45,8 +46,8 @@ LABELS_NAME = "labels.jsonl"
 CONTROL_EVENTS_NAME = "control-events.jsonl"
 
 #: One questions and one distributions file per evaluation, under these
-#: folders. The step is in the name, so a later eval never replaces an earlier
-#: one.
+#: folders. The step and the evaluation kind are in the name, so a later eval
+#: never replaces an earlier one and two evals at one step both survive.
 QUESTIONS_DIR = "questions"
 DISTRIBUTIONS_DIR = "distributions"
 
@@ -57,23 +58,20 @@ LABELS_TABLE = "labels.json"
 DROPPED_TABLE = "dropped.json"
 CONTROL_EVENTS_TABLE = "control-events.json"
 
+#: The append tables, in the order the counts are written to `mlflow.json`.
+APPENDED_TABLES: tuple[str, ...] = (
+    EVALUATIONS_TABLE,
+    LABELS_TABLE,
+    DROPPED_TABLE,
+    CONTROL_EVENTS_TABLE,
+)
+
 #: MLflow 3.18 calls two pandas APIs that pandas 3 deprecates. Nothing here
 #: can fix that, so the two messages are dropped around a table write instead
 #: of printing once per eval in the training log.
 TABLE_WARNINGS: tuple[str, ...] = (
     "For backward compatibility, 'str' dtypes are included by select_dtypes",
     "The 'convert_dates' keyword in read_json is deprecated",
-)
-
-#: The evaluation fields kept in the table. `prompt_ids` and `subset` are left
-#: out, because a cell full of ids is unreadable.
-EVALUATION_FIELDS: tuple[str, ...] = (
-    "step",
-    "kind",
-    "stage",
-    "count",
-    "pass_at_1",
-    "evaluation_seconds",
 )
 
 #: MLflow reads this setting when system metrics logging starts, so setting it
@@ -189,17 +187,52 @@ def _payload_step(payload: Mapping[str, Any]) -> int:
     return 0
 
 
+def _payload_kind(payload: Mapping[str, Any]) -> str:
+    """The kind of the newest evaluation in an `eval.json` payload.
+
+    A payload carries the kind at the top level in some writers and on each
+    evaluation point in others. The top level wins, then the newest point.
+    """
+    kind = payload.get("kind")
+    if isinstance(kind, str) and kind:
+        return kind
+    evaluations = payload.get("evaluations")
+    if isinstance(evaluations, list):
+        for point in reversed(evaluations):
+            if not isinstance(point, Mapping):
+                continue
+            value = point.get("kind")
+            if isinstance(value, str) and value:
+                return value
+    return "unknown"
+
+
+def _slug(name: str) -> str:
+    """A metric name segment: lower case, letters, digits and `_` only."""
+    return re.sub(r"[^a-z0-9_]", "_", name.lower())
+
+
 def _evaluation_rows(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """The evaluation points of `eval.json`, without the long id lists."""
+    """The evaluation points of `eval.json`, every field kept."""
     evaluations = payload.get("evaluations")
     if not isinstance(evaluations, list):
         return []
-    rows: list[dict[str, Any]] = []
-    for point in evaluations:
-        if not isinstance(point, Mapping):
-            continue
-        rows.append({name: point[name] for name in EVALUATION_FIELDS if name in point})
-    return rows
+    return [dict(point) for point in evaluations if isinstance(point, Mapping)]
+
+
+def _load_table_counts(run_dir: Path) -> dict[str, int]:
+    """The append counts an earlier mirror wrote to `mlflow.json`, or zeros."""
+    payload = _read_json(run_dir / IDS_NAME)
+    tables = payload.get("tables")
+    tables = tables if isinstance(tables, Mapping) else {}
+    counts: dict[str, int] = {}
+    for name in APPENDED_TABLES:
+        value = tables.get(name)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            counts[name] = value
+        else:
+            counts[name] = 0
+    return counts
 
 
 def _distribution_rows(distributions: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -319,14 +352,11 @@ class MlflowMirror:
         self._gpu_step = 0
         self._mlflow: Any = None
         self._client: Any = None
-        self._question_steps: set[int] = set()
-        self._distribution_steps: set[int] = set()
-        self._logged_rows: dict[str, int] = {
-            EVALUATIONS_TABLE: 0,
-            LABELS_TABLE: 0,
-            DROPPED_TABLE: 0,
-            CONTROL_EVENTS_TABLE: 0,
-        }
+        self._question_steps: set[tuple[int, str]] = set()
+        self._distribution_steps: set[tuple[int, str]] = set()
+        # A mirror rebuilt over the same run folder picks up the counts from
+        # the last one, so a restart does not append the same rows twice.
+        self._logged_rows: dict[str, int] = _load_table_counts(self.run_dir)
         try:
             self._connect()
         except Exception as error:  # noqa: BLE001 - the mirror must not stop training
@@ -395,6 +425,10 @@ class MlflowMirror:
         if params:
             self._mlflow.log_params(params)
 
+        # A new run has no tables yet, so the counts start at zero even when
+        # the folder carries counts from an earlier run.
+        self._logged_rows = {name: 0 for name in APPENDED_TABLES}
+
         child = client.create_run(
             self.experiment_id,
             run_name=f"{name}-gpu",
@@ -409,7 +443,11 @@ class MlflowMirror:
 
     @_guarded
     def step(self, step: int) -> None:
-        """Copy the newest value of each series at `step`. Nulls are skipped."""
+        """Copy the newest value of each series at `step`. Nulls are skipped.
+
+        The stage progress and the per band pass rate are logged here too,
+        because the spec sends them to metrics rather than to a table.
+        """
         client = self._require_client()
         if not self.run_id:
             raise RuntimeError("the parent run has not started")
@@ -417,7 +455,8 @@ class MlflowMirror:
         runs = dashboard.get("runs") or []
         if not runs:
             return
-        series = runs[0].get("series") or {}
+        run = runs[0]
+        series = run.get("series") or {}
         index = int(step)
         for name, values in series.items():
             if name == "steps" or not isinstance(values, list) or not values:
@@ -426,6 +465,31 @@ class MlflowMirror:
             if value is None:
                 continue
             client.log_metric(self.run_id, name, value, step=index)
+
+        stage_progress = run.get("stage_progress") or {}
+        for point in stage_progress.get("points") or []:
+            if not isinstance(point, Mapping) or point.get("step") != index:
+                continue
+            band = _text(point.get("band"))
+            if band is None:
+                continue
+            for field in ("solved", "total"):
+                value = _number(point.get(field))
+                if value is not None:
+                    client.log_metric(
+                        self.run_id, f"stage/{_slug(band)}/{field}", value, step=index
+                    )
+
+        for band_row in run.get("bands") or []:
+            if not isinstance(band_row, Mapping):
+                continue
+            band = _text(band_row.get("band"))
+            value = _number(band_row.get("pass_rate"))
+            if band is None or value is None:
+                continue
+            client.log_metric(
+                self.run_id, f"band/{_slug(band)}/pass_rate", value, step=index
+            )
 
     @_guarded
     def eval(self, payload: Mapping[str, Any]) -> None:
@@ -440,11 +504,12 @@ class MlflowMirror:
     def push_tables(self, step: int) -> None:
         """Log the run tables for one evaluation.
 
-        The questions and distributions tables get one file per step, so a
-        later eval does not replace an earlier one. The event tables append,
-        and each call logs only the rows that arrived since the last call. A
-        table with no rows is not written. One failed table is logged and the
-        rest are still pushed.
+        The questions and distributions tables get one file per step and kind,
+        so a later eval does not replace an earlier one and two evals at one
+        step both survive. The event tables append, and each call logs only the
+        rows that arrived since the last call. A table with no rows is not
+        written. One failed table is logged and the rest are still pushed. The
+        whole `eval.json` is logged as an artifact too.
         """
         self._require_client()
         if not self.run_id:
@@ -453,26 +518,30 @@ class MlflowMirror:
         dashboard = collect_dashboard([self.run_dir])
         runs = dashboard.get("runs") or []
         run = runs[0] if runs else {}
+        payload = _read_json(self.run_dir / EVAL_NAME)
+        kind = _payload_kind(payload)
+        key = (index, kind)
 
         questions = (run.get("questions") or {}).get("rows") or []
-        if index not in self._question_steps:
-            if self._push(f"{QUESTIONS_DIR}/step-{index}.json", questions):
-                self._question_steps.add(index)
+        if key not in self._question_steps:
+            name = f"{QUESTIONS_DIR}/step-{index}-{kind}.json"
+            if self._push(name, questions):
+                self._question_steps.add(key)
 
         distributions = run.get("distributions") or {}
-        if index not in self._distribution_steps:
+        if key not in self._distribution_steps:
+            name = f"{DISTRIBUTIONS_DIR}/step-{index}-{kind}.json"
             rows = _distribution_rows(distributions)
-            if self._push(f"{DISTRIBUTIONS_DIR}/step-{index}.json", rows):
-                self._distribution_steps.add(index)
+            if self._push(name, rows):
+                self._distribution_steps.add(key)
 
-        self._push_appended(
-            EVALUATIONS_TABLE, _evaluation_rows(_read_json(self.run_dir / EVAL_NAME))
-        )
+        self._push_appended(EVALUATIONS_TABLE, _evaluation_rows(payload))
         self._push_appended(LABELS_TABLE, _read_jsonl(self.run_dir / LABELS_NAME))
         self._push_appended(DROPPED_TABLE, _dropped_rows(run.get("dropped") or {}))
         self._push_appended(
             CONTROL_EVENTS_TABLE, _read_jsonl(self.run_dir / CONTROL_EVENTS_NAME)
         )
+        self._log_artifact(self.run_dir / EVAL_NAME)
 
     def _push(self, artifact_file: str, rows: list[Mapping[str, Any]]) -> bool:
         """Log one table. True when it was written."""
@@ -491,19 +560,37 @@ class MlflowMirror:
             return False
         return True
 
+    def _log_artifact(self, path: Path) -> None:
+        """Log one file as an artifact. A missing file is not an error."""
+        if not path.is_file():
+            return
+        try:
+            self._mlflow.log_artifact(str(path), run_id=self.run_id)
+        except Exception as error:  # noqa: BLE001 - one artifact must not stop the rest
+            self._write_error(error)
+
     def _push_appended(
         self, artifact_file: str, rows: list[Mapping[str, Any]]
     ) -> None:
-        """Append the rows this run has not pushed yet."""
+        """Append the rows this run has not pushed yet.
+
+        The count is kept in `mlflow.json`, so a mirror rebuilt over the same
+        folder skips the rows an earlier one pushed. A file that shrank under
+        the table is left alone: the store already has more rows, and pushing
+        the whole table again would duplicate them.
+        """
         seen = self._logged_rows.get(artifact_file, 0)
         if seen > len(rows):
-            seen = 0
+            # The file shrank under the table. The store already has those
+            # rows, so pushing them again would duplicate them. Leave both the
+            # file and the count alone.
+            return
         fresh = rows[seen:]
         if not fresh:
-            self._logged_rows[artifact_file] = len(rows)
             return
         if self._push(artifact_file, fresh):
             self._logged_rows[artifact_file] = len(rows)
+            self._write_ids()
 
     @_guarded
     def gpu_sample(self, row: Mapping[str, Any]) -> None:
@@ -544,7 +631,13 @@ class MlflowMirror:
             client.set_terminated(self.run_id, status)
 
     def _write_ids(self) -> None:
-        payload = {"run_id": self.run_id, "gpu_run_id": self.gpu_run_id}
+        payload = {
+            "run_id": self.run_id,
+            "gpu_run_id": self.gpu_run_id,
+            "tables": {
+                name: self._logged_rows.get(name, 0) for name in APPENDED_TABLES
+            },
+        }
         _write_atomic(self.run_dir / IDS_NAME, json.dumps(payload, indent=2) + "\n")
 
 

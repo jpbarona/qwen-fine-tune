@@ -34,7 +34,11 @@ def make_run(
     """A run folder with one row of every file the tables read."""
     run_dir = tmp_path / "runs" / "code-score" / RUN_NAME
     run_dir.mkdir(parents=True)
-    meta = {"arm": "code-score", "timestamp": RUN_NAME}
+    meta = {
+        "arm": "code-score",
+        "timestamp": RUN_NAME,
+        "pools": {"train": 2},
+    }
     (run_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
 
     metric = {"step": 1, "pass_rate": 1.0}
@@ -74,6 +78,7 @@ def make_run(
         "pass_at_1": 1.0,
         "evaluation_seconds": 3.0,
         "prompt_ids": ["p1"],
+        "subset": {"seed": 1},
     }
     payload = {
         "arm": "code-score",
@@ -86,6 +91,14 @@ def make_run(
     }
     (run_dir / "eval.json").write_text(json.dumps(payload), encoding="utf-8")
     return run_dir
+
+
+def set_eval_kind(run_dir: Path, kind: str) -> None:
+    """Rewrite the newest evaluation's kind in `eval.json`."""
+    path = run_dir / "eval.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["evaluations"][-1]["kind"] = kind
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def started_mirror(tmp_path: Path) -> tuple[MlflowMirror, Path]:
@@ -109,9 +122,11 @@ def test_each_eval_writes_a_questions_file_for_its_step(tmp_path: Path) -> None:
 
     client = MlflowClient()
     paths = [item.path for item in client.list_artifacts(mirror.run_id, "questions")]
-    assert any(path.endswith("step-1.json") for path in paths)
+    assert any(path.endswith("step-1-final.json") for path in paths)
 
-    rows = read_rows(client, mirror.run_id, "questions/step-1.json", tmp_path / "download")
+    rows = read_rows(
+        client, mirror.run_id, "questions/step-1-final.json", tmp_path / "download"
+    )
     assert [row["prompt_id"] for row in rows] == ["p1"]
     mirror.close()
 
@@ -122,10 +137,10 @@ def test_each_eval_writes_a_distributions_file_for_its_step(tmp_path: Path) -> N
 
     client = MlflowClient()
     paths = [item.path for item in client.list_artifacts(mirror.run_id, "distributions")]
-    assert any(path.endswith("step-1.json") for path in paths)
+    assert any(path.endswith("step-1-final.json") for path in paths)
 
     rows = read_rows(
-        client, mirror.run_id, "distributions/step-1.json", tmp_path / "download"
+        client, mirror.run_id, "distributions/step-1-final.json", tmp_path / "download"
     )
     assert {"reward_bin", "reward_count", "tests_passed_bin", "tests_passed_count"} <= set(
         rows[0]
@@ -144,11 +159,133 @@ def test_a_second_eval_does_not_replace_the_first_questions_file(
     questions = sorted(
         item.path for item in client.list_artifacts(mirror.run_id, "questions")
     )
-    assert questions == ["questions/step-1.json", "questions/step-2.json"]
+    assert questions == [
+        "questions/step-1-final.json",
+        "questions/step-2-final.json",
+    ]
     distributions = sorted(
         item.path for item in client.list_artifacts(mirror.run_id, "distributions")
     )
-    assert distributions == ["distributions/step-1.json", "distributions/step-2.json"]
+    assert distributions == [
+        "distributions/step-1-final.json",
+        "distributions/step-2-final.json",
+    ]
+    mirror.close()
+
+
+def test_two_evals_at_one_step_write_two_questions_files(tmp_path: Path) -> None:
+    mirror, run_dir = started_mirror(tmp_path)
+    set_eval_kind(run_dir, "checkpoint")
+    mirror.push_tables(1)
+    set_eval_kind(run_dir, "final")
+    mirror.push_tables(1)
+
+    client = MlflowClient()
+    questions = sorted(
+        item.path for item in client.list_artifacts(mirror.run_id, "questions")
+    )
+    assert questions == [
+        "questions/step-1-checkpoint.json",
+        "questions/step-1-final.json",
+    ]
+    distributions = sorted(
+        item.path for item in client.list_artifacts(mirror.run_id, "distributions")
+    )
+    assert distributions == [
+        "distributions/step-1-checkpoint.json",
+        "distributions/step-1-final.json",
+    ]
+    mirror.close()
+
+
+def test_step_logs_stage_and_band_metrics(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    rollout = {
+        "step": 1,
+        "prompt_id": "p2",
+        "stage": "gated judge",
+        "tests_passed": 1,
+        "tests_total": 2,
+        "reward": 0.5,
+        "error_class": None,
+    }
+    with (run_dir / "rollouts.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(rollout) + "\n")
+
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score"})
+    mirror.step(1)
+
+    client = MlflowClient()
+    solved = client.get_metric_history(mirror.run_id, "stage/unstaged/solved")
+    assert [point.value for point in solved] == [1.0]
+    total = client.get_metric_history(mirror.run_id, "stage/unstaged/total")
+    assert [point.value for point in total] == [2.0]
+    band = client.get_metric_history(mirror.run_id, "band/unstaged/pass_rate")
+    assert [point.value for point in band] == [1.0]
+    gated = client.get_metric_history(mirror.run_id, "band/gated_judge/pass_rate")
+    assert [point.value for point in gated] == [0.0]
+    mirror.close()
+
+
+def test_a_fresh_mirror_does_not_re_append_the_event_tables(tmp_path: Path) -> None:
+    mirror, run_dir = started_mirror(tmp_path)
+    mirror.push_tables(1)
+    mirror.close()
+
+    counts = json.loads((run_dir / "mlflow.json").read_text(encoding="utf-8"))["tables"]
+    assert counts["labels.json"] == 1
+    assert counts["evaluations.json"] == 1
+
+    fresh = MlflowMirror(tmp_path / "runs", run_dir)
+    fresh.run_id = mirror.run_id
+    fresh.push_tables(1)
+
+    client = MlflowClient()
+    labels = read_rows(client, mirror.run_id, "labels.json", tmp_path / "download")
+    assert [row["prompt_id"] for row in labels] == ["p1"]
+    evaluations = read_rows(
+        client, mirror.run_id, "evaluations.json", tmp_path / "download"
+    )
+    assert len(evaluations) == 1
+    fresh.close()
+    assert not (run_dir / "mlflow-errors.log").exists()
+
+
+def test_a_shrunk_event_file_does_not_re_push_the_whole_table(
+    tmp_path: Path,
+) -> None:
+    rows = [
+        {"step": 1, "prompt_id": "p1", "label": "parked"},
+        {"step": 1, "prompt_id": "p2", "label": "train"},
+    ]
+    run_dir = make_run(tmp_path, labels=rows)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score"})
+    mirror.push_tables(1)
+
+    (run_dir / "labels.jsonl").write_text(json.dumps(rows[0]) + "\n", encoding="utf-8")
+    mirror.push_tables(2)
+
+    client = MlflowClient()
+    labels = read_rows(client, mirror.run_id, "labels.json", tmp_path / "download")
+    assert [row["prompt_id"] for row in labels] == ["p1", "p2"]
+    mirror.close()
+
+
+def test_eval_json_is_logged_as_an_artifact(tmp_path: Path) -> None:
+    mirror, _run_dir = started_mirror(tmp_path)
+    mirror.push_tables(1)
+
+    client = MlflowClient()
+    names = {item.path for item in client.list_artifacts(mirror.run_id)}
+    assert "eval.json" in names
+
+    path = client.download_artifacts(
+        mirror.run_id, "eval.json", dst_path=str(tmp_path / "download")
+    )
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert payload["step"] == 1
     mirror.close()
 
 
@@ -171,7 +308,8 @@ def test_the_event_tables_append_without_repeating_rows(tmp_path: Path) -> None:
         client, mirror.run_id, "evaluations.json", tmp_path / "download"
     )
     assert len(evaluations) == 1
-    assert "prompt_ids" not in evaluations[0]
+    assert evaluations[0]["prompt_ids"] == ["p1"]
+    assert evaluations[0]["subset"] == {"seed": 1}
     mirror.close()
 
 
@@ -212,7 +350,7 @@ def test_eval_pushes_the_tables_for_the_payload(tmp_path: Path) -> None:
 
     client = MlflowClient()
     paths = [item.path for item in client.list_artifacts(mirror.run_id, "questions")]
-    assert any(path.endswith("step-1.json") for path in paths)
+    assert any(path.endswith("step-1-final.json") for path in paths)
     mirror.close()
 
 
