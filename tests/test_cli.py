@@ -20,6 +20,7 @@ from rlvr.cli import (
     main,
     run_command,
     sync_mlflow_command,
+    sync_mlflow_settings,
 )
 from rlvr.config import load_config
 from rlvr.data import load_split, prompt_id_for
@@ -1404,7 +1405,9 @@ def parents_and_children() -> tuple[list, list]:
 
 
 def test_sync_mlflow_twice_leaves_one_run(tmp_path, capsys, monkeypatch):
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.setenv(
+        "MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'runs' / 'mlflow.db'}"
+    )
     folder = make_run(tmp_path / "runs")
     args = Namespace(run_dir=folder, config=None)
     assert sync_mlflow_command(args) == 0
@@ -1445,7 +1448,9 @@ def test_sync_mlflow_uses_the_tracking_uri_in_meta(tmp_path, monkeypatch):
 
 def test_sync_mlflow_keeps_the_checkpoints_tag(tmp_path, monkeypatch):
     """A repaired run must keep the bucket pointer its files live under."""
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.setenv(
+        "MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'runs' / 'mlflow.db'}"
+    )
     folder = make_run(tmp_path / "runs")
     payload = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
     payload["config"] = {"mlflow": {"bucket": "s3://bucket/runs/v1"}}
@@ -1461,6 +1466,38 @@ def test_sync_mlflow_keeps_the_checkpoints_tag(tmp_path, monkeypatch):
     assert parents[0].data.tags["rlvr/checkpoints_uri"] == (
         f"s3://bucket/runs/v1/code-score/{IMPORT_TIMESTAMP}"
     )
+
+
+def test_sync_mlflow_settings_fall_back_to_the_http_store(monkeypatch) -> None:
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    settings = sync_mlflow_settings(None, {})
+    assert settings.tracking_uri == "http://127.0.0.1:8081"
+
+
+def test_sync_mlflow_settings_explicit_config_wins(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:8888")
+    path = tmp_path / "config.toml"
+    path.write_text(
+        CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9000"\n',
+        encoding="utf-8",
+    )
+    settings = sync_mlflow_settings(path, {"config": {"mlflow": {}}})
+    assert settings.tracking_uri == "http://127.0.0.1:9000"
+
+
+def test_sync_mlflow_prints_the_store_it_used(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    folder = make_run(tmp_path / "runs")
+    monkeypatch.setattr("rlvr.cli.import_run", lambda *args, **kwargs: "run-1")
+    args = Namespace(run_dir=folder, config=None)
+
+    assert sync_mlflow_command(args) == 0
+
+    assert "store: http://127.0.0.1:8081" in capsys.readouterr().out
 
 
 class StubUploader:

@@ -1076,7 +1076,7 @@ def sync_mlflow_settings(
     read through the same `[mlflow]` parser the run used, so a copied folder
     points back at the store and the bucket it came from. When neither names a
     tracking URI, `MLFLOW_TRACKING_URI` is used, and with none of those the
-    mirror writes to `mlflow.db` under the runs root.
+    store on this VM at port 8081 is used.
     """
     if config_path is not None:
         settings = load_config(config_path).mlflow
@@ -1090,9 +1090,9 @@ def sync_mlflow_settings(
     if settings.tracking_uri:
         return settings
     env_uri = os.environ.get("MLFLOW_TRACKING_URI")
-    if not env_uri:
-        return settings
-    return replace(settings, tracking_uri=env_uri)
+    if env_uri:
+        return replace(settings, tracking_uri=env_uri)
+    return replace(settings, tracking_uri=DEFAULT_TRACKING_URI)
 
 
 def sync_mlflow_command(args: argparse.Namespace) -> int:
@@ -1104,6 +1104,7 @@ def sync_mlflow_command(args: argparse.Namespace) -> int:
     meta = _read_json(meta_path)
     runs_root = run_dir.parent.parent
     settings = sync_mlflow_settings(args.config, meta)
+    print(f"store: {settings.tracking_uri}")
     # The same arm and timestamp source the mirror's own `start` uses.
     arm = meta.get("arm")
     if not isinstance(arm, str) or not arm:
