@@ -88,6 +88,25 @@ EXPECTED: dict[str, list[str]] = {
     ],
 }
 
+#: The keys the Chart view would add on its own. A deleted card blocks the add
+#: and does not render, so the page stays at eight sections.
+EXPECTED_HIDDEN = {
+    "rlvr/heartbeat_seconds",
+    "system/cpu_utilization_percentage",
+    "system/disk_available_megabytes",
+    "system/disk_usage_megabytes",
+    "system/disk_usage_percentage",
+    "system/network_receive_megabytes",
+    "system/network_transmit_megabytes",
+    "system/system_memory_usage_megabytes",
+    "system/system_memory_usage_percentage",
+    "system/gpu_0_memory_usage_percentage",
+    "system/gpu_0_memory_usage_megabytes",
+    "system/gpu_0_utilization_percentage",
+    "system/gpu_0_power_usage_watts",
+    "system/gpu_0_power_usage_percentage",
+}
+
 
 def test_build_view_state_puts_the_core_first() -> None:
     state = build_view_state()
@@ -97,7 +116,7 @@ def test_build_view_state_puts_the_core_first() -> None:
     assert all(section["display"] is True for section in sections)
     assert all(section["isReordered"] is True for section in sections)
 
-    cards = state["compareRunCharts"]
+    cards = [card for card in state["compareRunCharts"] if not card["deleted"]]
     section_ids = {section["name"]: section["uuid"] for section in sections}
     for name, metrics in EXPECTED.items():
         found = [
@@ -106,7 +125,7 @@ def test_build_view_state_puts_the_core_first() -> None:
             if card["metricSectionId"] == section_ids[name]
         ]
         assert found == metrics
-    assert len(cards) == sum(len(metrics) for metrics in EXPECTED.values())
+    assert len(cards) == sum(len(metrics) for metrics in EXPECTED.values()) == 41
 
     core_id = section_ids["core"]
     core = [card for card in cards if card["metricSectionId"] == core_id]
@@ -125,6 +144,13 @@ def test_build_view_state_puts_the_core_first() -> None:
     assert all("range" not in card for card in rest)
 
     assert state["searchFilter"] == "tags.`rlvr/run_dir` != ''"
+
+    hidden = [card for card in state["compareRunCharts"] if card["deleted"]]
+    assert {card["metricKey"] for card in hidden} == EXPECTED_HIDDEN
+    assert all(card["deleted"] is True for card in hidden)
+    assert all(card["type"] == "LINE" for card in hidden)
+    assert all(card["selectedMetricKeys"] == [card["metricKey"]] for card in hidden)
+    assert {card["metricSectionId"] for card in hidden} <= set(section_ids.values())
 
 
 def test_encode_view_state_matches_the_mlflow_format() -> None:
@@ -184,10 +210,10 @@ def test_saved_view_command_writes_the_tag_and_prints_the_route(
     )
     assert state == build_view_state()
 
-    assert (
+    assert out.strip().splitlines()[-1] == (
         f"#/experiments/{experiment.experiment_id}/runs"
         "?viewStateShareKey=rlvr-study&compareRunsMode=CHART"
-    ) in out
+    )
 
     # A second run replaces the tag, so the store keeps one saved view.
     assert main(["saved-view", "--runs-root", str(runs_root)]) == 0
