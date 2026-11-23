@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 from .stages import BANDS
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard for type checkers
-    from .experiment import Prompt
+    from .values import Prompt
 
 __all__ = [
     "SUBSET_METHOD",

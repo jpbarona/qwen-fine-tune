@@ -42,7 +42,7 @@ from .pools import DEFAULT_PROMOTION_BAR
 from .queues import PromptQueue
 
 if TYPE_CHECKING:  # pragma: no cover - import used only by type checkers
-    from .experiment import Prompt
+    from .values import Prompt
 
 __all__ = [
     "DEFAULT_DEMOTE_AFTER",

@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from .experiment import Generation, Prompt
+from .values import Generation, Prompt
 from .model_profiles import LORA_TARGETS, model_profile, validate_transformers_version
 
 __all__ = [

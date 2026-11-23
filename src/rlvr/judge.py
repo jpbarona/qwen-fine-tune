@@ -55,7 +55,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .config import Config, ConfigError
-from .experiment import JudgeResult, Prompt
+from .values import JudgeResult, Prompt
 
 __all__ = [
     "DEFAULT_BACKOFF_BASE",

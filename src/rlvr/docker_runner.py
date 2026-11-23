@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from .data import MBPPQuestion, prompt_id_for
-from .experiment import Outcome, Prompt, TestResult
+from .values import Outcome, Prompt, TestResult
 
 __all__ = [
     "DEFAULT_IMAGE",

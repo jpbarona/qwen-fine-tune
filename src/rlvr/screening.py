@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
-from .experiment import Prompt
+from .values import Prompt
 from .reward import all_tests_passed
 
 __all__ = [

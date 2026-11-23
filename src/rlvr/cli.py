@@ -86,13 +86,8 @@ from .data import (
     load_split,
     prompts_for_questions,
 )
-from .experiment import (
-    EVAL_TEMPERATURE,
-    Experiment,
-    Judge,
-    JudgeResult,
-    Prompt,
-)
+from .experiment import EVAL_TEMPERATURE, Experiment, Judge
+from .values import JudgeResult, Prompt
 from .evaluation import band_eval_prompts, pass_at_1
 from .fake import (
     FakeGenerator,

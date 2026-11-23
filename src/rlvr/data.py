@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from .experiment import Prompt
+from .values import Prompt
 from .stages import BANDS, DEFAULT_LABELS_PATH
 
 __all__ = [

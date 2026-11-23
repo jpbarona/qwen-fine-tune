@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import hashlib
 
-from .experiment import Generation, JudgeResult, Prompt, Outcome
+from .values import Generation, JudgeResult, Prompt, Outcome
 from .memory import MemoryReport
 from .stages import BANDS
 
