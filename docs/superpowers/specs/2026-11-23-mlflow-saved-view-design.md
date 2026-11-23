@@ -1,7 +1,7 @@
 # MLflow saved view for the study page
 
 Date: 23 November 2026.
-Status: approved in conversation, ready to build.
+Status: implemented on `feat/mlflow-saved-view`.
 
 ## Problem Statement
 
@@ -96,6 +96,23 @@ survives a store rebuild.
   - band: one pass rate card per band.
   - stage: one solved card and one total card per band.
 - The heartbeat metric stays on the run page and is not in the view.
+- The parent run also logs the heartbeat and the MLflow system metrics. The
+  Chart view adds a chart for every metric key missing from `compareRunCharts`,
+  so those keys would appear as extra sections. The view includes a deleted
+  card for each of them. A deleted card blocks the auto-add and does not
+  render. The hidden keys are `rlvr/heartbeat_seconds` and these system keys:
+  `system/cpu_utilization_percentage`, `system/disk_available_megabytes`,
+  `system/disk_usage_megabytes`, `system/disk_usage_percentage`,
+  `system/network_receive_megabytes`, `system/network_transmit_megabytes`,
+  `system/system_memory_usage_megabytes`,
+  `system/system_memory_usage_percentage`,
+  `system/gpu_0_memory_usage_percentage`,
+  `system/gpu_0_memory_usage_megabytes`,
+  `system/gpu_0_utilization_percentage`,
+  `system/gpu_0_power_usage_watts`,
+  `system/gpu_0_power_usage_percentage`.
+- The visible page has eight sections and 41 charts. The deleted cards are not
+  counted.
 - Fixed ranges only on core. Mean reward is -1 to 1. Pass rate and advantage
   share are 0 to 1. Every other chart keeps the auto range.
 - The search filter is ``tags.`rlvr/run_dir` != ''``. The parent run carries
@@ -117,7 +134,8 @@ Four tests:
 
 1. The builder test checks the eight sections in order, the exact card
    membership of each section, the three core cards in order, the three core
-   ranges and the run filter.
+   ranges, the run filter, and the deleted cards for the heartbeat and the
+   system metrics.
 2. The encoder test checks the envelope fields, the `deflate;` prefix, a zlib
    round trip, and the error above 20000 characters.
 3. The writer test checks a real temporary SQLite store. It reads the tag with
