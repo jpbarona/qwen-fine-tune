@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from rlvr.evaluation import (
+from rlvr.evaluation.evaluation import (
     band_eval_prompts,
     pass_at_1,
     select_eval_subset,

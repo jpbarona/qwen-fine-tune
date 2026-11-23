@@ -60,7 +60,7 @@ def test_checkpoints_is_a_directory(run_fake) -> None:
 
 
 def test_meta_json_records_reproducibility_fields(run_fake, monkeypatch) -> None:
-    import rlvr.repro as repro
+    import rlvr.evaluation.repro as repro
 
     monkeypatch.setattr(repro, "git_commit", lambda: "deadbeef")
     meta = read_json(run_fake("code-score")[0] / "meta.json")
@@ -82,7 +82,7 @@ def test_meta_records_the_image_digest(run_fake, monkeypatch) -> None:
 
 
 def test_meta_git_commit_is_null_when_git_is_unavailable(run_fake, monkeypatch) -> None:
-    import rlvr.repro as repro
+    import rlvr.evaluation.repro as repro
 
     monkeypatch.setattr(repro, "git_commit", lambda: None)
     meta = read_json(run_fake("code-score")[0] / "meta.json")

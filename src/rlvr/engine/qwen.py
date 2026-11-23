@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from rlvr.core.values import Generation, Prompt
-from .model_profiles import LORA_TARGETS, model_profile, validate_transformers_version
+from rlvr.engine.model_profiles import LORA_TARGETS, model_profile, validate_transformers_version
 
 __all__ = [
     "ATTENTION_TARGET_MODULES",

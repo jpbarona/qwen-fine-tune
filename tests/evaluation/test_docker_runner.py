@@ -9,8 +9,8 @@ from threading import Barrier, Lock
 
 import pytest
 
-from rlvr.data import MBPPQuestion, load_dataset, prompt_for_question
-from rlvr.docker_runner import (
+from rlvr.evaluation.data import MBPPQuestion, load_dataset, prompt_for_question
+from rlvr.evaluation.docker_runner import (
     DEFAULT_IMAGE,
     DEFAULT_TIMEOUT_SECONDS,
     ERROR_CLASSES,

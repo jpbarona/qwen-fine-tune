@@ -62,7 +62,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
-from . import repro
+from rlvr.evaluation import repro
 from rlvr.core.control import ControlState, ControlWatcher
 from rlvr.core.batching import START_PROMPTS, BatchSizePolicy, is_cuda_out_of_memory
 from rlvr.core.checkpoint import (
@@ -73,7 +73,7 @@ from rlvr.core.checkpoint import (
     write_checkpoint_manifest,
 )
 from rlvr.core.config import Config
-from .evaluation import pass_at_1, select_eval_subset, subset_selector
+from rlvr.evaluation.evaluation import pass_at_1, select_eval_subset, subset_selector
 from rlvr.core.memory import MemoryReport
 from .pools import DEFAULT_PROMOTION_BAR, Pools
 from .queues import queues_from_row, restore_queue

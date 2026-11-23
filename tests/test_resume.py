@@ -17,7 +17,7 @@ from rlvr.core.checkpoint import (
 )
 from rlvr.core.config import load_config
 from rlvr.experiment import Experiment, Prompt
-from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner
+from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner
 from rlvr.resume import ResumeError, validate_resume
 from rlvr.runs import RunStore
 from rlvr.core.schema import RolloutRecord

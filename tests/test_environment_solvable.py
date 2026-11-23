@@ -18,10 +18,10 @@ import subprocess
 
 import pytest
 
-from rlvr.data import expected_call_arity, expected_function_name, prompt_id_for
-from rlvr.docker_runner import DEFAULT_IMAGE, DockerTestRunner
+from rlvr.evaluation.data import expected_call_arity, expected_function_name, prompt_id_for
+from rlvr.evaluation.docker_runner import DEFAULT_IMAGE, DockerTestRunner
 from rlvr.experiment import Prompt
-from rlvr.synthetic import load_synthetic_questions
+from rlvr.evaluation.synthetic import load_synthetic_questions
 
 
 @pytest.fixture(scope="session")

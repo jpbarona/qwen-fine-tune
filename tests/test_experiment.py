@@ -23,7 +23,7 @@ from rlvr.experiment import (
     Prompt,
     TestResult,
 )
-from rlvr.judge import UnrecoverableJudgeError
+from rlvr.engine.judge import UnrecoverableJudgeError
 from rlvr.core.memory import MemoryReport
 from rlvr.reward import RewardError
 from rlvr.core.schema import RolloutRecord
@@ -783,7 +783,7 @@ def test_an_empty_trace_is_a_valid_judge_input(tmp_path) -> None:
 
 
 def test_a_fake_gated_process_run_populates_every_record_field(tmp_path) -> None:
-    from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
+    from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 
     prompts = fake_prompts(6)
     store = RecordingStore()
@@ -866,7 +866,7 @@ def test_metric_row_writes_null_for_non_finite_norms(tmp_path) -> None:
 
 
 def test_a_fake_run_writes_null_norms(tmp_path) -> None:
-    from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
+    from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 
     store = RecordingStore()
     build(
@@ -1210,7 +1210,7 @@ def test_resume_starts_after_the_checkpoint_step_and_skips_meta(tmp_path) -> Non
 
 def test_a_checkpoint_manifest_is_saved_every_configured_steps(tmp_path) -> None:
     from rlvr.core.checkpoint import find_latest_checkpoint
-    from rlvr.fake import FakeGenerator, FakeTestRunner
+    from rlvr.evaluation.fake import FakeGenerator, FakeTestRunner
     from rlvr.runs import RunStore
 
     config_text = (
@@ -1241,7 +1241,7 @@ def test_a_checkpoint_manifest_is_saved_every_configured_steps(tmp_path) -> None
 
 
 def test_a_save_prunes_to_the_retained_set(tmp_path) -> None:
-    from rlvr.fake import FakeGenerator, FakeTestRunner
+    from rlvr.evaluation.fake import FakeGenerator, FakeTestRunner
     from rlvr.runs import RunStore
 
     config_text = (

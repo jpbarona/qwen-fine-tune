@@ -22,7 +22,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .data import MBPPQuestion
+from rlvr.evaluation.data import MBPPQuestion
 
 __all__ = [
     "DEFAULT_SYNTHETIC_PATH",
@@ -37,7 +37,7 @@ __all__ = [
 
 #: Repo-relative path of the committed synthetic set.
 DEFAULT_SYNTHETIC_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "synthetic_easy.jsonl"
+    Path(__file__).resolve().parents[3] / "data" / "synthetic_easy.jsonl"
 )
 
 #: First synthetic task id. MBPP ids stop at 974, so this cannot collide.

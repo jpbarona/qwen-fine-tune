@@ -58,7 +58,7 @@ __all__ = [
 ]
 
 #: Repo-relative path of the committed offline dataset.
-DEFAULT_DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "mbpp_full.jsonl"
+DEFAULT_DATA_PATH = Path(__file__).resolve().parents[3] / "data" / "mbpp_full.jsonl"
 
 #: Counts for the full MBPP configuration.
 TOTAL_QUESTIONS = 961
@@ -71,7 +71,7 @@ TEST_SIZE = 250
 #: held-out set, so the ids are stored instead. Produced from seed 1234 over
 #: the original 964 rows, with the three removed ids dropped from the training
 #: side. No held-out id changed.
-DEFAULT_SPLIT_PATH = Path(__file__).resolve().parents[2] / "data" / "split_seed1234.json"
+DEFAULT_SPLIT_PATH = Path(__file__).resolve().parents[3] / "data" / "split_seed1234.json"
 
 #: The seed the pinned split was cut with. A config that asks for another seed
 #: gets a fresh cut, so a label file built for the pinned one fails its check.

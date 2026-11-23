@@ -40,7 +40,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from .data import MBPPQuestion, prompt_id_for
+from rlvr.evaluation.data import MBPPQuestion, prompt_id_for
 from rlvr.core.values import Outcome, Prompt, TestResult
 
 __all__ = [

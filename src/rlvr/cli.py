@@ -75,7 +75,7 @@ from rlvr.core.config import (
 from rlvr.core.control import CONTROL_NAME, ControlWatcher
 from rlvr.core.checkpoint import find_latest_checkpoint, read_checkpoint_manifest
 from .dashboard_io import _read_json
-from .data import (
+from rlvr.evaluation.data import (
     DEFAULT_LABELS_PATH,
     TEST_SIZE,
     TRAIN_SIZE,
@@ -88,15 +88,15 @@ from .data import (
 )
 from .experiment import EVAL_TEMPERATURE, Experiment, Judge
 from rlvr.core.values import JudgeResult, Prompt
-from .evaluation import band_eval_prompts, pass_at_1
-from .fake import (
+from rlvr.evaluation.evaluation import band_eval_prompts, pass_at_1
+from rlvr.evaluation.fake import (
     FakeGenerator,
     FakeJudge,
     FakeTestRunner,
     fake_memory,
 )
 from .gpu import GPU_ROWS_NAME, GpuSampler
-from .judge import JudgeClient, MissingAPIKeyError
+from rlvr.engine.judge import JudgeClient, MissingAPIKeyError
 from rlvr.core.memory import configure_expandable_segments, read_torch_memory
 from .mlflow_import import import_run, run_dirs
 from .mlflow_log import open_mirror
@@ -123,7 +123,7 @@ from .screening import DEFAULT_SCREEN_SAMPLES, ROWS_NAME, ScreenError, ScreenSto
 from .screening import screen as run_screen
 from rlvr.core.stages import BANDS
 from .summary import SummaryError, format_summary, load_reports, write_report
-from .synthetic import SyntheticError, load_synthetic_questions
+from rlvr.evaluation.synthetic import SyntheticError, load_synthetic_questions
 from .upload import RunUploader, upload_prefix
 
 __all__ = [
@@ -603,14 +603,14 @@ def build_test_runner(config: Config, *, fake: bool):
     except DatasetError as error:
         raise UsageError(f"cannot load the MBPP split: {error}") from error
     questions = list(split.train) + list(split.test) + list(load_synthetic_rows())
-    from .docker_runner import DockerTestRunner
+    from rlvr.evaluation.docker_runner import DockerTestRunner
 
     return DockerTestRunner(questions, workers=config.test_workers)
 
 
 def _qwen_generator(config: Config, *, trainable: bool):
     """Build the Hugging Face generator, with one startup message on a miss."""
-    from .qwen import QwenGenerator
+    from rlvr.engine.qwen import QwenGenerator
 
     try:
         return QwenGenerator(
@@ -647,14 +647,14 @@ def build_generator(config: Config, *, fake: bool, trainable: bool = True):
     """
     if fake:
         return FakeGenerator()
-    from .model_profiles import validate_inference_engine
+    from rlvr.engine.model_profiles import validate_inference_engine
 
     try:
         validate_inference_engine(config.model_name)
     except ValueError as error:
         raise UsageError(str(error)) from error
 
-    from .vllm_backend import VLLMEngine, VLLMGenerator
+    from rlvr.engine.vllm_backend import VLLMEngine, VLLMGenerator
 
     # Build the engine first, so a missing vllm package fails before the
     # training model is loaded.
@@ -691,7 +691,7 @@ def build_screen_test_runner(questions, *, fake: bool):
     """
     if fake:
         return FakeTestRunner()
-    from .docker_runner import DockerTestRunner
+    from rlvr.evaluation.docker_runner import DockerTestRunner
 
     return DockerTestRunner(questions)
 

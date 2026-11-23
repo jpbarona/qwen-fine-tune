@@ -11,7 +11,7 @@ import pytest
 
 from rlvr.core.config import ConfigError, default_config_path, load_config
 from rlvr.experiment import JudgeResult, Prompt
-from rlvr.judge import (
+from rlvr.engine.judge import (
     DEFAULT_CONCURRENCY,
     DEFAULT_ENDPOINT,
     DEFAULT_KEY_ENV,
@@ -931,7 +931,7 @@ def test_the_packaged_config_defaults_to_openrouter():
 
 
 def test_both_run_configs_default_to_openrouter():
-    root = Path(__file__).resolve().parents[1] / "configs"
+    root = Path(__file__).resolve().parents[2] / "configs"
     for name in ("real.toml", "smoke.toml"):
         config = load_config(root / name)
         judge = config.raw["judge"]

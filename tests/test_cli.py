@@ -23,11 +23,11 @@ from rlvr.cli import (
     sync_mlflow_settings,
 )
 from rlvr.core.config import load_config
-from rlvr.data import load_split, prompt_id_for
-from rlvr.fake import FakeJudge
+from rlvr.evaluation.data import load_split, prompt_id_for
+from rlvr.evaluation.fake import FakeJudge
 from rlvr.core.memory import ALLOCATOR_ENV, EXPANDABLE_SEGMENTS
 from rlvr.mlflow_log import NullMirror
-from rlvr.synthetic import load_synthetic_questions
+from rlvr.evaluation.synthetic import load_synthetic_questions
 
 CONFIG = """\
 [model]
@@ -302,8 +302,8 @@ def test_unparseable_config_is_reported_on_stderr(tmp_path, capsys) -> None:
 def test_without_fake_the_command_asks_for_the_train_extra(
     config_path, tmp_path, capsys, monkeypatch
 ) -> None:
-    import rlvr.qwen
-    import rlvr.vllm_backend as backend
+    import rlvr.engine.qwen
+    import rlvr.engine.vllm_backend as backend
 
     def missing(*args, **kwargs):
         raise ImportError("simulated missing torch")
@@ -315,7 +315,7 @@ def test_without_fake_the_command_asks_for_the_train_extra(
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr(rlvr.qwen, "QwenGenerator", missing)
+    monkeypatch.setattr(rlvr.engine.qwen, "QwenGenerator", missing)
     monkeypatch.setattr(backend, "VLLMEngine", StubEngine)
     runs_root = tmp_path / "runs"
     code = main(
@@ -622,7 +622,7 @@ def test_a_bad_split_stops_before_the_run_folder(
     config_path, tmp_path, monkeypatch, capsys
 ) -> None:
     from rlvr import cli
-    from rlvr.data import DatasetError
+    from rlvr.evaluation.data import DatasetError
 
     def fail(*args, **kwargs):
         raise DatasetError("dataset file not found")
@@ -795,8 +795,8 @@ def test_the_fake_run_carries_the_unstaged_value(
 
 def test_build_test_runner_uses_fakes_or_docker(write_config) -> None:
     from rlvr.cli import build_test_runner
-    from rlvr.docker_runner import DockerTestRunner
-    from rlvr.fake import FakeTestRunner
+    from rlvr.evaluation.docker_runner import DockerTestRunner
+    from rlvr.evaluation.fake import FakeTestRunner
 
     config = load_config(write_config())
     assert isinstance(build_test_runner(config, fake=True), FakeTestRunner)

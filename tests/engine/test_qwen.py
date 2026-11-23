@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rlvr.qwen import (
+from rlvr.engine.qwen import (
     ATTENTION_TARGET_MODULES,
     QwenGenerator,
     categorical_entropy,
@@ -336,9 +336,9 @@ def test_qwen_module_imports_without_importing_torch() -> None:
     import subprocess
     import sys
 
-    source_root = Path(__file__).resolve().parents[1] / "src"
+    source_root = Path(__file__).resolve().parents[2] / "src"
     subprocess.run(
-        [sys.executable, "-c", "import sys\nimport rlvr.qwen\nassert 'torch' not in sys.modules"],
+        [sys.executable, "-c", "import sys\nimport rlvr.engine.qwen\nassert 'torch' not in sys.modules"],
         env={**os.environ, "PYTHONPATH": str(source_root)},
         check=True,
     )
@@ -496,7 +496,7 @@ def test_mean_token_loss_is_zero_for_an_empty_group() -> None:
 
 
 def test_profiles_use_the_architecture_output_projection() -> None:
-    from rlvr.model_profiles import LFM2, QWEN3, model_profile
+    from rlvr.engine.model_profiles import LFM2, QWEN3, model_profile
 
     assert model_profile("Qwen/Qwen3-0.6B") == QWEN3
     assert model_profile("LiquidAI/LFM2.5-2.6B") == LFM2
@@ -509,7 +509,7 @@ def test_profiles_use_the_architecture_output_projection() -> None:
 
 
 def test_lfm_requires_its_transformers_5_tokenizer_runtime() -> None:
-    from rlvr.model_profiles import LFM2, QWEN3, validate_transformers_version
+    from rlvr.engine.model_profiles import LFM2, QWEN3, validate_transformers_version
 
     validate_transformers_version(QWEN3, "4.57.1")
     validate_transformers_version(LFM2, "5.0.0")
@@ -519,8 +519,8 @@ def test_lfm_requires_its_transformers_5_tokenizer_runtime() -> None:
 
 def test_prompt_template_owns_tokenization_and_lfm_always_thinks() -> None:
     from rlvr.experiment import Prompt
-    from rlvr.model_profiles import LFM2, QWEN3
-    from rlvr.qwen import QwenGenerator
+    from rlvr.engine.model_profiles import LFM2, QWEN3
+    from rlvr.engine.qwen import QwenGenerator
 
     calls = []
 
@@ -542,7 +542,7 @@ def test_prompt_template_owns_tokenization_and_lfm_always_thinks() -> None:
 
 
 def test_reasoning_split_uses_the_loaded_tokenizer_marker() -> None:
-    from rlvr.qwen import QwenGenerator
+    from rlvr.engine.qwen import QwenGenerator
 
     generator = object.__new__(QwenGenerator)
     generator.think_end_token_id = 7
@@ -550,8 +550,8 @@ def test_reasoning_split_uses_the_loaded_tokenizer_marker() -> None:
 
 
 def test_checkpoint_model_and_adapter_identity_is_checked() -> None:
-    from rlvr.model_profiles import LFM2
-    from rlvr.qwen import QwenGenerator
+    from rlvr.engine.model_profiles import LFM2
+    from rlvr.engine.qwen import QwenGenerator
 
     generator = object.__new__(QwenGenerator)
     generator.model_name = "LiquidAI/LFM2.5-2.6B"
@@ -578,8 +578,8 @@ def test_checkpoint_model_and_adapter_identity_is_checked() -> None:
 
 
 def test_checkpoint_guard_rejects_a_mismatched_lora_placement() -> None:
-    from rlvr.model_profiles import LFM2
-    from rlvr.qwen import QwenGenerator
+    from rlvr.engine.model_profiles import LFM2
+    from rlvr.engine.qwen import QwenGenerator
 
     attention = list(LFM2.attention_targets)
     all_linear = attention + [
@@ -619,7 +619,7 @@ def test_shipped_lfm_profiles_use_the_pinned_model() -> None:
     from pathlib import Path
     from rlvr.core.config import load_config
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     for name in ("lfm.toml", "lfm-smoke.toml"):
         config = load_config(root / "configs" / name)
         assert config.model_name == "LiquidAI/LFM2.5-2.6B"
@@ -638,7 +638,7 @@ def test_all_linear_targets_adapt_the_lfm_convolution_and_mlp(tmp_path) -> None:
     from tokenizers.models import WordLevel
     from tokenizers.pre_tokenizers import Whitespace
     from transformers import AutoModelForCausalLM, Lfm2Config, PreTrainedTokenizerFast
-    from rlvr.qwen import CausalLMGenerator
+    from rlvr.engine.qwen import CausalLMGenerator
 
     vocabulary = {
         "<pad>": 0, "<eos>": 1, "<unk>": 2, "<bos>": 3,
@@ -687,8 +687,8 @@ def test_cached_logprobs_match_masked_rollout_batch(monkeypatch, family) -> None
     from types import SimpleNamespace
     from transformers import AutoModelForCausalLM
     from rlvr.experiment import Prompt
-    from rlvr.model_profiles import LFM2, QWEN3
-    from rlvr.qwen import CausalLMGenerator
+    from rlvr.engine.model_profiles import LFM2, QWEN3
+    from rlvr.engine.qwen import CausalLMGenerator
 
     torch.manual_seed(17)
     model_options = dict(
@@ -788,7 +788,7 @@ def test_tiny_model_update_and_resume(tmp_path, family) -> None:
     from tokenizers.pre_tokenizers import Whitespace
     from transformers import AutoModelForCausalLM, PreTrainedTokenizerFast
     from rlvr.experiment import Prompt
-    from rlvr.qwen import CausalLMGenerator
+    from rlvr.engine.qwen import CausalLMGenerator
 
     vocabulary = {
         "<pad>": 0, "<eos>": 1, "<unk>": 2, "<bos>": 3,

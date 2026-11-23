@@ -16,7 +16,7 @@ import pytest
 from rlvr.cli import build_generator, main
 from rlvr.core.config import load_config
 from rlvr.experiment import Generation, Outcome, Prompt
-from rlvr.fake import FakeGenerator, FakeTestRunner
+from rlvr.evaluation.fake import FakeGenerator, FakeTestRunner
 from rlvr.screening import (
     DEFAULT_SCREEN_SAMPLES,
     HISTOGRAM_LABELS,
@@ -980,8 +980,8 @@ def test_cli_screen_reports_an_empty_question_file(tmp_path: Path, capsys) -> No
 def test_cli_screen_without_fake_asks_for_the_train_extra(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    import rlvr.qwen
-    import rlvr.vllm_backend as backend
+    import rlvr.engine.qwen
+    import rlvr.engine.vllm_backend as backend
 
     def missing(*args, **kwargs):
         raise ImportError("simulated missing torch")
@@ -993,7 +993,7 @@ def test_cli_screen_without_fake_asks_for_the_train_extra(
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr(rlvr.qwen, "QwenGenerator", missing)
+    monkeypatch.setattr(rlvr.engine.qwen, "QwenGenerator", missing)
     monkeypatch.setattr(backend, "VLLMEngine", StubEngine)
     questions = write_questions(tmp_path / "questions.jsonl")
     output = tmp_path / "screen"
@@ -1050,8 +1050,8 @@ def test_the_screen_asks_for_a_non_trainable_base_model(
 def test_build_generator_wraps_every_real_generator_in_the_vllm_backend(
     write_config, monkeypatch
 ) -> None:
-    import rlvr.qwen
-    import rlvr.vllm_backend as backend
+    import rlvr.engine.qwen
+    import rlvr.engine.vllm_backend as backend
 
     engines: list[dict[str, object]] = []
     trainers: list[object] = []
@@ -1072,7 +1072,7 @@ def test_build_generator_wraps_every_real_generator_in_the_vllm_backend(
         def __init__(self, *, trainer, engine) -> None:
             trainers.append(trainer)
 
-    monkeypatch.setattr(rlvr.qwen, "QwenGenerator", StubTrainer)
+    monkeypatch.setattr(rlvr.engine.qwen, "QwenGenerator", StubTrainer)
     monkeypatch.setattr(backend, "VLLMEngine", StubEngine)
     monkeypatch.setattr(backend, "VLLMGenerator", StubGenerator)
     config = load_config(write_config())
@@ -1093,8 +1093,8 @@ def test_build_generator_wraps_every_real_generator_in_the_vllm_backend(
 
 def test_build_screen_test_runner_uses_fakes_or_docker() -> None:
     from rlvr.cli import build_screen_test_runner
-    from rlvr.data import load_dataset
-    from rlvr.docker_runner import DockerTestRunner
+    from rlvr.evaluation.data import load_dataset
+    from rlvr.evaluation.docker_runner import DockerTestRunner
 
     questions = load_dataset()
     assert isinstance(build_screen_test_runner(questions, fake=True), FakeTestRunner)

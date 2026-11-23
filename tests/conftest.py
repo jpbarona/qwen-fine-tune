@@ -9,7 +9,7 @@ import pytest
 from rlvr.core.batching import BatchSizePolicy
 from rlvr.core.config import load_config
 from rlvr.experiment import Experiment, Prompt
-from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
+from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 from rlvr.runs import RunStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

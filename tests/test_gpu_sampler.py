@@ -6,7 +6,7 @@ import json
 import time
 from pathlib import Path
 
-from rlvr.fake import fake_memory
+from rlvr.evaluation.fake import fake_memory
 from rlvr.gpu import GpuSampler
 from rlvr.core.memory import MemoryReport
 

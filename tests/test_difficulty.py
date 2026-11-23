@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.data import (
+from rlvr.evaluation.data import (
     DEFAULT_LABELS_PATH,
     TRAIN_SIZE,
     DatasetError,
@@ -28,7 +28,7 @@ from rlvr.data import (
     prompt_id_for,
 )
 from rlvr.core.stages import BANDS
-from rlvr.synthetic import (
+from rlvr.evaluation.synthetic import (
     DEFAULT_SYNTHETIC_PATH,
     MAX_REFERENCE_LINES,
     MIN_TESTS,

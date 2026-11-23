@@ -15,7 +15,7 @@ import pytest
 from rlvr.cli import UsageError, build_generator
 from rlvr.core.config import ConfigError, load_config
 from rlvr.experiment import Generation
-from rlvr.vllm_backend import VLLMEngine, VLLMGenerator
+from rlvr.engine.vllm_backend import VLLMEngine, VLLMGenerator
 
 CONFIG = """\
 [model]
@@ -164,7 +164,7 @@ class RealDecodeTrainer:
     def __init__(self, max_completion_tokens: int) -> None:
         from types import SimpleNamespace
 
-        from rlvr.qwen import QwenGenerator
+        from rlvr.engine.qwen import QwenGenerator
 
         self.max_completion_tokens = max_completion_tokens
         self.decoder = object.__new__(QwenGenerator)
@@ -208,7 +208,7 @@ def test_a_completion_that_reaches_the_cap_is_truncated_and_scores_minus_one(
     from rlvr.experiment import Experiment, Outcome
 
     config = load_config(
-        Path(__file__).resolve().parents[1] / "configs" / "lfm-spread.toml"
+        Path(__file__).resolve().parents[2] / "configs" / "lfm-spread.toml"
     )
     engine = CapEngine()
     generator = VLLMGenerator(
@@ -389,7 +389,7 @@ def test_the_removed_inference_engine_spelling_is_a_config_error(write_config) -
 
 
 def test_no_committed_config_sets_an_engine_key() -> None:
-    root = Path(__file__).resolve().parents[1] / "configs"
+    root = Path(__file__).resolve().parents[2] / "configs"
 
     for path in sorted(root.glob("*.toml")):
         training = load_config(path).raw.get("training", {})
@@ -408,7 +408,7 @@ def test_set_adapter_needs_an_engine_to_hand_the_adapter_to() -> None:
 
 
 def test_lfm_vllm_needs_the_engine_that_supports_its_lora_layers() -> None:
-    from rlvr.model_profiles import validate_inference_engine
+    from rlvr.engine.model_profiles import validate_inference_engine
 
     validate_inference_engine("LiquidAI/LFM2.5-2.6B", vllm_version="0.17.0")
     validate_inference_engine("LiquidAI/LFM2.5-2.6B", vllm_version="0.34.0")
@@ -417,20 +417,20 @@ def test_lfm_vllm_needs_the_engine_that_supports_its_lora_layers() -> None:
 
 
 def test_lfm_vllm_rejects_the_release_before_the_lora_support() -> None:
-    from rlvr.model_profiles import validate_inference_engine
+    from rlvr.engine.model_profiles import validate_inference_engine
 
     with pytest.raises(ValueError, match="vllm >= 0.17.0"):
         validate_inference_engine("LiquidAI/LFM2.5-2.6B", vllm_version="0.16.9")
 
 
 def test_lfm_vllm_accepts_a_development_build_at_the_floor() -> None:
-    from rlvr.model_profiles import validate_inference_engine
+    from rlvr.engine.model_profiles import validate_inference_engine
 
     validate_inference_engine("LiquidAI/LFM2.5-2.6B", vllm_version="0.17.0.dev0")
 
 
 def test_qwen_keeps_no_vllm_floor() -> None:
-    from rlvr.model_profiles import validate_inference_engine
+    from rlvr.engine.model_profiles import validate_inference_engine
 
     for version in ("0.9.0", "0.10.1", "0.17.0"):
         validate_inference_engine("Qwen/Qwen3-0.6B", vllm_version=version)
@@ -440,7 +440,7 @@ def test_a_source_checkout_version_comes_from_the_module(monkeypatch) -> None:
     import types
     from importlib.metadata import PackageNotFoundError
 
-    import rlvr.model_profiles as profiles
+    import rlvr.engine.model_profiles as profiles
 
     def missing(name):
         raise PackageNotFoundError(name)
@@ -461,7 +461,7 @@ def test_an_importable_vllm_with_no_version_is_an_error(monkeypatch) -> None:
     import types
     from importlib.metadata import PackageNotFoundError
 
-    import rlvr.model_profiles as profiles
+    import rlvr.engine.model_profiles as profiles
 
     def missing(name):
         raise PackageNotFoundError(name)
@@ -477,7 +477,7 @@ def test_a_missing_vllm_package_is_left_to_the_engine_builder(monkeypatch) -> No
     import types
     from importlib.metadata import PackageNotFoundError
 
-    import rlvr.model_profiles as profiles
+    import rlvr.engine.model_profiles as profiles
 
     def missing(name):
         raise PackageNotFoundError(name)

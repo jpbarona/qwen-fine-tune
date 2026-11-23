@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.data import (
+from rlvr.evaluation.data import (
     DEFAULT_DATA_PATH,
     DEFAULT_SPLIT_PATH,
     ARITY_PROMPT_TEMPLATE,
@@ -30,7 +30,7 @@ from rlvr.data import (
     split_questions,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _tiny_questions(*prompt_ids: str) -> list[MBPPQuestion]:

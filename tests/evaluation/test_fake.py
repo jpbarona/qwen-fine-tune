@@ -8,7 +8,7 @@ import pytest
 
 from rlvr.core.config import load_config
 from rlvr.experiment import Experiment, Prompt
-from rlvr.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
+from rlvr.evaluation.fake import FakeGenerator, FakeJudge, FakeTestRunner, fake_prompts
 from rlvr.runs import RunStore
 
 

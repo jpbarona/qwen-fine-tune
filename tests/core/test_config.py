@@ -742,7 +742,7 @@ def test_the_arm_config_accepts_a_screen_for_every_trained_prompt(
     from dataclasses import replace
 
     from rlvr.cli import build_pools, build_prompts
-    from rlvr.data import load_split, prompt_id_for
+    from rlvr.evaluation.data import load_split, prompt_id_for
     from rlvr.screening import ScreenRow, ScreenStore
 
     config = load_config(REPO_ROOT / "configs" / "lfm-spread.toml")
