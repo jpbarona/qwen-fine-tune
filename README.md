@@ -271,8 +271,8 @@ The route opens the experiment Chart view.
 
 The view has eight sections in this order: core, quality, optim, speed, data,
 gpu, band, stage. Core holds mean reward, pass rate and advantage share. Their
-ranges are fixed: -1 to 1.05 for mean reward, and 0 to 1.05 for pass rate and
-advantage share. The extra 0.05 keeps the top 1.0 label inside the plot. Every
+ranges are fixed: -1 to 1.1 for mean reward, and 0 to 1.05 for pass rate and
+advantage share. The headroom keeps the top 1.0 label inside the plot. Every
 other chart keeps the auto range. A filter keeps the
 parent runs and drops the GPU child. The run page stays as it was, so the
 tables, the artifacts and the GPU child run are still there.

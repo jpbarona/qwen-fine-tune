@@ -92,7 +92,7 @@ _SECTIONS = (
 _CORE = ("mean_reward", "pass_rate", "advantage_share")
 
 _CORE_RANGES: dict[str, tuple[float, float]] = {
-    "mean_reward": (-1.0, 1.05),
+    "mean_reward": (-1.0, 1.1),
     "pass_rate": (0.0, 1.05),
     "advantage_share": (0.0, 1.05),
 }

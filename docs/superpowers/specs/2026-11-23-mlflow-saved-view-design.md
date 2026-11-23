@@ -114,10 +114,12 @@ survives a store rebuild.
   `system/gpu_0_power_usage_percentage`.
 - The visible page has eight sections and 41 charts. The deleted cards are not
   counted.
-- Fixed ranges only on core. Mean reward is -1 to 1.05. Pass rate and
+- Fixed ranges only on core. Mean reward is -1 to 1.1. Pass rate and
   advantage share are 0 to 1.05. Every other chart keeps the auto range. The
-  0.05 headroom keeps the top 1.0 label inside the plot, because the chart's
-  top margin is 0 and the 1.0 label would otherwise be clipped.
+  headroom keeps the top 1.0 label inside the plot, because the chart's top
+  margin is 0 and the 1.0 label would otherwise be clipped. Mean reward gets
+  0.1 of headroom because its range is 2 units wide, so 0.05 would leave the
+  1.0 label too close to the edge.
 - The search filter is ``tags.`rlvr/run_dir` != ''``. The parent run carries
   the tag. The GPU child does not.
 - The route is
