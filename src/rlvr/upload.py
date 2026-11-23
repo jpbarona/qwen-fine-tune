@@ -2,8 +2,15 @@
 
 A training step must never wait on the network. `RunUploader` starts one
 background thread that scans `checkpoints/` every few seconds and hands changed
-files to a small worker pool. `close` stops the scan, drains the queue, uploads
-the small run files, then writes `manifest.json` last.
+files to a small pool of daemon worker threads. `close` stops the scan, runs
+one last scan, drains the queue, uploads the small run files, then writes
+`manifest.json` last.
+
+A checkpoint file is queued only when its step directory holds
+`checkpoint.json`. The trainer writes that manifest last, so a half written
+adapter or optimizer file is never uploaded. A file that fails its retries is
+left unseen, so the next scan tries it again. A file pruned while it sits in
+the queue is skipped without an error.
 
 Every failure is retried with backoff and then recorded in `errors`. No upload
 raises into the caller, so a bad bucket or a dead network leaves the run
@@ -21,9 +28,9 @@ import hashlib
 import io
 import json
 import os
+import queue
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +51,10 @@ RUN_FILES = (
 )
 
 CHECKPOINTS_NAME = "checkpoints"
+
+#: Marker written last in a checkpoint directory. A directory without it may
+#: still be receiving files, so its contents are not uploaded yet.
+CHECKPOINT_MANIFEST = "checkpoint.json"
 
 
 def upload_prefix(destination: str, arm: str, started: str) -> str:
@@ -124,9 +135,13 @@ class RunUploader:
         self._ready = threading.Event()
         self._stop = threading.Event()
         self._seen: dict[str, tuple[int, int]] = {}
+        self._inflight: set[str] = set()
         self._files: dict[str, dict[str, Any]] = {}
+        self._work: queue.Queue[tuple[Path, str, tuple[int, int]] | None] = (
+            queue.Queue()
+        )
+        self._workers: list[threading.Thread] = []
         self._thread: threading.Thread | None = None
-        self._executor: ThreadPoolExecutor | None = None
         self._closed = False
 
     def start(self) -> None:
@@ -134,9 +149,14 @@ class RunUploader:
         if self._closed or self._thread is not None:
             return
         try:
-            self._executor = ThreadPoolExecutor(
-                max_workers=self.concurrency, thread_name_prefix="rlvr-upload"
-            )
+            for index in range(self.concurrency):
+                worker = threading.Thread(
+                    target=self._worker_loop,
+                    name=f"rlvr-upload-{index}",
+                    daemon=True,
+                )
+                worker.start()
+                self._workers.append(worker)
             self._thread = threading.Thread(
                 target=self._scan_loop, name="rlvr-upload-scan", daemon=True
             )
@@ -156,14 +176,15 @@ class RunUploader:
         self._wait_idle(remaining)
 
     def close(self, timeout: float = 60.0) -> None:
-        """Stop the scan, drain the queue, upload the run files and manifest."""
+        """Stop the scan, run one last scan, then upload the folder and manifest."""
         if self._closed:
             return
-        self._closed = True
         try:
             self._close(max(0.0, timeout))
         except Exception as error:
             self._record(f"close: {error}")
+        finally:
+            self._closed = True
 
     def _close(self, timeout: float) -> None:
         self._stop.set()
@@ -173,8 +194,13 @@ class RunUploader:
             thread.join(max(0.0, deadline - time.monotonic()))
             if thread.is_alive():
                 self._record("close: scan thread did not stop in time")
-        if self._thread is not None:
-            self._wait_idle(max(0.0, deadline - time.monotonic()))
+        if self._workers:
+            try:
+                self._scan_once()
+            except Exception as error:
+                self._record(f"scan: {error}")
+            if not self._wait_idle(max(0.0, deadline - time.monotonic())):
+                self._record("close: uploads did not finish in time")
 
         for name in RUN_FILES:
             path = self.run_dir / name
@@ -183,9 +209,8 @@ class RunUploader:
 
         self._upload_manifest()
 
-        executor = self._executor
-        if executor is not None:
-            executor.shutdown(wait=False, cancel_futures=True)
+        for _ in self._workers:
+            self._work.put_nowait(None)
 
     def _scan_loop(self) -> None:
         try:
@@ -207,43 +232,88 @@ class RunUploader:
         for path in sorted(root.rglob("*")):
             if not path.is_file():
                 continue
+            relative = path.relative_to(self.run_dir).as_posix()
+            checkpoint = self._checkpoint_dir(relative)
+            if checkpoint is None:
+                continue
+            if not (checkpoint / CHECKPOINT_MANIFEST).is_file():
+                continue
             try:
                 stat = path.stat()
+            except FileNotFoundError:
+                continue
             except OSError as error:
-                self._record(f"{path}: {error}")
+                self._record(f"{relative}: {error}")
                 continue
             stamp = (stat.st_size, stat.st_mtime_ns)
-            relative = path.relative_to(self.run_dir).as_posix()
-            if self._seen.get(relative) == stamp:
-                continue
-            self._seen[relative] = stamp
-            self._submit(path, relative)
+            with self._lock:
+                if self._seen.get(relative) == stamp:
+                    continue
+                if relative in self._inflight:
+                    continue
+                self._inflight.add(relative)
+            self._submit(path, relative, stamp)
 
-    def _submit(self, path: Path, relative: str) -> None:
-        executor = self._executor
-        if executor is None:
-            return
+    def _checkpoint_dir(self, relative: str) -> Path | None:
+        """The step directory that owns `relative`, or None outside one."""
+        parts = Path(relative).parts
+        if len(parts) < 3 or parts[0] != CHECKPOINTS_NAME:
+            return None
+        return self.run_dir / parts[0] / parts[1]
+
+    def _submit(self, path: Path, relative: str, stamp: tuple[int, int]) -> None:
         with self._idle:
             self._active += 1
         try:
-            executor.submit(self._job, path, relative)
+            self._work.put_nowait((path, relative, stamp))
         except Exception as error:
             with self._idle:
                 self._active -= 1
                 self._idle.notify_all()
+            with self._lock:
+                self._inflight.discard(relative)
             self._record(f"{relative}: {error}")
 
-    def _job(self, path: Path, relative: str) -> None:
+    def _worker_loop(self) -> None:
+        while True:
+            item = self._work.get()
+            if item is None:
+                return
+            path, relative, stamp = item
+            try:
+                self._upload_checkpoint(path, relative, stamp)
+            except Exception as error:
+                self._record(f"{relative}: {error}")
+            finally:
+                with self._idle:
+                    self._active -= 1
+                    self._idle.notify_all()
+
+    def _upload_checkpoint(
+        self, path: Path, relative: str, stamp: tuple[int, int]
+    ) -> None:
+        ok = False
         try:
-            self._upload_file(path, relative)
+            ok = self._upload_file(path, relative)
+            if ok:
+                try:
+                    stat = path.stat()
+                except OSError:
+                    stat = None
+                if stat is None or (stat.st_size, stat.st_mtime_ns) != stamp:
+                    # The file changed while it was sent. Queue it again.
+                    ok = False
         finally:
-            with self._idle:
-                self._active -= 1
-                self._idle.notify_all()
+            with self._lock:
+                self._inflight.discard(relative)
+                if ok:
+                    self._seen[relative] = stamp
 
     def _upload_file(self, path: Path, relative: str) -> bool:
         try:
             data = path.read_bytes()
+        except FileNotFoundError:
+            return False
         except OSError as error:
             self._record(f"{relative}: {error}")
             return False
@@ -264,7 +334,7 @@ class RunUploader:
         last: Exception | None = None
         for attempt in range(self.retries + 1):
             if attempt:
-                self._stop.wait(self.backoff * (2 ** (attempt - 1)))
+                time.sleep(self.backoff * (2 ** (attempt - 1)))
             try:
                 self._client.put_object(
                     Bucket=self.bucket, Key=key, Body=io.BytesIO(data)
