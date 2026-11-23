@@ -116,3 +116,23 @@ def test_import_mlflow_honors_the_arm_filter(tmp_path: Path) -> None:
     assert experiment is not None
     runs = client.search_runs([experiment.experiment_id])
     assert {run.data.tags["rlvr/arm"] for run in runs} == {"hybrid"}
+
+
+def test_import_run_rebuild_replaces_the_run(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_dir = make_run(runs_root, "code-score")
+
+    first = import_run(runs_root, run_dir)
+    again = import_run(runs_root, run_dir, rebuild=True)
+
+    assert first is not None
+    assert again is not None
+    assert again != first
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("rlvr")
+    assert experiment is not None
+    runs = client.search_runs([experiment.experiment_id])
+    parents = [run for run in runs if "rlvr/run_dir" in run.data.tags]
+    assert [run.info.run_id for run in parents] == [again]
+    history = client.get_metric_history(again, "pass_rate")
+    assert [point.step for point in history] == [1, 2]

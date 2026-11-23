@@ -56,10 +56,18 @@ Optional keys, with the defaults shown:
 
     [mlflow] enabled = true
     [mlflow] gpu_sample_seconds = 1.0
+    [mlflow] tracking_uri = (unset: the local tracking store)
+    [mlflow] artifact_root = (unset: the local artifact folder)
+    [mlflow] bucket = (unset: no upload bucket)
+    [mlflow] upload_concurrency = 2
 
 `[mlflow]` is optional. A missing table means tracking is on with the defaults,
 so a config written before the mirror keeps its old behaviour. `enabled` turns
 the mirror off. `gpu_sample_seconds` is the interval for the GPU sampler.
+`tracking_uri` is the MLflow tracking server. `artifact_root` is the URI prefix
+for artifacts. `bucket` is the object storage prefix for run data.
+`upload_concurrency` is the number of parallel uploads, and it must be at least
+one.
 
 `eval_subset_seed` chooses the fixed checkpoint subset from the test pool. It is
 deliberately separate from `data.split_seed`, so the eval subset is not tied to
@@ -148,6 +156,7 @@ __all__ = [
     "MlflowSettings",
     "default_config_path",
     "load_config",
+    "mlflow_settings_from_raw",
 ]
 
 #: Resource path of the config used when --config is not given.
@@ -187,6 +196,7 @@ DEFAULT_ROLLOUTS_PER_STEP = 608
 #: so a config written before the mirror still copies writes by default.
 DEFAULT_MLFLOW_ENABLED = True
 DEFAULT_GPU_SAMPLE_SECONDS = 1.0
+DEFAULT_UPLOAD_CONCURRENCY = 2
 
 #: Pool policies the code implements.
 POOL_POLICIES: tuple[str, ...] = ("spread", "sweep")
@@ -202,6 +212,10 @@ class MlflowSettings:
 
     enabled: bool = DEFAULT_MLFLOW_ENABLED
     gpu_sample_seconds: float = DEFAULT_GPU_SAMPLE_SECONDS
+    tracking_uri: str | None = None
+    artifact_root: str | None = None
+    bucket: str | None = None
+    upload_concurrency: int = DEFAULT_UPLOAD_CONCURRENCY
 
 
 @dataclass(frozen=True)
@@ -442,6 +456,29 @@ def _optional_int_none(raw: dict[str, Any], dotted: str) -> int | None:
     return _positive_int(raw, dotted)
 
 
+def mlflow_settings_from_raw(raw: dict[str, Any]) -> MlflowSettings:
+    """The `[mlflow]` table of a raw config mapping.
+
+    `load_config` and a reader of the `config` snapshot in a run's `meta.json`
+    both call this, so the two paths use the same keys and defaults.
+    """
+    return MlflowSettings(
+        enabled=_optional_bool(raw, "mlflow.enabled", DEFAULT_MLFLOW_ENABLED),
+        gpu_sample_seconds=_optional_float(
+            raw,
+            "mlflow.gpu_sample_seconds",
+            DEFAULT_GPU_SAMPLE_SECONDS,
+            positive=True,
+        ),
+        tracking_uri=_optional_string(raw, "mlflow.tracking_uri", None),
+        artifact_root=_optional_string(raw, "mlflow.artifact_root", None),
+        bucket=_optional_string(raw, "mlflow.bucket", None),
+        upload_concurrency=_optional_positive_int(
+            raw, "mlflow.upload_concurrency", DEFAULT_UPLOAD_CONCURRENCY
+        ),
+    )
+
+
 def load_config(path: str | Path) -> Config:
     """Read and validate a config file. Raises ConfigError with a clear message."""
     file_path = Path(path)
@@ -568,13 +605,5 @@ def load_config(path: str | Path) -> Config:
         ),
         max_steps=_optional_int_none(raw, "budget.max_steps"),
         max_judge_calls=_optional_int_none(raw, "budget.max_judge_calls"),
-        mlflow=MlflowSettings(
-            enabled=_optional_bool(raw, "mlflow.enabled", DEFAULT_MLFLOW_ENABLED),
-            gpu_sample_seconds=_optional_float(
-                raw,
-                "mlflow.gpu_sample_seconds",
-                DEFAULT_GPU_SAMPLE_SECONDS,
-                positive=True,
-            ),
-        ),
+        mlflow=mlflow_settings_from_raw(raw),
     )

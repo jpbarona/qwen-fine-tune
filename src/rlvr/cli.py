@@ -4,8 +4,9 @@
     rlvr screen --questions <path> [--samples <n>] --output <dir> [--fake]
     rlvr eval-band --band <band> [--count 100] [--seed 2026] [--checkpoint <dir>] [--out <path>]
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
-    rlvr dashboard [--runs-root <runs-root>] [--port 8081]
+    rlvr dashboard [--runs-root <runs-root>] [--local] [--port 8099] [--config <path>]
     rlvr import-mlflow --runs-root <runs-root> [--arm <arm>]
+    rlvr sync-mlflow <run folder> [--config PATH]
     rlvr saved-view --runs-root <runs-root>
     rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
 
@@ -35,6 +36,14 @@ caller's git can already write to.
 `runs/<arm>/<timestamp>/meta.json` when `--arm` is omitted, and replays each
 folder's metrics, tables and GPU samples.
 
+`sync-mlflow` replays one run folder and deletes the runs it had before, so a
+folder that was imported twice or copied from another machine keeps one run.
+The store is the one `--config` names, else `MLFLOW_TRACKING_URI`, else the
+local `mlflow.db` under the runs root.
+
+A run with `[mlflow] bucket` set starts the uploader beside training, tags the
+run with `rlvr/checkpoints_uri`, and never stops training for an upload fault.
+
 `saved-view` writes the study saved view to the `rlvr` experiment and prints the
 hash route that opens it. A second call replaces the same tag.
 
@@ -49,14 +58,23 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping, Sequence
 
 from .batching import START_PROMPTS, BatchSizePolicy
-from .config import Config, ConfigError, default_config_path, load_config
+from .config import (
+    Config,
+    ConfigError,
+    MlflowSettings,
+    default_config_path,
+    load_config,
+    mlflow_settings_from_raw,
+)
 from .control import CONTROL_NAME, ControlWatcher
 from .checkpoint import find_latest_checkpoint, read_checkpoint_manifest
+from .dashboard_io import _read_json
 from .data import (
     DEFAULT_LABELS_PATH,
     TEST_SIZE,
@@ -111,6 +129,7 @@ from .screening import screen as run_screen
 from .stages import BANDS
 from .summary import SummaryError, format_summary, load_reports, write_report
 from .synthetic import SyntheticError, load_synthetic_questions
+from .upload import RunUploader, upload_prefix
 
 __all__ = [
     "build_generator",
@@ -126,10 +145,15 @@ __all__ = [
     "main",
     "screen_command",
     "spread_share_warning",
+    "sync_mlflow_command",
+    "sync_mlflow_settings",
     "training_steps",
 ]
 
 USAGE_ERROR = 2
+
+#: The MLflow server on this VM. The box reaches it through an SSH tunnel.
+DEFAULT_TRACKING_URI = "http://127.0.0.1:8081"
 
 #: vLLM shares the card with the training model, so the engine gets a fraction
 #: of the memory and a context that covers one prompt plus one completion.
@@ -310,19 +334,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     dashboard = subparsers.add_parser(
-        "dashboard", help="serve the MLflow tracking UI"
+        "dashboard", help="print the MLflow URL or serve a local store"
     )
     dashboard.add_argument(
         "--runs-root",
         type=Path,
         default=Path("runs"),
-        help="runs root that holds the MLflow store (default: ./runs)",
+        help="runs root that holds the local MLflow store (default: ./runs)",
+    )
+    dashboard.add_argument(
+        "--local",
+        action="store_true",
+        help="start a local MLflow server instead of printing the remote URL",
     )
     dashboard.add_argument(
         "--port",
         type=int,
-        default=8081,
-        help="port to serve on (default: 8081)",
+        # None rather than 8099 so `main` can tell an explicit `--port` from the
+        # default and reject it when `--local` is absent.
+        default=None,
+        help="local server port (default: 8099)",
+    )
+    dashboard.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="config file that names the tracking URI (default: packaged config)",
     )
 
     import_mlflow = subparsers.add_parser(
@@ -338,6 +375,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--arm",
         default=None,
         help="only import this arm (default: every arm under the runs root)",
+    )
+
+    sync_mlflow = subparsers.add_parser(
+        "sync-mlflow", help="replay one run folder and replace its old run"
+    )
+    sync_mlflow.add_argument(
+        "run_dir",
+        type=Path,
+        help="run folder, for example runs/code-score/20260101T000000Z",
+    )
+    sync_mlflow.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="config file that names the tracking URI (default: $MLFLOW_TRACKING_URI)",
     )
 
     saved_view = subparsers.add_parser(
@@ -698,8 +750,6 @@ def run_command(args: argparse.Namespace) -> int:
     # train pool. Without a schedule the step size is the starting batch. The
     # fake path keeps the small `[fake] steps` count.
     if not args.fake:
-        from dataclasses import replace
-
         config = replace(
             config, steps=training_steps(config, train_prompts, pools)
         )
@@ -747,7 +797,22 @@ def run_command(args: argparse.Namespace) -> int:
     # broken store hands back a null mirror, so training never depends on it.
     # On resume the store is attached after the truncation, so the rebuild
     # replays the kept records.
-    mirror = open_mirror(args.runs_root, store.run_dir, config.mlflow.enabled)
+    mirror = open_mirror(
+        args.runs_root,
+        store.run_dir,
+        config.mlflow.enabled,
+        # The container gets MLFLOW_TRACKING_URI from docker-run.sh. A config
+        # value wins, then the environment, then the local SQLite file.
+        tracking_uri=(
+            config.mlflow.tracking_uri or os.environ.get("MLFLOW_TRACKING_URI")
+        ),
+        artifact_root=config.mlflow.artifact_root,
+        checkpoints_uri=(
+            upload_prefix(config.mlflow.bucket, args.arm, store.timestamp)
+            if config.mlflow.bucket
+            else None
+        ),
+    )
     store.attach_mirror(mirror)
     if args.resume:
         mirror.rebuild()
@@ -798,6 +863,27 @@ def run_command(args: argparse.Namespace) -> int:
             interval=config.mlflow.gpu_sample_seconds,
         )
     )
+
+    # The uploader copies checkpoints and the run folder to the bucket beside
+    # training. It starts here, one line above the try, so every exit from the
+    # run reaches its close. A missing boto3, a bad destination or a dead
+    # network leaves the run folder intact and the run keeps going, so a failed
+    # start is a line on stderr and no uploader.
+    uploader: RunUploader | None = None
+    if config.mlflow.bucket:
+        try:
+            uploader = RunUploader(
+                store.run_dir,
+                args.arm,
+                store.timestamp,
+                config.mlflow.bucket,
+                concurrency=config.mlflow.upload_concurrency,
+            )
+            uploader.start()
+        except Exception as error:  # noqa: BLE001 - the uploader must not stop training
+            print(f"uploader did not start: {error}", file=sys.stderr)
+            uploader = None
+
     failed = False
     try:
         summary = experiment.run()
@@ -807,6 +893,11 @@ def run_command(args: argparse.Namespace) -> int:
     finally:
         if sampler is not None:
             sampler.stop()
+        if uploader is not None:
+            try:
+                uploader.close()
+            except Exception as error:  # noqa: BLE001 - the uploader must not stop training
+                print(f"uploader did not stop cleanly: {error}", file=sys.stderr)
         mirror.close(status="FAILED" if failed else "FINISHED")
 
     print(f"arm={summary.arm} steps={summary.steps} rollouts={summary.rollouts}")
@@ -976,6 +1067,70 @@ def import_mlflow_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def sync_mlflow_settings(
+    config_path: Path | None, meta: Mapping[str, Any]
+) -> MlflowSettings:
+    """The `[mlflow]` settings for `sync-mlflow`.
+
+    A `--config` file wins. Without one the `config` snapshot in `meta.json` is
+    read through the same `[mlflow]` parser the run used, so a copied folder
+    points back at the store and the bucket it came from. When neither names a
+    tracking URI, `MLFLOW_TRACKING_URI` is used, and with none of those the
+    store on this VM at port 8081 is used.
+    """
+    if config_path is not None:
+        settings = load_config(config_path).mlflow
+    else:
+        snapshot = meta.get("config")
+        settings = (
+            mlflow_settings_from_raw(dict(snapshot))
+            if isinstance(snapshot, Mapping)
+            else MlflowSettings()
+        )
+    if settings.tracking_uri:
+        return settings
+    env_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if env_uri:
+        return replace(settings, tracking_uri=env_uri)
+    return replace(settings, tracking_uri=DEFAULT_TRACKING_URI)
+
+
+def sync_mlflow_command(args: argparse.Namespace) -> int:
+    """Replay one run folder and replace the runs it had in the store."""
+    run_dir = Path(args.run_dir)
+    meta_path = run_dir / "meta.json"
+    if not meta_path.is_file():
+        raise UsageError(f"not a run folder (no meta.json): {run_dir}")
+    meta = _read_json(meta_path)
+    runs_root = run_dir.parent.parent
+    settings = sync_mlflow_settings(args.config, meta)
+    print(f"store: {settings.tracking_uri}")
+    # The same arm and timestamp source the mirror's own `start` uses.
+    arm = meta.get("arm")
+    if not isinstance(arm, str) or not arm:
+        arm = run_dir.parent.name
+    timestamp = meta.get("timestamp")
+    if not isinstance(timestamp, str) or not timestamp:
+        timestamp = run_dir.name
+    checkpoints_uri = (
+        upload_prefix(settings.bucket, arm, timestamp) if settings.bucket else None
+    )
+    try:
+        run_id = import_run(
+            runs_root,
+            run_dir,
+            rebuild=True,
+            tracking_uri=settings.tracking_uri,
+            checkpoints_uri=checkpoints_uri,
+        )
+    except Exception as error:  # noqa: BLE001 - report the folder and stop
+        raise UsageError(f"cannot sync {run_dir}: {error}") from error
+    if run_id is None:
+        raise UsageError(f"cannot sync {run_dir}: the store kept no run id")
+    print(f"synced {run_dir.parent.name}/{run_dir.name} -> {run_id}")
+    return 0
+
+
 def saved_view_command(args: argparse.Namespace) -> int:
     """Write the saved view tag and print the route that opens it."""
     try:
@@ -1003,23 +1158,40 @@ def dashboard_argv(runs_root: Path, port: int) -> list[str]:
         "--artifacts-destination",
         str(runs_root / "mlartifacts"),
         "--host",
-        "0.0.0.0",
+        "127.0.0.1",
         "--port",
         str(port),
+        "--workers",
+        "1",
         "--allowed-hosts",
         os.environ.get("RLVR_ALLOWED_HOSTS", "*"),
     ]
 
 
 def dashboard_command(args: argparse.Namespace) -> int:
-    """Start the MLflow server on the runs root."""
-    if not 0 < args.port <= 65535:
-        raise UsageError(f"invalid port {args.port}")
+    """Print the tracking URI, or start a local MLflow server with --local."""
+    port = getattr(args, "port", None)
+    if not getattr(args, "local", False):
+        config_path = getattr(args, "config", None)
+        if config_path is None:
+            try:
+                config = load_config(default_config_path())
+            except (OSError, ConfigError):
+                print(DEFAULT_TRACKING_URI)
+                return 0
+        else:
+            config = load_config(config_path)
+        print(config.mlflow.tracking_uri or DEFAULT_TRACKING_URI)
+        return 0
+    if port is None:
+        port = 8099
+    if not 0 < port <= 65535:
+        raise UsageError(f"invalid port {port}")
     runs_root = args.runs_root
     runs_root.mkdir(parents=True, exist_ok=True)
     (runs_root / "mlartifacts").mkdir(parents=True, exist_ok=True)
-    command = dashboard_argv(runs_root, args.port)
-    print(f"dashboard: http://0.0.0.0:{args.port}  (Ctrl+C to stop)")
+    command = dashboard_argv(runs_root, port)
+    print(f"dashboard: http://127.0.0.1:{port}  (Ctrl+C to stop)")
     try:
         os.execv(command[0], command)
     except OSError as error:
@@ -1058,9 +1230,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "summary":
             return summary_command(args)
         if args.command == "dashboard":
+            # The parser stores no port when `--port` is absent, so a value here
+            # means the caller asked for one. Only `--local` reads it.
+            if args.port is not None and not args.local:
+                raise UsageError("--port needs --local")
             return dashboard_command(args)
         if args.command == "import-mlflow":
             return import_mlflow_command(args)
+        if args.command == "sync-mlflow":
+            return sync_mlflow_command(args)
         if args.command == "saved-view":
             return saved_view_command(args)
         if args.command == "publish":

@@ -7,15 +7,26 @@ import importlib
 import os
 import subprocess
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
-from rlvr.cli import build_judge, build_prompts, dashboard_argv, main
+from rlvr.cli import (
+    build_judge,
+    build_prompts,
+    dashboard_argv,
+    dashboard_command,
+    main,
+    run_command,
+    sync_mlflow_command,
+    sync_mlflow_settings,
+)
 from rlvr.config import load_config
 from rlvr.data import load_split, prompt_id_for
 from rlvr.fake import FakeJudge
 from rlvr.memory import ALLOCATOR_ENV, EXPANDABLE_SEGMENTS
+from rlvr.mlflow_log import NullMirror
 from rlvr.synthetic import load_synthetic_questions
 
 CONFIG = """\
@@ -1202,6 +1213,108 @@ def test_training_steps_keeps_the_starting_batch_without_a_policy(tmp_path) -> N
     assert training_steps(config, prompts, None) == config.epochs * 100
 
 
+def test_dashboard_prints_the_remote_store(capsys, monkeypatch) -> None:
+    def fail_exec(path: str, argv: list[str]) -> None:
+        raise AssertionError("the remote path must not start a server")
+
+    monkeypatch.setattr("rlvr.cli.os.execv", fail_exec)
+    args = Namespace(local=False, port=None, runs_root=Path("runs"))
+    assert dashboard_command(args) == 0
+    assert "http://127.0.0.1:8081" in capsys.readouterr().out
+
+
+def test_dashboard_prints_the_uri_for_a_namespace_with_a_port(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """The function does not reject a port. Only `main` sees an explicit one."""
+
+    def fail_exec(path: str, argv: list[str]) -> None:
+        raise AssertionError("the remote path must not start a server")
+
+    monkeypatch.setattr("rlvr.cli.os.execv", fail_exec)
+    path = tmp_path / "config.toml"
+    path.write_text(CONFIG, encoding="utf-8")
+    args = Namespace(local=False, port=8081, runs_root=Path("runs"), config=path)
+    assert dashboard_command(args) == 0
+    assert "http://127.0.0.1:8081" in capsys.readouterr().out
+
+
+def test_dashboard_falls_back_when_the_packaged_config_cannot_be_read(
+    capsys, monkeypatch
+) -> None:
+    def fail_load(path: str | Path):
+        raise OSError("no packaged config")
+
+    monkeypatch.setattr("rlvr.cli.load_config", fail_load)
+    args = Namespace(local=False, port=None, runs_root=Path("runs"))
+    assert dashboard_command(args) == 0
+    assert "http://127.0.0.1:8081" in capsys.readouterr().out
+
+
+def test_dashboard_reads_the_packaged_config_tracking_uri(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    path = tmp_path / "default_config.toml"
+    path.write_text(
+        CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9100"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("rlvr.cli.default_config_path", lambda: path)
+    args = Namespace(local=False, port=None, runs_root=Path("runs"))
+    assert dashboard_command(args) == 0
+    assert "http://127.0.0.1:9100" in capsys.readouterr().out
+
+
+def test_dashboard_prints_the_configured_store(tmp_path, capsys, monkeypatch) -> None:
+    def fail_exec(path: str, argv: list[str]) -> None:
+        raise AssertionError("the remote path must not start a server")
+
+    monkeypatch.setattr("rlvr.cli.os.execv", fail_exec)
+    path = tmp_path / "config.toml"
+    path.write_text(
+        CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9000"\n',
+        encoding="utf-8",
+    )
+    args = Namespace(local=False, port=None, runs_root=Path("runs"), config=path)
+    assert dashboard_command(args) == 0
+    assert "http://127.0.0.1:9000" in capsys.readouterr().out
+
+
+def test_dashboard_rejects_a_bad_config(tmp_path, capsys) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[model]\nname = 3\n", encoding="utf-8")
+    assert main(["dashboard", "--config", str(path)]) == 2
+    assert "config" in capsys.readouterr().err
+
+
+def test_dashboard_port_needs_local(capsys) -> None:
+    assert main(["dashboard", "--port", "8099"]) == 2
+    assert "--port needs --local" in capsys.readouterr().err
+
+
+def test_dashboard_local_still_starts_a_server(tmp_path, monkeypatch) -> None:
+    seen: list[tuple[str, list[str]]] = []
+
+    def fake_exec(path: str, argv: list[str]) -> None:
+        seen.append((path, argv))
+
+    monkeypatch.setattr("rlvr.cli.os.execv", fake_exec)
+    runs_root = tmp_path / "runs"
+
+    assert main(["dashboard", "--local", "--runs-root", str(runs_root)]) == 0
+
+    assert len(seen) == 1
+    path, argv = seen[0]
+    assert path == sys.executable
+    assert argv[argv.index("--backend-store-uri") + 1] == (
+        f"sqlite:///{runs_root / 'mlflow.db'}"
+    )
+    assert argv[argv.index("--host") + 1] == "127.0.0.1"
+    assert argv[argv.index("--workers") + 1] == "1"
+    # The local server defaults to a port that cannot collide with the remote.
+    assert argv[argv.index("--port") + 1] == "8099"
+
+
 def test_dashboard_command_runs_mlflow_as_a_module(tmp_path, monkeypatch) -> None:
     seen: list[tuple[str, list[str]]] = []
 
@@ -1212,15 +1325,28 @@ def test_dashboard_command_runs_mlflow_as_a_module(tmp_path, monkeypatch) -> Non
     monkeypatch.setenv("PATH", "")
 
     runs_root = tmp_path / "runs"
-    assert main(["dashboard", "--runs-root", str(runs_root), "--port", "8081"]) == 0
+    assert (
+        main(
+            [
+                "dashboard",
+                "--local",
+                "--runs-root",
+                str(runs_root),
+                "--port",
+                "8081",
+            ]
+        )
+        == 0
+    )
 
     assert len(seen) == 1
     path, argv = seen[0]
     assert path == sys.executable
     assert argv[0] == sys.executable
     assert argv[1:4] == ["-m", "mlflow", "server"]
-    assert argv[argv.index("--host") + 1] == "0.0.0.0"
+    assert argv[argv.index("--host") + 1] == "127.0.0.1"
     assert argv[argv.index("--port") + 1] == "8081"
+    assert argv[argv.index("--workers") + 1] == "1"
     assert argv[argv.index("--allowed-hosts") + 1] == "*"
     # The module form does not need the mlflow console script on PATH.
     assert "mlflow" not in os.environ.get("PATH", "")
@@ -1248,3 +1374,348 @@ def test_the_dashboard_module_is_gone() -> None:
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("rlvr.dashboard")
 
+
+IMPORT_TIMESTAMP = "20260101T000000Z"
+
+
+def make_run(runs_root: Path) -> Path:
+    """A run folder with meta.json and two metrics rows, ready to import."""
+    run_dir = runs_root / "code-score" / IMPORT_TIMESTAMP
+    run_dir.mkdir(parents=True)
+    meta = {"arm": "code-score", "timestamp": IMPORT_TIMESTAMP, "mode": "fake"}
+    (run_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    rows = [
+        {"step": 1, "pass_rate": 0.25},
+        {"step": 2, "pass_rate": 0.5},
+    ]
+    (run_dir / "metrics.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+    return run_dir
+
+
+def count_runs() -> int:
+    """The run count in the store the test mirror pointed MLflow at."""
+    return len(store_runs())
+
+
+def store_runs() -> list:
+    """Every run in the store the test mirror pointed MLflow at."""
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("rlvr")
+    if experiment is None:
+        return []
+    return client.search_runs([experiment.experiment_id])
+
+
+def parents_and_children() -> tuple[list, list]:
+    """The parent runs and the GPU child runs in the test store."""
+    runs = store_runs()
+    parents = [run for run in runs if "rlvr/run_dir" in run.data.tags]
+    children = [run for run in runs if "mlflow.parentRunId" in run.data.tags]
+    return parents, children
+
+
+def test_sync_mlflow_twice_leaves_one_run(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv(
+        "MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'runs' / 'mlflow.db'}"
+    )
+    folder = make_run(tmp_path / "runs")
+    args = Namespace(run_dir=folder, config=None)
+    assert sync_mlflow_command(args) == 0
+    first = count_runs()
+    assert first > 0
+    assert sync_mlflow_command(args) == 0
+
+    assert count_runs() == first
+    parents, children = parents_and_children()
+    assert len(parents) == 1
+    assert len(children) == 1
+    assert children[0].data.tags["mlflow.parentRunId"] == parents[0].info.run_id
+
+
+def test_sync_mlflow_uses_the_tracking_uri_in_meta(tmp_path, monkeypatch):
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    folder = make_run(tmp_path / "runs")
+    payload = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    payload["config"] = {
+        "mlflow": {"tracking_uri": f"sqlite:///{remote / 'mlflow.db'}"}
+    }
+    (folder / "meta.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    args = Namespace(run_dir=folder, config=None)
+    assert sync_mlflow_command(args) == 0
+
+    assert (remote / "mlflow.db").is_file()
+    assert not (tmp_path / "runs" / "mlflow.db").exists()
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient(tracking_uri=f"sqlite:///{remote / 'mlflow.db'}")
+    experiment = client.get_experiment_by_name("rlvr")
+    assert experiment is not None
+    assert len(client.search_runs([experiment.experiment_id])) == 2
+
+
+def test_sync_mlflow_keeps_the_checkpoints_tag(tmp_path, monkeypatch):
+    """A repaired run must keep the bucket pointer its files live under."""
+    monkeypatch.setenv(
+        "MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'runs' / 'mlflow.db'}"
+    )
+    folder = make_run(tmp_path / "runs")
+    payload = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    payload["config"] = {"mlflow": {"bucket": "s3://bucket/runs/v1"}}
+    (folder / "meta.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    args = Namespace(run_dir=folder, config=None)
+    assert sync_mlflow_command(args) == 0
+    assert sync_mlflow_command(args) == 0
+
+    parents, children = parents_and_children()
+    assert len(parents) == 1
+    assert len(children) == 1
+    assert parents[0].data.tags["rlvr/checkpoints_uri"] == (
+        f"s3://bucket/runs/v1/code-score/{IMPORT_TIMESTAMP}"
+    )
+
+
+def test_sync_mlflow_settings_fall_back_to_the_http_store(monkeypatch) -> None:
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    settings = sync_mlflow_settings(None, {})
+    assert settings.tracking_uri == "http://127.0.0.1:8081"
+
+
+def test_sync_mlflow_settings_explicit_config_wins(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:8888")
+    path = tmp_path / "config.toml"
+    path.write_text(
+        CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9000"\n',
+        encoding="utf-8",
+    )
+    settings = sync_mlflow_settings(path, {"config": {"mlflow": {}}})
+    assert settings.tracking_uri == "http://127.0.0.1:9000"
+
+
+def test_sync_mlflow_prints_the_store_it_used(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    folder = make_run(tmp_path / "runs")
+    monkeypatch.setattr("rlvr.cli.import_run", lambda *args, **kwargs: "run-1")
+    args = Namespace(run_dir=folder, config=None)
+
+    assert sync_mlflow_command(args) == 0
+
+    assert "store: http://127.0.0.1:8081" in capsys.readouterr().out
+
+
+class StubUploader:
+    """Records the calls a run makes on the uploader."""
+
+    calls: list[tuple] = []
+
+    def __init__(self, run_dir, arm, started, destination, **kwargs) -> None:
+        StubUploader.calls.append(("init", run_dir, arm, started, destination, kwargs))
+
+    def start(self) -> None:
+        StubUploader.calls.append(("start",))
+
+    def close(self, timeout: float = 60.0) -> None:
+        StubUploader.calls.append(("close",))
+
+
+class CloseFailsUploader(StubUploader):
+    """An uploader whose close raises, like a bucket that went away."""
+
+    def close(self, timeout: float = 60.0) -> None:
+        StubUploader.calls.append(("close",))
+        raise RuntimeError("the bucket is gone")
+
+
+class QuietExperiment:
+    """A stand-in experiment that writes meta and returns at once."""
+
+    def __init__(self, **kwargs) -> None:
+        self.store = kwargs["store"]
+        self.arm = kwargs["arm"]
+
+    def run(self):
+        from rlvr.experiment import RunSummary
+
+        self.store.write_meta({"arm": self.arm, "timestamp": self.store.timestamp})
+        return RunSummary(
+            arm=self.arm,
+            run_dir=self.store.run_dir,
+            steps=0,
+            rollouts=0,
+            mean_reward=0.0,
+            pass_at_1=0.0,
+        )
+
+
+class TagReadingExperiment(QuietExperiment):
+    """Reads the checkpoints tag right after the mirror opens the run."""
+
+    seen: list[str] = []
+
+    def run(self):
+        summary = super().run()
+        from mlflow.tracking import MlflowClient
+
+        run = MlflowClient().get_run(self.store.mirror.run_id)
+        TagReadingExperiment.seen.append(run.data.tags.get("rlvr/checkpoints_uri", ""))
+        return summary
+
+
+class FailingExperiment:
+    """A stand-in experiment whose training raises."""
+
+    def __init__(self, **kwargs) -> None:
+        pass
+
+    def run(self):
+        raise RuntimeError("training died")
+
+
+def write_bucket_config(tmp_path: Path) -> Path:
+    path = tmp_path / "bucket.toml"
+    path.write_text(CONFIG + '\n[mlflow]\nbucket = "s3://bucket/runs/v1"\n', encoding="utf-8")
+    return path
+
+
+def run_args(tmp_path: Path, config_path: Path) -> Namespace:
+    return Namespace(
+        arm="code-score",
+        config=config_path,
+        fake=True,
+        runs_root=tmp_path / "runs",
+        resume=False,
+        control=None,
+    )
+
+
+def test_run_uses_the_environment_tracking_uri(tmp_path, config_path, monkeypatch) -> None:
+    """The container gets MLFLOW_TRACKING_URI, and the mirror must honor it."""
+    seen: list[str | None] = []
+
+    def fake_open_mirror(runs_root, run_dir, enabled, *, tracking_uri=None, **kwargs):
+        seen.append(tracking_uri)
+        return NullMirror()
+
+    monkeypatch.setattr("rlvr.cli.open_mirror", fake_open_mirror)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://172.17.0.1:8081")
+
+    assert run_command(run_args(tmp_path, config_path)) == 0
+
+    assert seen == ["http://172.17.0.1:8081"]
+
+
+def test_a_config_tracking_uri_wins_over_the_environment(
+    tmp_path, config_path, monkeypatch
+) -> None:
+    seen: list[str | None] = []
+
+    def fake_open_mirror(runs_root, run_dir, enabled, *, tracking_uri=None, **kwargs):
+        seen.append(tracking_uri)
+        return NullMirror()
+
+    monkeypatch.setattr("rlvr.cli.open_mirror", fake_open_mirror)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://172.17.0.1:8081")
+    config_path.write_text(
+        CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9999"\n',
+        encoding="utf-8",
+    )
+
+    assert run_command(run_args(tmp_path, config_path)) == 0
+
+    assert seen == ["http://127.0.0.1:9999"]
+
+
+def test_run_starts_the_uploader_when_a_bucket_is_set(tmp_path, monkeypatch) -> None:
+    StubUploader.calls = []
+    monkeypatch.setattr("rlvr.cli.RunUploader", StubUploader)
+    config_path = write_bucket_config(tmp_path)
+    runs_root = tmp_path / "runs"
+
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+
+    kinds = [call[0] for call in StubUploader.calls]
+    assert kinds == ["init", "start", "close"]
+    init = StubUploader.calls[0]
+    assert init[2] == "code-score"
+    assert init[4] == "s3://bucket/runs/v1"
+    assert init[5]["concurrency"] == 2
+
+
+def test_a_run_tags_the_checkpoints_uri_before_training_ends(
+    tmp_path, monkeypatch
+) -> None:
+    """The tag must exist while the run is live, not after it closes."""
+    TagReadingExperiment.seen = []
+    StubUploader.calls = []
+    monkeypatch.setattr("rlvr.cli.RunUploader", StubUploader)
+    monkeypatch.setattr("rlvr.cli.Experiment", TagReadingExperiment)
+    config_path = write_bucket_config(tmp_path)
+    args = run_args(tmp_path, config_path)
+
+    assert run_command(args) == 0
+
+    started = next((args.runs_root / "code-score").iterdir()).name
+    assert TagReadingExperiment.seen == [
+        f"s3://bucket/runs/v1/code-score/{started}"
+    ]
+
+
+def test_a_broken_uploader_does_not_stop_the_run(tmp_path, monkeypatch) -> None:
+    class BrokenUploader(StubUploader):
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("no boto3 here")
+
+    monkeypatch.setattr("rlvr.cli.RunUploader", BrokenUploader)
+    config_path = write_bucket_config(tmp_path)
+    runs_root = tmp_path / "runs"
+
+    args = Namespace(
+        arm="code-score",
+        config=config_path,
+        fake=True,
+        runs_root=runs_root,
+        resume=False,
+        control=None,
+    )
+    assert run_command(args) == 0
+    assert (runs_root / "code-score").is_dir()
+    # The prefix comes from the config, so it is tagged even with no uploader.
+    parents, _ = parents_and_children()
+    assert parents[0].data.tags["rlvr/checkpoints_uri"].startswith(
+        "s3://bucket/runs/v1/code-score/"
+    )
+
+
+def test_a_close_that_raises_does_not_stop_the_run(tmp_path, monkeypatch) -> None:
+    StubUploader.calls = []
+    monkeypatch.setattr("rlvr.cli.RunUploader", CloseFailsUploader)
+    monkeypatch.setattr("rlvr.cli.Experiment", QuietExperiment)
+    args = run_args(tmp_path, write_bucket_config(tmp_path))
+
+    assert run_command(args) == 0
+    assert [call[0] for call in StubUploader.calls] == ["init", "start", "close"]
+
+
+def test_the_uploader_closes_when_the_run_raises(tmp_path, monkeypatch) -> None:
+    StubUploader.calls = []
+    monkeypatch.setattr("rlvr.cli.RunUploader", StubUploader)
+    monkeypatch.setattr("rlvr.cli.Experiment", FailingExperiment)
+    args = run_args(tmp_path, write_bucket_config(tmp_path))
+
+    with pytest.raises(RuntimeError, match="training died"):
+        run_command(args)
+
+    assert [call[0] for call in StubUploader.calls] == ["init", "start", "close"]

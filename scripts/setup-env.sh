@@ -444,5 +444,5 @@ echo
 echo "READY. start training with:"
 echo "  ./run.sh code-score --config configs/lfm-spread.toml --runs-root runs"
 echo "run.sh sets CUDA_HOME from the venv, so the fast kernels are used."
-echo "the dashboard reads the same runs folder:"
-echo "  $venv/bin/rlvr dashboard --runs-root runs --port 8081"
+echo "the dashboard is the remote store on this VM, open it with:"
+echo "  $venv/bin/rlvr dashboard"

@@ -26,6 +26,58 @@ if ! docker info >/dev/null 2>&1; then
   need_sudo="sudo -n"
 fi
 
+# The MLflow server runs on the VM and the box reaches it through an SSH reverse
+# tunnel. The tunnel binds the Docker bridge gateway on the box so the training
+# container can reach it. sshd refuses a non-loopback bind unless GatewayPorts
+# allows it, so a missing line and a `GatewayPorts no` line both need fixing.
+# The drop-in is included before the main file on Ubuntu, so it wins. Any other
+# GatewayPorts line is rewritten too, because an earlier drop-in would win over
+# ours.
+ensure_gatewayports() {
+  local drop_in=/etc/ssh/sshd_config.d/99-rlvr-gatewayports.conf
+  local line="GatewayPorts clientspecified"
+  local sudo_cmd=()
+  local file
+
+  if [ "$(id -u)" -eq 0 ]; then
+    sudo_cmd=()
+  elif [ -n "$need_sudo" ]; then
+    sudo_cmd=($need_sudo)
+  else
+    sudo_cmd=(sudo -n)
+  fi
+
+  "${sudo_cmd[@]}" mkdir -p /etc/ssh/sshd_config.d 2>/dev/null || true
+  if ! printf '%s\n' "$line" | "${sudo_cmd[@]}" tee "$drop_in" >/dev/null 2>&1; then
+    echo "cannot write $drop_in, so the tunnel bind stays refused. run:"
+    echo "  echo '$line' | sudo tee $drop_in"
+    echo "  sudo sed -i -E 's|^[[:space:]]*GatewayPorts.*|$line|' \\"
+    echo "    /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf"
+    echo "  sudo sshd -t && sudo systemctl reload ssh"
+    return 0
+  fi
+
+  for file in /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf; do
+    [ -f "$file" ] || continue
+    [ "$file" = "$drop_in" ] && continue
+    if grep -qE '^[[:space:]]*GatewayPorts([[:space:]]|$)' "$file" 2>/dev/null; then
+      "${sudo_cmd[@]}" sed -i -E \
+        "s|^[[:space:]]*GatewayPorts([[:space:]].*)?\$|$line|" "$file"
+      echo "replaced the GatewayPorts line in $file"
+    fi
+  done
+
+  if ! "${sudo_cmd[@]}" sshd -t; then
+    echo "docker-setup.sh: sshd -t rejected the configuration, sshd not reloaded" >&2
+    exit 1
+  fi
+  "${sudo_cmd[@]}" systemctl reload ssh 2>/dev/null ||
+    "${sudo_cmd[@]}" systemctl reload sshd
+  echo "set $line and reloaded sshd"
+}
+
+ensure_gatewayports
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "installing docker"
   $need_sudo apt-get update -qq

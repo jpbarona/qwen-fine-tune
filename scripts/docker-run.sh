@@ -7,8 +7,8 @@
 # The repository is mounted at /app, so a code change needs no rebuild. The
 # container gets the GPU, host shared memory, the host Docker socket for the
 # sandboxed test runner, and a cache volume for the compiled kernels. The
-# dashboard command starts the MLflow server with the same mounts and publishes
-# port 8081 on the host loopback.
+# dashboard arm prints the remote store URL and starts nothing. The offline
+# server is on bare metal through `rlvr dashboard --local`.
 
 set -euo pipefail
 
@@ -30,16 +30,8 @@ fi
 case "$arm" in
   code-score|hybrid|gated-judge|gated-process) ;;
   dashboard)
-    port="${RLVR_PORT:-8081}"
-    exec docker run --rm \
-      -v "$repo_root":/app \
-      -v "$repo_root":"$repo_root" \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      -v rlvr-kernel-cache:/root/.cache \
-      -p "127.0.0.1:$port:$port" \
-      -e RLVR_IMAGE_REF="$image_ref" \
-      -w /app \
-      "$image" rlvr dashboard --runs-root runs --port "$port"
+    echo "http://127.0.0.1:8081"
+    exit 0
     ;;
   *)
     echo "docker-run.sh: unknown arm '$arm'" >&2
@@ -74,5 +66,10 @@ exec docker run --rm --gpus all --ipc=host \
   -e TMPDIR="$runner_tmp" \
   -e OPENROUTER_API_KEY \
   -e OPENCODE_GO_API_KEY \
+  -e MLFLOW_TRACKING_URI \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e MLFLOW_S3_ENDPOINT_URL \
+  -e AWS_DEFAULT_REGION \
   -w /app \
   "$image" /app/run.sh "$arm" "$@"

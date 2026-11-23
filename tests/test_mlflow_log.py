@@ -71,6 +71,39 @@ def test_a_null_metric_is_skipped(tmp_path: Path) -> None:
     mirror.close()
 
 
+def test_step_sends_one_batch_with_the_heartbeat_and_the_row(tmp_path: Path) -> None:
+    class RecordingClient:
+        def __init__(self) -> None:
+            self.batches: list[tuple[str, list]] = []
+
+        def set_tag(self, *args, **kwargs) -> None:
+            pass
+
+        def log_batch(self, run_id, metrics) -> None:
+            self.batches.append((run_id, list(metrics)))
+
+        def log_metric(self, *args, **kwargs) -> None:
+            raise AssertionError("a step must not log one metric at a time")
+
+    run_dir = make_run(tmp_path)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score"})
+    mirror.close("FINISHED")
+    recorder = RecordingClient()
+    mirror._client = recorder
+
+    mirror.step({"step": 3, "pass_rate": 0.5, "grad_norm": 1.0, "rollouts": None})
+
+    assert len(recorder.batches) == 1
+    run_id, metrics = recorder.batches[0]
+    assert run_id == mirror.run_id
+    points = {metric.key: (metric.value, metric.step) for metric in metrics}
+    assert points["pass_rate"] == (0.5, 3)
+    assert points["grad_norm"] == (1.0, 3)
+    assert points["rlvr/heartbeat_seconds"][1] == 3
+    assert "rollouts" not in points
+
+
 def test_start_writes_the_run_ids_file(tmp_path: Path) -> None:
     run_dir = make_run(tmp_path)
     mirror = MlflowMirror(tmp_path / "runs", run_dir)
@@ -127,10 +160,10 @@ def test_a_failure_is_logged_and_not_raised(tmp_path: Path, monkeypatch) -> None
     mirror = MlflowMirror(tmp_path / "runs", run_dir)
     mirror.start({"arm": "code-score"})
 
-    def explode(self, _row, _step):
+    def explode(self, _row, _step, _timestamp):
         raise RuntimeError("read exploded")
 
-    monkeypatch.setattr(mlflow_log.MlflowMirror, "_log_row", explode)
+    monkeypatch.setattr(mlflow_log.MlflowMirror, "_row_metrics", explode)
     mirror.step({"step": 1, "pass_rate": 0.5})
 
     text = (run_dir / "mlflow-errors.log").read_text(encoding="utf-8")
@@ -155,6 +188,39 @@ def test_a_broken_store_is_logged_and_stays_quiet(tmp_path: Path, monkeypatch) -
     text = (run_dir / "mlflow-errors.log").read_text(encoding="utf-8")
     assert "store unavailable" in text
     assert text.count("store unavailable") == 1
+
+
+def test_a_creation_race_re_reads_the_experiment_by_name() -> None:
+    class RacingClient:
+        def __init__(self) -> None:
+            self.lookups = 0
+
+        def get_experiment_by_name(self, name):
+            self.lookups += 1
+            if self.lookups == 1:
+                return None
+            return type("Experiment", (), {"experiment_id": "42"})()
+
+        def create_experiment(self, name, artifact_location=None):
+            raise RuntimeError("RESOURCE_ALREADY_EXISTS: experiment already exists")
+
+    client = RacingClient()
+    experiment_id = mlflow_log._ensure_experiment_id(client, "s3://bucket/artifacts")
+
+    assert experiment_id == "42"
+    assert client.lookups == 2
+
+
+def test_a_creation_failure_that_is_not_a_race_still_raises() -> None:
+    class BrokenClient:
+        def get_experiment_by_name(self, name):
+            return None
+
+        def create_experiment(self, name, artifact_location=None):
+            raise RuntimeError("permission denied")
+
+    with pytest.raises(RuntimeError, match="permission denied"):
+        mlflow_log._ensure_experiment_id(BrokenClient(), "s3://bucket/artifacts")
 
 
 def test_open_mirror_respects_the_flag(tmp_path: Path) -> None:
@@ -188,6 +254,37 @@ def test_start_writes_the_step_target_as_max_steps(tmp_path: Path) -> None:
     )
     run = MlflowClient().get_run(mirror.run_id)
     assert run.data.params["max_steps"] == "5"
+    mirror.close()
+
+
+def test_mirror_uses_the_configured_tracking_uri(tmp_path: Path) -> None:
+    store = tmp_path / "store"
+    store.mkdir()
+    run_dir = make_run(tmp_path)
+    uri = f"sqlite:///{store / 'other.db'}"
+    mirror = MlflowMirror(tmp_path / "runs", run_dir, tracking_uri=uri)
+    mirror.start({"arm": "code-score"})
+    assert (store / "other.db").exists()
+    assert not (tmp_path / "runs" / "mlflow.db").exists()
+    mirror.close()
+
+
+def test_mirror_creates_the_experiment_at_the_artifact_root(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    root = "s3://opencodeagent1/mlflow/v1/artifacts"
+    mirror = MlflowMirror(tmp_path / "runs", run_dir, artifact_root=root)
+    mirror.start({"arm": "code-score"})
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("rlvr")
+    assert experiment.artifact_location == root
+    mirror.close()
+
+
+def test_mirror_without_a_uri_keeps_the_local_store(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score"})
+    assert (tmp_path / "runs" / "mlflow.db").exists()
     mirror.close()
 
 

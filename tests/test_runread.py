@@ -327,6 +327,15 @@ def test_collect_dashboard_empty_arm_folder_shows_waiting(tmp_path) -> None:
     assert data["runs"][0]["status"] == "waiting"
 
 
+def test_collect_dashboard_ignores_dot_directories_as_arms(tmp_path) -> None:
+    root = tmp_path / "runs"
+    (root / ".upload-slots").mkdir(parents=True)
+    (root / "code-score").mkdir()
+    data = collect_dashboard([root])
+
+    assert [run["arm"] for run in data["runs"]] == ["code-score"]
+
+
 def test_collect_dashboard_runs_root_expands_to_latest_run(tmp_path) -> None:
     root = tmp_path / "runs"
     write_run(root, "code-score", timestamp="20260101T000000Z")

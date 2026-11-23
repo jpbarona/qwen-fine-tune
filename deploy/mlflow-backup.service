@@ -1,0 +1,11 @@
+[Unit]
+Description=Copy the MLflow SQLite store to object storage
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=opencode
+Group=opencode
+EnvironmentFile=/home/opencode/.config/mlflow/env
+ExecStart=/home/opencode/Work/rl-grpo/.venv/bin/python /home/opencode/Work/rl-grpo/deploy/backup.py

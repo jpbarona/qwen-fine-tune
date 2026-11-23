@@ -52,7 +52,14 @@ def _run_exists(client: Any, run_id: str) -> bool:
     return getattr(run.info, "lifecycle_stage", "active") != "deleted"
 
 
-def import_run(runs_root: Path, run_dir: Path) -> str | None:
+def import_run(
+    runs_root: Path,
+    run_dir: Path,
+    *,
+    rebuild: bool = False,
+    tracking_uri: str | None = None,
+    checkpoints_uri: str | None = None,
+) -> str | None:
     """Replay one old run folder into the store and return its MLflow run id.
 
     The mirror opens the parent run and the GPU child run. The replay copies
@@ -62,25 +69,43 @@ def import_run(runs_root: Path, run_dir: Path) -> str | None:
 
     A folder whose `mlflow.json` names a run that still exists is skipped and
     returns None. A second import of the same folder therefore adds no rows.
+    With `rebuild` the old runs for the folder are deleted and opened again, so
+    the folder lands in exactly one run and the new id is returned.
+
+    `tracking_uri` points the mirror at a store other than the local SQLite file
+    under the runs root. Without it the mirror uses that local file.
+    `checkpoints_uri` is the bucket prefix the rebuilt run records in its
+    `rlvr/checkpoints_uri` tag, so a repair does not drop the pointer.
     """
     root = Path(runs_root)
     folder = Path(run_dir)
     meta = _read_json(folder / META_NAME)
     ids = _read_json(folder / IDS_NAME)
-    mirror = MlflowMirror(root, folder)
+    mirror = MlflowMirror(
+        root, folder, tracking_uri=tracking_uri, checkpoints_uri=checkpoints_uri
+    )
     existing = ids.get("run_id")
     if not isinstance(existing, str) or not existing:
         existing = ""
-    if mirror._client is not None and existing and _run_exists(mirror._client, existing):
+    if (
+        not rebuild
+        and mirror._client is not None
+        and existing
+        and _run_exists(mirror._client, existing)
+    ):
         return None
-    mirror.start(meta)
-    if not mirror.run_id:
-        raise RuntimeError(
-            f"cannot open an MLflow run for {folder}. "
-            f"See {folder / 'mlflow-errors.log'}."
-        )
     try:
-        mirror._replay()
+        if rebuild:
+            mirror.rebuild()
+        else:
+            mirror.start(meta)
+            if mirror.run_id:
+                mirror._replay()
+        if not mirror.run_id:
+            raise RuntimeError(
+                f"cannot open an MLflow run for {folder}. "
+                f"See {folder / 'mlflow-errors.log'}."
+            )
     except Exception:
         mirror.close(status="FAILED")
         raise

@@ -26,6 +26,7 @@ import math
 import os
 import re
 import tempfile
+import time
 import warnings
 from datetime import datetime, timezone
 from functools import wraps
@@ -100,6 +101,10 @@ HEARTBEAT_TAG = "rlvr/heartbeat_seconds"
 #: The tag that records how many prompts the run dropped. The spec puts the
 #: count beside the dropped table.
 DROPPED_COUNT_TAG = "rlvr/dropped_count"
+
+#: The tag that links a run to the bucket prefix of its checkpoints. It is set
+#: at `start`, so a box that dies mid-run still leaves the pointer behind.
+CHECKPOINTS_URI_TAG = "rlvr/checkpoints_uri"
 
 #: The metric names for the pass@1 series. The spec keeps the checkpoint and
 #: final scores as separate series so a run can show both.
@@ -388,17 +393,52 @@ class NullMirror:
         pass
 
 
+def _ensure_experiment_id(client: Any, artifact_location: str) -> str:
+    """The experiment id, creating the experiment if it is not there yet.
+
+    Four arms can reach this at the same moment. One create wins and the
+    others get an `already exists` failure, so those re-read the experiment by
+    name instead of failing the mirror.
+    """
+    experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
+    if experiment is not None:
+        return experiment.experiment_id
+    try:
+        return client.create_experiment(
+            EXPERIMENT_NAME,
+            artifact_location=artifact_location,
+        )
+    except Exception as error:  # noqa: BLE001 - match the race, re-raise the rest
+        if "already exists" not in str(error).lower():
+            raise
+        experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
+        if experiment is None:
+            raise
+        return experiment.experiment_id
+
+
 class MlflowMirror:
-    """Copies one run folder into the local MLflow store.
+    """Copies one run folder into the configured store.
 
     Construction sets the tracking URI and makes sure the experiment exists.
     `start` opens the parent and the GPU child run. `step` copies the newest
     value of every series. `close` terminates both runs.
     """
 
-    def __init__(self, runs_root: str | Path, run_dir: str | Path) -> None:
+    def __init__(
+        self,
+        runs_root: str | Path,
+        run_dir: str | Path,
+        *,
+        tracking_uri: str | None = None,
+        artifact_root: str | None = None,
+        checkpoints_uri: str | None = None,
+    ) -> None:
         self.runs_root = Path(runs_root)
         self.run_dir = Path(run_dir)
+        self.tracking_uri = tracking_uri
+        self.artifact_root = artifact_root
+        self.checkpoints_uri = checkpoints_uri
         self.run_id = ""
         self.gpu_run_id = ""
         self.experiment_id = ""
@@ -417,6 +457,10 @@ class MlflowMirror:
         # A mirror that found an existing `mlflow.json` only owns the table
         # counts, not the run ids an earlier mirror wrote.
         self._owns_ids = False
+        # A run copied to another machine keeps its name, so the name is the
+        # identity a rebuild matches on. The folder path is not, because the
+        # same run folder has a different path on each machine.
+        self.run_key = self._run_name(_read_json(self.run_dir / META_NAME))[2]
         # A mirror rebuilt over the same run folder picks up the counts from
         # the last one, so a restart does not append the same rows twice.
         self._logged_rows: dict[str, int] = _load_table_counts(self.run_dir)
@@ -431,16 +475,16 @@ class MlflowMirror:
         import mlflow
         from mlflow.tracking import MlflowClient
 
-        mlflow.set_tracking_uri(f"sqlite:///{self.runs_root / DATABASE_NAME}")
+        mlflow.set_tracking_uri(
+            self.tracking_uri or f"sqlite:///{self.runs_root / DATABASE_NAME}"
+        )
         client = MlflowClient()
-        experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
-        if experiment is None:
-            experiment_id = client.create_experiment(
-                EXPERIMENT_NAME,
-                artifact_location=str(self.runs_root / ARTIFACTS_NAME),
-            )
-        else:
-            experiment_id = experiment.experiment_id
+        artifact_location = (
+            self.artifact_root
+            if self.artifact_root is not None
+            else str(self.runs_root / ARTIFACTS_NAME)
+        )
+        experiment_id = _ensure_experiment_id(client, artifact_location)
         mlflow.set_experiment(EXPERIMENT_NAME)
         self._mlflow = mlflow
         self._client = client
@@ -471,6 +515,8 @@ class MlflowMirror:
             "rlvr/timestamp": timestamp,
             "rlvr/run_dir": str(self.run_dir.resolve()),
         }
+        if self.checkpoints_uri:
+            tags[CHECKPOINTS_URI_TAG] = self.checkpoints_uri
         for source, tag in TAG_FIELDS:
             value = _text(meta.get(source))
             if value is not None:
@@ -541,11 +587,20 @@ class MlflowMirror:
         index = row.get("step")
         if isinstance(index, bool) or not isinstance(index, int):
             return
+        from mlflow.entities import Metric
+
         heartbeat = self._write_heartbeat(datetime.now(timezone.utc))
-        self._require_client().log_metric(
-            self.run_id, HEARTBEAT_TAG, heartbeat, step=index
-        )
-        self._log_row(row, index)
+        stamp = int(time.time() * 1000)
+        metrics = [
+            Metric(
+                key=HEARTBEAT_TAG,
+                value=float(heartbeat),
+                step=index,
+                timestamp=stamp,
+            )
+        ]
+        metrics.extend(self._row_metrics(row, index, stamp))
+        self._require_client().log_batch(self.run_id, metrics=metrics)
 
     def _write_heartbeat(self, now: datetime) -> float:
         """Refresh the last write and heartbeat tags on the parent and child.
@@ -619,15 +674,20 @@ class MlflowMirror:
             )
             self._band_steps.add(key)
 
-    def _log_row(self, row: Mapping[str, Any], step: int) -> None:
-        """Log the series values of one metrics row at `step`."""
-        client = self._require_client()
-        if not self.run_id:
-            raise RuntimeError("the parent run has not started")
+    def _row_metrics(
+        self, row: Mapping[str, Any], step: int, timestamp: int
+    ) -> list[Any]:
+        """The non-null series values of one metrics row as `Metric` objects."""
+        from mlflow.entities import Metric
+
+        metrics: list[Any] = []
         for name in SERIES_FIELDS:
             value = _number(row.get(name))
             if value is not None:
-                client.log_metric(self.run_id, name, value, step=step)
+                metrics.append(
+                    Metric(key=name, value=value, step=step, timestamp=timestamp)
+                )
+        return metrics
 
     def _log_pass_at_1(self, payload: Mapping[str, Any]) -> None:
         """Log the checkpoint and final pass@1 values from the eval payload.
@@ -805,18 +865,19 @@ class MlflowMirror:
             client.log_metric(self.gpu_run_id, name, value, step=index)
 
     def _runs_for_folder(self) -> list[str]:
-        """Every run in the experiment whose `rlvr/run_dir` tag is this folder.
+        """Every run in the experiment whose `rlvr/run_name` tag is this run.
 
         A crash between `start_run` and the ids write leaves a run that
-        `mlflow.json` does not name. The tag finds it. The child runs of each
-        matching parent are included too, so a rebuild leaves no GPU run
-        behind.
+        `mlflow.json` does not name. The tag finds it. The name is used rather
+        than `rlvr/run_dir`, because a folder copied to another machine has a
+        different path but the same name. The child runs of each matching
+        parent are included too, so a rebuild leaves no GPU run behind.
         """
         client = self._require_client()
-        escaped = str(self.run_dir.resolve()).replace("'", "\\'")
+        escaped = self.run_key.replace("'", "\\'")
         runs = client.search_runs(
             experiment_ids=[self.experiment_id],
-            filter_string=f"tags.`rlvr/run_dir` = '{escaped}'",
+            filter_string=f"tags.`rlvr/run_name` = '{escaped}'",
         )
         found: list[str] = []
         for run in runs:
@@ -836,9 +897,10 @@ class MlflowMirror:
     def rebuild(self) -> None:
         """Replace the runs for this folder with a replay of the local files.
 
-        A resumed run deletes every run whose `rlvr/run_dir` tag names this
-        folder, then recreates the parent and child runs. The tag finds a run
-        left by a crash before `mlflow.json` was written. The local files are
+        A resumed run deletes every run whose `rlvr/run_name` tag is this run,
+        then recreates the parent and child runs. The tag finds a run left by a
+        crash before `mlflow.json` was written, and a run copied from another
+        machine under a different folder path. The local files are
         already truncated to the last checkpoint, so the replay holds no point
         past it. The active run this process owns is ended first, so the new
         run can open.
@@ -950,7 +1012,15 @@ class MlflowMirror:
         _write_atomic(path, json.dumps(payload, indent=2) + "\n")
 
 
-def open_mirror(runs_root: Path, run_dir: Path, enabled: bool) -> Mirror:
+def open_mirror(
+    runs_root: Path,
+    run_dir: Path,
+    enabled: bool,
+    *,
+    tracking_uri: str | None = None,
+    artifact_root: str | None = None,
+    checkpoints_uri: str | None = None,
+) -> Mirror:
     """The mirror for one run. A disabled or broken mirror does nothing.
 
     A store that could not be opened at construction leaves one line in
@@ -960,7 +1030,13 @@ def open_mirror(runs_root: Path, run_dir: Path, enabled: bool) -> Mirror:
     if not enabled:
         return NullMirror()
     try:
-        mirror = MlflowMirror(runs_root, run_dir)
+        mirror = MlflowMirror(
+            runs_root,
+            run_dir,
+            tracking_uri=tracking_uri,
+            artifact_root=artifact_root,
+            checkpoints_uri=checkpoints_uri,
+        )
     except Exception as error:  # noqa: BLE001 - the mirror must not stop training
         _write_error(Path(run_dir), error)
         return NullMirror()

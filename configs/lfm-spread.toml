@@ -82,3 +82,9 @@ eval_subset_seed = 2026
 
 [budget]
 max_steps = 100
+
+# Checkpoints and eval tables go to the bucket. The tunnel sets the tracking
+# URI on each box, so it is not written here.
+[mlflow]
+bucket = "s3://opencodeagent1/runs/v1"
+artifact_root = "s3://opencodeagent1/mlflow/v1/artifacts"

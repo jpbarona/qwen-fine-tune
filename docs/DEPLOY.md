@@ -72,39 +72,102 @@ ssh -i ~/.ssh/id_ed25519 Ubuntu@<host> \
 `watch-remote.sh` reports on exit, treats a failed SSH as a retry rather than
 completion, and gives up after eight empty replies.
 
+A run that should write to the store on this VM goes through
+`./scripts/start-remote-run.sh` instead. The Dashboard section covers it.
+
 ## Dashboard
 
-The view is MLflow. The server binds `0.0.0.0:8081` inside the container and is
-published on the box loopback only.
+The store lives on this VM, not on the box. One MLflow server serves every box,
+so a run keeps its history after the box is destroyed.
 
-The fast path is a tunnel from your own machine to the box. Every request
-through this VM pays the slow VM to box link, about 1.2 seconds per request:
-
-```bash
-ssh -N -L 8083:127.0.0.1:8081 Ubuntu@<host>
-```
-
-Then open `http://127.0.0.1:8083/`.
-
-The fallback, when your machine cannot reach the box, goes through this VM:
+The server is a systemd unit in `deploy/`, run as `opencode`. Once installed it
+binds `127.0.0.1:8081`, keeps its SQLite store at
+`/home/opencode/Work/rl-grpo-data/mlflow/mlflow.db`, and proxies artifacts to
+`s3://opencodeagent1/mlflow/v1/artifacts`. The credentials are in
+`/home/opencode/.config/mlflow/env`. Install the unit and the backup timer with:
 
 ```bash
-ssh -N -L 100.67.80.52:8083:127.0.0.1:8081 -i ~/.ssh/id_ed25519 Ubuntu@<host>
+sudo deploy/install.sh
 ```
 
-Then open `http://100.67.80.52:8083/`.
+`deploy/README.md` covers the install, the health check and the restore.
 
-The server accepts the tunnel host name through `RLVR_ALLOWED_HOSTS`, which
-defaults to `*`.
+The box reaches the server through an SSH reverse tunnel opened by this VM. The
+tunnel binds the Docker bridge gateway on the box, so the training container
+reaches it without a public port. It needs `GatewayPorts clientspecified` in the
+box `sshd_config`. `scripts/docker-setup.sh` writes that line as a drop-in and
+reloads sshd.
 
+Open the tunnel alone:
 
-The store and artifacts live under the runs root. The image serves the same
-server with `./scripts/docker-run.sh dashboard`. The store starts empty. Import
-an old run folder once with `rlvr import-mlflow --runs-root runs`.
+```bash
+./scripts/open-tunnel.sh Ubuntu@<host>
+```
+
+Open the tunnel and start a run:
+
+```bash
+./scripts/start-remote-run.sh code-score Ubuntu@<host> \
+  --config configs/lfm-spread.toml --runs-root runs
+```
+
+The script opens the tunnel, reads the gateway the tunnel bound, waits for
+`/health` from the box, then starts `docker-run.sh` detached. It launches nothing
+when the health check does not answer, because that run would train with no
+store. The run log is `$HOME/.cache/rlvr/run-<arm>-<host>.log`.
+
+The tunnel reconnects when the link drops. One tunnel serves every arm on the
+box. Run `open-tunnel.sh` again to reuse an open tunnel.
+
+`rlvr dashboard` prints the store URL:
+
+```bash
+.venv/bin/rlvr dashboard
+```
+
+Open the UI through the Mac to VM tunnel on port 8083. That tunnel already
+forwards `8083` on the Mac to `127.0.0.1:8081` on this VM. Then open
+`http://127.0.0.1:8083/`.
+
+`rlvr dashboard --local` starts the old local server on port 8099 with the store
+under the runs root. It starts a server from the local venv and needs no tunnel.
+
+A run with `[mlflow] bucket` set copies its checkpoints and run folder to
+`s3://opencodeagent1/runs/v1/<arm>/<started>/` while it trains. The uploader
+reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `MLFLOW_S3_ENDPOINT_URL`
+from the box environment, so keep them in `$HOME/.env`. The key is scoped to the
+`runs/` prefix. The run folder stays the record and the bucket is the copy.
+
+After a dropped link, replay one run folder into the store:
+
+```bash
+.venv/bin/rlvr sync-mlflow runs/code-score/<timestamp>
+```
+
+The command deletes and rebuilds that run's entries, so it is safe to repeat. It
+matches the run on `rlvr/run_name`, the arm and start timestamp, not the folder
+path.
+
+`deploy/mlflow-backup.timer` copies the store nightly at 03:00 UTC and keeps 14
+copies under `s3://opencodeagent1/mlflow/v1/backups/`. The store is rebuildable
+from the run folders, so the backup saves that work.
+
+The store starts empty. Old dumps under `dumps/` are untouched. Import an old
+run folder once with `rlvr import-mlflow --runs-root runs`.
 
 ## Before the box is destroyed
 
-Copy the run folders off. They exist only on the box.
+A run with `[mlflow] bucket` set copies its folder to the bucket as it trains.
+Every regular file in the run folder is copied, `gpu.jsonl`, `rollouts.jsonl`
+and `mlflow.json` included, and `manifest.json` is written last. The manifest
+is not in the local folder, so exclude it when you compare:
+
+```bash
+rclone check <run folder> \
+  hetzner-dumps:opencodeagent1/runs/v1/<arm>/<started> --exclude manifest.json
+```
+
+A run without a bucket exists only on the box. Copy it off:
 
 ```bash
 rclone copy <run folder> hetzner-dumps:opencodeagent1/dumps/runs/gpu/<timestamp> --progress
