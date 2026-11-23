@@ -1174,9 +1174,13 @@ def dashboard_command(args: argparse.Namespace) -> int:
     if not getattr(args, "local", False):
         config_path = getattr(args, "config", None)
         if config_path is None:
-            print(DEFAULT_TRACKING_URI)
-            return 0
-        config = load_config(config_path)
+            try:
+                config = load_config(default_config_path())
+            except (OSError, ConfigError):
+                print(DEFAULT_TRACKING_URI)
+                return 0
+        else:
+            config = load_config(config_path)
         print(config.mlflow.tracking_uri or DEFAULT_TRACKING_URI)
         return 0
     if port is None:

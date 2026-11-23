@@ -1239,16 +1239,30 @@ def test_dashboard_prints_the_uri_for_a_namespace_with_a_port(
     assert "http://127.0.0.1:8081" in capsys.readouterr().out
 
 
-def test_dashboard_needs_no_config_file_for_the_remote_store(
+def test_dashboard_falls_back_when_the_packaged_config_cannot_be_read(
     capsys, monkeypatch
 ) -> None:
     def fail_load(path: str | Path):
-        raise AssertionError("the remote path must not load a config")
+        raise OSError("no packaged config")
 
     monkeypatch.setattr("rlvr.cli.load_config", fail_load)
     args = Namespace(local=False, port=None, runs_root=Path("runs"))
     assert dashboard_command(args) == 0
     assert "http://127.0.0.1:8081" in capsys.readouterr().out
+
+
+def test_dashboard_reads_the_packaged_config_tracking_uri(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    path = tmp_path / "default_config.toml"
+    path.write_text(
+        CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9100"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("rlvr.cli.default_config_path", lambda: path)
+    args = Namespace(local=False, port=None, runs_root=Path("runs"))
+    assert dashboard_command(args) == 0
+    assert "http://127.0.0.1:9100" in capsys.readouterr().out
 
 
 def test_dashboard_prints_the_configured_store(tmp_path, capsys, monkeypatch) -> None:
