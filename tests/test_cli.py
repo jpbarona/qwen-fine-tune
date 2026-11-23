@@ -7,11 +7,19 @@ import importlib
 import os
 import subprocess
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
-from rlvr.cli import build_judge, build_prompts, dashboard_argv, main
+from rlvr.cli import (
+    build_judge,
+    build_prompts,
+    dashboard_argv,
+    main,
+    run_command,
+    sync_mlflow_command,
+)
 from rlvr.config import load_config
 from rlvr.data import load_split, prompt_id_for
 from rlvr.fake import FakeJudge
@@ -1248,3 +1256,128 @@ def test_the_dashboard_module_is_gone() -> None:
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("rlvr.dashboard")
 
+
+IMPORT_TIMESTAMP = "20260101T000000Z"
+
+
+def make_run(runs_root: Path) -> Path:
+    """A run folder with meta.json and two metrics rows, ready to import."""
+    run_dir = runs_root / "code-score" / IMPORT_TIMESTAMP
+    run_dir.mkdir(parents=True)
+    meta = {"arm": "code-score", "timestamp": IMPORT_TIMESTAMP, "mode": "fake"}
+    (run_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    rows = [
+        {"step": 1, "pass_rate": 0.25},
+        {"step": 2, "pass_rate": 0.5},
+    ]
+    (run_dir / "metrics.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+    return run_dir
+
+
+def count_runs() -> int:
+    """The run count in the store the test mirror pointed MLflow at."""
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("rlvr")
+    if experiment is None:
+        return 0
+    return len(client.search_runs([experiment.experiment_id]))
+
+
+def test_sync_mlflow_twice_leaves_one_run(tmp_path, capsys):
+    folder = make_run(tmp_path / "runs")
+    args = Namespace(run_dir=folder, config=None)
+    assert sync_mlflow_command(args) == 0
+    first = count_runs()
+    assert first > 0
+    assert sync_mlflow_command(args) == 0
+    assert count_runs() == first
+
+
+class StubUploader:
+    """Records the calls a run makes on the uploader."""
+
+    calls: list[tuple] = []
+
+    def __init__(self, run_dir, arm, started, destination, **kwargs) -> None:
+        StubUploader.calls.append(("init", run_dir, arm, started, destination, kwargs))
+
+    def start(self) -> None:
+        StubUploader.calls.append(("start",))
+
+    def close(self, timeout: float = 60.0) -> None:
+        StubUploader.calls.append(("close",))
+
+
+def write_bucket_config(tmp_path: Path) -> Path:
+    path = tmp_path / "bucket.toml"
+    path.write_text(CONFIG + '\n[mlflow]\nbucket = "s3://bucket/runs/v1"\n', encoding="utf-8")
+    return path
+
+
+def test_run_starts_the_uploader_when_a_bucket_is_set(tmp_path, monkeypatch) -> None:
+    StubUploader.calls = []
+    monkeypatch.setattr("rlvr.cli.RunUploader", StubUploader)
+    config_path = write_bucket_config(tmp_path)
+    runs_root = tmp_path / "runs"
+
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+
+    kinds = [call[0] for call in StubUploader.calls]
+    assert kinds == ["init", "start", "close"]
+    init = StubUploader.calls[0]
+    assert init[2] == "code-score"
+    assert init[4] == "s3://bucket/runs/v1"
+    assert init[5]["concurrency"] == 2
+
+
+def test_a_run_tags_the_checkpoints_uri_when_a_bucket_is_set(
+    tmp_path, monkeypatch
+) -> None:
+    from mlflow.tracking import MlflowClient
+
+    StubUploader.calls = []
+    monkeypatch.setattr("rlvr.cli.RunUploader", StubUploader)
+    config_path = write_bucket_config(tmp_path)
+    runs_root = tmp_path / "runs"
+
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+
+    started = next((runs_root / "code-score").iterdir()).name
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("rlvr")
+    assert experiment is not None
+    runs = client.search_runs([experiment.experiment_id])
+    parents = [run for run in runs if "rlvr/run_dir" in run.data.tags]
+    assert len(parents) == 1
+    assert parents[0].data.tags["rlvr/checkpoints_uri"] == (
+        f"s3://bucket/runs/v1/code-score/{started}"
+    )
+
+
+def test_a_broken_uploader_does_not_stop_the_run(tmp_path, monkeypatch) -> None:
+    class BrokenUploader(StubUploader):
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("no boto3 here")
+
+    monkeypatch.setattr("rlvr.cli.RunUploader", BrokenUploader)
+    config_path = write_bucket_config(tmp_path)
+    runs_root = tmp_path / "runs"
+
+    args = Namespace(
+        arm="code-score",
+        config=config_path,
+        fake=True,
+        runs_root=runs_root,
+        resume=False,
+        control=None,
+    )
+    assert run_command(args) == 0
+    assert (runs_root / "code-score").is_dir()

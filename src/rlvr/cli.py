@@ -6,6 +6,7 @@
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
     rlvr dashboard [--runs-root <runs-root>] [--port 8081]
     rlvr import-mlflow --runs-root <runs-root> [--arm <arm>]
+    rlvr sync-mlflow <run folder> [--config PATH]
     rlvr saved-view --runs-root <runs-root>
     rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
 
@@ -34,6 +35,14 @@ caller's git can already write to.
 `import-mlflow` copies old run folders into the local MLflow store. It walks
 `runs/<arm>/<timestamp>/meta.json` when `--arm` is omitted, and replays each
 folder's metrics, tables and GPU samples.
+
+`sync-mlflow` replays one run folder and deletes the runs it had before, so a
+folder that was imported twice or copied from another machine keeps one run.
+The store is the one `--config` names, else `MLFLOW_TRACKING_URI`, else the
+local `mlflow.db` under the runs root.
+
+A run with `[mlflow] bucket` set starts the uploader beside training, tags the
+run with `rlvr/checkpoints_uri`, and never stops training for an upload fault.
 
 `saved-view` writes the study saved view to the `rlvr` experiment and prints the
 hash route that opens it. A second call replaces the same tag.
@@ -111,6 +120,7 @@ from .screening import screen as run_screen
 from .stages import BANDS
 from .summary import SummaryError, format_summary, load_reports, write_report
 from .synthetic import SyntheticError, load_synthetic_questions
+from .upload import RunUploader, upload_prefix
 
 __all__ = [
     "build_generator",
@@ -126,10 +136,16 @@ __all__ = [
     "main",
     "screen_command",
     "spread_share_warning",
+    "sync_mlflow_command",
+    "sync_tracking_uri",
+    "tag_checkpoints_uri",
     "training_steps",
 ]
 
 USAGE_ERROR = 2
+
+#: Tag that links a run in the store to the bucket prefix of its checkpoints.
+CHECKPOINTS_URI_TAG = "rlvr/checkpoints_uri"
 
 #: vLLM shares the card with the training model, so the engine gets a fraction
 #: of the memory and a context that covers one prompt plus one completion.
@@ -338,6 +354,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--arm",
         default=None,
         help="only import this arm (default: every arm under the runs root)",
+    )
+
+    sync_mlflow = subparsers.add_parser(
+        "sync-mlflow", help="replay one run folder and replace its old run"
+    )
+    sync_mlflow.add_argument(
+        "run_dir",
+        type=Path,
+        help="run folder, for example runs/code-score/20260101T000000Z",
+    )
+    sync_mlflow.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="config file that names the tracking URI (default: $MLFLOW_TRACKING_URI)",
     )
 
     saved_view = subparsers.add_parser(
@@ -663,6 +694,24 @@ def start_gpu_sampler(sampler: GpuSampler) -> GpuSampler | None:
     return sampler
 
 
+def tag_checkpoints_uri(run_id: str, prefix: str) -> None:
+    """Record where one run's checkpoints live in the bucket.
+
+    The dashboard reads `rlvr/checkpoints_uri` to link a run to its files. An
+    empty run id means the mirror never opened a run, so there is nothing to
+    tag. A failed write is a line on stderr, because a tag must not stop
+    training.
+    """
+    if not run_id:
+        return
+    try:
+        from mlflow.tracking import MlflowClient
+
+        MlflowClient().set_tag(run_id, CHECKPOINTS_URI_TAG, prefix)
+    except Exception as error:  # noqa: BLE001 - the tag must not stop training
+        print(f"cannot tag the checkpoints uri: {error}", file=sys.stderr)
+
+
 def run_command(args: argparse.Namespace) -> int:
     # PyTorch reads PYTORCH_CUDA_ALLOC_CONF once, at allocator startup, so set
     # it before anything can import torch. A value the user already set wins.
@@ -767,6 +816,29 @@ def run_command(args: argparse.Namespace) -> int:
     except OSError as error:
         raise UsageError(f"cannot create the control file: {error}") from error
 
+    # The uploader copies checkpoints and the run folder to the bucket beside
+    # training. A missing boto3, a bad destination or a dead network leaves the
+    # run folder intact and the run keeps going, so every fault here is a line
+    # on stderr and no uploader.
+    uploader: RunUploader | None = None
+    checkpoints_prefix = ""
+    if config.mlflow.bucket:
+        try:
+            uploader = RunUploader(
+                store.run_dir,
+                args.arm,
+                store.timestamp,
+                config.mlflow.bucket,
+                concurrency=config.mlflow.upload_concurrency,
+            )
+            uploader.start()
+            checkpoints_prefix = upload_prefix(
+                config.mlflow.bucket, args.arm, store.timestamp
+            )
+        except Exception as error:  # noqa: BLE001 - the uploader must not stop training
+            print(f"uploader did not start: {error}", file=sys.stderr)
+            uploader = None
+
     experiment = Experiment(
         arm=args.arm,
         config=config,
@@ -813,6 +885,14 @@ def run_command(args: argparse.Namespace) -> int:
     finally:
         if sampler is not None:
             sampler.stop()
+        if uploader is not None:
+            try:
+                uploader.close()
+            except Exception as error:  # noqa: BLE001 - the uploader must not stop training
+                print(f"uploader did not stop cleanly: {error}", file=sys.stderr)
+            # The run id exists once the mirror has opened the parent run, which
+            # happens at the first store write inside the experiment.
+            tag_checkpoints_uri(mirror.run_id, checkpoints_prefix)
         mirror.close(status="FAILED" if failed else "FINISHED")
 
     print(f"arm={summary.arm} steps={summary.steps} rollouts={summary.rollouts}")
@@ -982,6 +1062,40 @@ def import_mlflow_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def sync_tracking_uri(config_path: Path | None) -> str | None:
+    """The tracking URI for `sync-mlflow`, or None for the local store.
+
+    A `--config` file wins. Without one the `MLFLOW_TRACKING_URI` environment
+    variable is used. With neither, the mirror writes to `mlflow.db` under the
+    runs root. The `config` snapshot in `meta.json` is not read, because no
+    parser turns that snapshot back into a config object.
+    """
+    if config_path is not None:
+        uri = load_config(config_path).mlflow.tracking_uri
+        if uri:
+            return uri
+    return os.environ.get("MLFLOW_TRACKING_URI") or None
+
+
+def sync_mlflow_command(args: argparse.Namespace) -> int:
+    """Replay one run folder and replace the runs it had in the store."""
+    run_dir = Path(args.run_dir)
+    if not (run_dir / "meta.json").is_file():
+        raise UsageError(f"not a run folder (no meta.json): {run_dir}")
+    runs_root = run_dir.parent.parent
+    tracking_uri = sync_tracking_uri(args.config)
+    try:
+        run_id = import_run(
+            runs_root, run_dir, rebuild=True, tracking_uri=tracking_uri
+        )
+    except Exception as error:  # noqa: BLE001 - report the folder and stop
+        raise UsageError(f"cannot sync {run_dir}: {error}") from error
+    if run_id is None:
+        raise UsageError(f"cannot sync {run_dir}: the store kept no run id")
+    print(f"synced {run_dir.parent.name}/{run_dir.name} -> {run_id}")
+    return 0
+
+
 def saved_view_command(args: argparse.Namespace) -> int:
     """Write the saved view tag and print the route that opens it."""
     try:
@@ -1067,6 +1181,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return dashboard_command(args)
         if args.command == "import-mlflow":
             return import_mlflow_command(args)
+        if args.command == "sync-mlflow":
+            return sync_mlflow_command(args)
         if args.command == "saved-view":
             return saved_view_command(args)
         if args.command == "publish":
