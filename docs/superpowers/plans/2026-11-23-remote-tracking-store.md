@@ -182,14 +182,15 @@ git commit -m "Point the mirror at the configured store and artifact root"
 
 ```python
 def test_rebuild_finds_a_run_copied_to_another_path(tmp_path: Path) -> None:
-    first = make_run(tmp_path / "box")
-    mirror = MlflowMirror(tmp_path / "box" / "runs", first)
+    runs_root = tmp_path / "runs"
+    first = make_run(tmp_path)
+    mirror = MlflowMirror(runs_root, first)
     mirror.start({"arm": "code-score", "timestamp": RUN_NAME})
     mirror.close("FINISHED")
 
-    copy = tmp_path / "vm" / "runs" / "code-score" / RUN_NAME
+    copy = tmp_path / "elsewhere" / "code-score" / RUN_NAME
     shutil.copytree(first, copy)
-    rebuilt = MlflowMirror(tmp_path / "vm" / "runs", copy)
+    rebuilt = MlflowMirror(runs_root, copy)
     rebuilt.rebuild()
     rebuilt.close("FINISHED")
 
@@ -294,7 +295,7 @@ Expected: FAIL, `ModuleNotFoundError: No module named 'rlvr.upload'`.
 
 - [ ] **Step 3: Implement the watcher**
 
-A background thread scans `checkpoints/` every `interval` seconds and queues files whose `(size, mtime_ns)` changed since the last scan. A `ThreadPoolExecutor(max_workers=concurrency)` uploads, retrying `retries` times with 1, 2, 4 second backoff. `close` stops the scan, waits for the queue, uploads `meta.json`, `metrics.jsonl`, `eval.json`, `labels.jsonl` and `control-events.jsonl` when present, then uploads `manifest.json` last. Compute sha256 while reading the file once. Every exception goes to `.errors` and never escapes.
+A background thread scans `checkpoints/` every `interval` seconds and queues files whose `(size, mtime_ns)` changed since the last scan. A `ThreadPoolExecutor(max_workers=concurrency)` uploads, retrying `retries` times with 1, 2, 4 second backoff. `close` stops the scan, waits for the queue, uploads `meta.json`, `metrics.jsonl`, `eval.json`, `labels.jsonl` and `control-events.jsonl` when present, then uploads `manifest.json` last. Compute sha256 while reading the file once. Every exception goes to `.errors` and never escapes. Import `boto3` inside the factory that builds the default client, so an injected stub needs no boto3.
 
 - [ ] **Step 4: Run the uploader tests**
 
