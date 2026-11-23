@@ -16,6 +16,7 @@ from rlvr.cli import (
     build_judge,
     build_prompts,
     dashboard_argv,
+    dashboard_command,
     main,
     run_command,
     sync_mlflow_command,
@@ -1210,6 +1211,52 @@ def test_training_steps_keeps_the_starting_batch_without_a_policy(tmp_path) -> N
     assert training_steps(config, prompts, None) == config.epochs * 100
 
 
+def test_dashboard_prints_the_remote_store(capsys, monkeypatch) -> None:
+    def fail_exec(path: str, argv: list[str]) -> None:
+        raise AssertionError("the remote path must not start a server")
+
+    monkeypatch.setattr("rlvr.cli.os.execv", fail_exec)
+    args = Namespace(local=False, port=8081, runs_root=Path("runs"))
+    assert dashboard_command(args) == 0
+    assert "http://127.0.0.1:8081" in capsys.readouterr().out
+
+
+def test_dashboard_prints_the_configured_store(tmp_path, capsys, monkeypatch) -> None:
+    def fail_exec(path: str, argv: list[str]) -> None:
+        raise AssertionError("the remote path must not start a server")
+
+    monkeypatch.setattr("rlvr.cli.os.execv", fail_exec)
+    path = tmp_path / "config.toml"
+    path.write_text(
+        CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9000"\n',
+        encoding="utf-8",
+    )
+    args = Namespace(local=False, port=8081, runs_root=Path("runs"), config=path)
+    assert dashboard_command(args) == 0
+    assert "http://127.0.0.1:9000" in capsys.readouterr().out
+
+
+def test_dashboard_local_still_starts_a_server(tmp_path, monkeypatch) -> None:
+    seen: list[tuple[str, list[str]]] = []
+
+    def fake_exec(path: str, argv: list[str]) -> None:
+        seen.append((path, argv))
+
+    monkeypatch.setattr("rlvr.cli.os.execv", fake_exec)
+    runs_root = tmp_path / "runs"
+
+    assert main(["dashboard", "--local", "--runs-root", str(runs_root)]) == 0
+
+    assert len(seen) == 1
+    path, argv = seen[0]
+    assert path == sys.executable
+    assert argv[argv.index("--backend-store-uri") + 1] == (
+        f"sqlite:///{runs_root / 'mlflow.db'}"
+    )
+    # The local server defaults to a port that cannot collide with the remote.
+    assert argv[argv.index("--port") + 1] == "8099"
+
+
 def test_dashboard_command_runs_mlflow_as_a_module(tmp_path, monkeypatch) -> None:
     seen: list[tuple[str, list[str]]] = []
 
@@ -1220,7 +1267,19 @@ def test_dashboard_command_runs_mlflow_as_a_module(tmp_path, monkeypatch) -> Non
     monkeypatch.setenv("PATH", "")
 
     runs_root = tmp_path / "runs"
-    assert main(["dashboard", "--runs-root", str(runs_root), "--port", "8081"]) == 0
+    assert (
+        main(
+            [
+                "dashboard",
+                "--local",
+                "--runs-root",
+                str(runs_root),
+                "--port",
+                "8081",
+            ]
+        )
+        == 0
+    )
 
     assert len(seen) == 1
     path, argv = seen[0]

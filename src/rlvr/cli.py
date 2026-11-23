@@ -4,7 +4,7 @@
     rlvr screen --questions <path> [--samples <n>] --output <dir> [--fake]
     rlvr eval-band --band <band> [--count 100] [--seed 2026] [--checkpoint <dir>] [--out <path>]
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
-    rlvr dashboard [--runs-root <runs-root>] [--port 8081]
+    rlvr dashboard [--runs-root <runs-root>] [--local] [--port 8099] [--config <path>]
     rlvr import-mlflow --runs-root <runs-root> [--arm <arm>]
     rlvr sync-mlflow <run folder> [--config PATH]
     rlvr saved-view --runs-root <runs-root>
@@ -151,6 +151,9 @@ __all__ = [
 ]
 
 USAGE_ERROR = 2
+
+#: The MLflow server on this VM. The box reaches it through an SSH tunnel.
+DEFAULT_TRACKING_URI = "http://127.0.0.1:8081"
 
 #: vLLM shares the card with the training model, so the engine gets a fraction
 #: of the memory and a context that covers one prompt plus one completion.
@@ -331,19 +334,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     dashboard = subparsers.add_parser(
-        "dashboard", help="serve the MLflow tracking UI"
+        "dashboard", help="print the MLflow URL or serve a local store"
     )
     dashboard.add_argument(
         "--runs-root",
         type=Path,
         default=Path("runs"),
-        help="runs root that holds the MLflow store (default: ./runs)",
+        help="runs root that holds the local MLflow store (default: ./runs)",
+    )
+    dashboard.add_argument(
+        "--local",
+        action="store_true",
+        help="start a local MLflow server instead of printing the remote URL",
     )
     dashboard.add_argument(
         "--port",
         type=int,
-        default=8081,
-        help="port to serve on (default: 8081)",
+        default=8099,
+        help="local server port (default: 8099)",
+    )
+    dashboard.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="config file that names the tracking URI (default: packaged config)",
     )
 
     import_mlflow = subparsers.add_parser(
@@ -1146,7 +1160,14 @@ def dashboard_argv(runs_root: Path, port: int) -> list[str]:
 
 
 def dashboard_command(args: argparse.Namespace) -> int:
-    """Start the MLflow server on the runs root."""
+    """Print the tracking URI, or start a local MLflow server with --local."""
+    if not getattr(args, "local", False):
+        config_path = getattr(args, "config", None)
+        config = load_config(
+            config_path if config_path is not None else default_config_path()
+        )
+        print(config.mlflow.tracking_uri or DEFAULT_TRACKING_URI)
+        return 0
     if not 0 < args.port <= 65535:
         raise UsageError(f"invalid port {args.port}")
     runs_root = args.runs_root
