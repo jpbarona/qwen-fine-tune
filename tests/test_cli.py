@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 import os
 import subprocess
 import sys
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from rlvr.cli import build_judge, build_prompts, main
+from rlvr.cli import build_judge, build_prompts, dashboard_argv, main
 from rlvr.config import load_config
 from rlvr.data import load_split, prompt_id_for
 from rlvr.fake import FakeJudge
@@ -210,11 +211,33 @@ def test_run_writes_the_four_files(config_path, tmp_path) -> None:
         "checkpoints",
         "control.json",
         "eval.json",
+        "gpu.jsonl",
         "meta.json",
         "metrics.jsonl",
+        "mlflow.json",
         "rollouts.jsonl",
     ]
     assert (run_dir / "meta.json").read_text(encoding="utf-8").startswith("{")
+
+
+def test_a_sampler_that_cannot_start_does_not_stop_the_run(
+    config_path, tmp_path, monkeypatch, capsys
+) -> None:
+    from rlvr import cli
+
+    def fail_start(self):
+        raise RuntimeError("cannot create a thread")
+
+    monkeypatch.setattr(cli.GpuSampler, "start", fail_start)
+    runs_root = tmp_path / "runs"
+    assert main(
+        ["run", "--arm", "code-score", "--fake", "--config", str(config_path), "--runs-root", str(runs_root)]
+    ) == 0
+    captured = capsys.readouterr()
+    assert "gpu sampler did not start" in captured.err
+    run_dir = next((runs_root / "code-score").iterdir())
+    assert (run_dir / "metrics.jsonl").is_file()
+    assert not (run_dir / "gpu.jsonl").exists()
 
 
 def test_unknown_arm_is_reported_on_stderr(config_path, tmp_path, capsys) -> None:
@@ -1177,3 +1200,51 @@ def test_training_steps_keeps_the_starting_batch_without_a_policy(tmp_path) -> N
 
     # The old path starts at two prompts per step.
     assert training_steps(config, prompts, None) == config.epochs * 100
+
+
+def test_dashboard_command_runs_mlflow_as_a_module(tmp_path, monkeypatch) -> None:
+    seen: list[tuple[str, list[str]]] = []
+
+    def fake_exec(path: str, argv: list[str]) -> None:
+        seen.append((path, argv))
+
+    monkeypatch.setattr("rlvr.cli.os.execv", fake_exec)
+    monkeypatch.setenv("PATH", "")
+
+    runs_root = tmp_path / "runs"
+    assert main(["dashboard", "--runs-root", str(runs_root), "--port", "8081"]) == 0
+
+    assert len(seen) == 1
+    path, argv = seen[0]
+    assert path == sys.executable
+    assert argv[0] == sys.executable
+    assert argv[1:4] == ["-m", "mlflow", "server"]
+    assert argv[argv.index("--host") + 1] == "0.0.0.0"
+    assert argv[argv.index("--port") + 1] == "8081"
+    assert argv[argv.index("--allowed-hosts") + 1] == "*"
+    # The module form does not need the mlflow console script on PATH.
+    assert "mlflow" not in os.environ.get("PATH", "")
+    assert dashboard_argv(runs_root, 8081) == argv
+
+
+def test_dashboard_allowed_hosts_can_be_set(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RLVR_ALLOWED_HOSTS", "example.test:8083")
+    argv = dashboard_argv(tmp_path, 8081)
+    assert argv[argv.index("--allowed-hosts") + 1] == "example.test:8083"
+
+
+def test_dashboard_help_mentions_mlflow() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "rlvr", "dashboard", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "mlflow" in result.stdout.lower()
+
+
+def test_the_dashboard_module_is_gone() -> None:
+    sys.modules.pop("rlvr.dashboard", None)
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("rlvr.dashboard")
+

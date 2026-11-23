@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=9,<10"]
+tracking = ["mlflow==3.18.0"]
 
 # The one runtime environment. vLLM samples every rollout and the same process
 # keeps the Hugging Face model for the optimizer. Pinned exact versions for a
@@ -31,7 +32,7 @@ rlvr = "rlvr.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-rlvr = ["resources/*.toml", "web/*.html"]
+rlvr = ["resources/*.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

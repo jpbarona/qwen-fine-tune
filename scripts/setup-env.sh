@@ -360,8 +360,8 @@ if ! "$venv/bin/python" -m pip --version >/dev/null 2>&1; then
   "$python_bin" -m pip --python "$venv/bin/python" install -q pip setuptools wheel
 fi
 
-echo "installing -e .[vllm]"
-"$venv/bin/python" -m pip install -e "$repo_root[vllm]"
+echo "installing -e .[vllm,tracking]"
+"$venv/bin/python" -m pip install -e "$repo_root[vllm,tracking]"
 
 echo "installing pytest"
 "$venv/bin/python" -m pip install "pytest>=9,<10"

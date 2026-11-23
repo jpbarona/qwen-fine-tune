@@ -75,6 +75,12 @@ def test_meta_json_records_reproducibility_fields(run_fake, monkeypatch) -> None
     assert meta["config"]["fake"]["steps"] == 3
 
 
+def test_meta_records_the_image_digest(run_fake, monkeypatch) -> None:
+    monkeypatch.setenv("RLVR_IMAGE_REF", "ghcr.io/jpbarona/rlvr@sha256:abc")
+    meta = read_json(run_fake("code-score")[0] / "meta.json")
+    assert meta["image"] == "ghcr.io/jpbarona/rlvr@sha256:abc"
+
+
 def test_meta_git_commit_is_null_when_git_is_unavailable(run_fake, monkeypatch) -> None:
     import rlvr.repro as repro
 
@@ -322,6 +328,25 @@ def test_a_bad_label_line_that_is_not_the_torn_tail_raises(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="label file line 2"):
         store.read_labels()
+
+
+def test_a_metric_row_reaches_the_mirror(tmp_path: Path) -> None:
+    from rlvr.runs import RunStore
+
+    class Recorder:
+        rows = []
+        def start(self, meta): pass
+        def step(self, row): self.rows.append(row)
+        def eval(self, payload): pass
+        def labels(self): pass
+        def gpu_sample(self, row): pass
+        def rebuild(self): pass
+        def close(self, status="FINISHED"): pass
+
+    recorder = Recorder()
+    store = RunStore(tmp_path, "code-score", mirror=recorder)
+    store.append_metric({"step": 3, "pass_rate": 0.5})
+    assert recorder.rows == [{"step": 3, "pass_rate": 0.5}]
 
 
 def test_an_unterminated_complete_label_line_is_rewritten(tmp_path) -> None:

@@ -14,6 +14,10 @@ Everything is append-as-you-go. A rollout is on disk before the next one is
 generated, so a crash costs at most one record. Each line is flushed on write.
 Later tasks that need speed can hold the handle open, as long as records stay
 visible.
+
+Each write is also copied into an optional mirror, which is the MLflow store by
+default in the CLI. The mirror is handed the record after it is on disk, so a
+mirror that fails loses a copy and never a record.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from .mlflow_log import Mirror, NullMirror
 from .schema import RolloutRecord
 
 __all__ = ["RunStore", "utc_timestamp"]
@@ -50,7 +55,13 @@ def _dumps(payload: Mapping[str, Any]) -> str:
 class RunStore:
     """Writes one run folder. The concrete implementation of the Store seam."""
 
-    def __init__(self, runs_root: str | Path, arm: str, timestamp: str | None = None) -> None:
+    def __init__(
+        self,
+        runs_root: str | Path,
+        arm: str,
+        timestamp: str | None = None,
+        mirror: Mirror | None = None,
+    ) -> None:
         self.arm = arm
         self.timestamp = utc_timestamp() if timestamp is None else timestamp
         if "/" in self.timestamp or self.timestamp in ("", ".", ".."):
@@ -61,6 +72,11 @@ class RunStore:
             raise FileExistsError(f"run folder already exists: {self.run_dir}")
         self.run_dir.mkdir(parents=True)
         (self.run_dir / CHECKPOINTS_NAME).mkdir(parents=True, exist_ok=True)
+        self.mirror: Mirror = NullMirror() if mirror is None else mirror
+
+    def attach_mirror(self, mirror: Mirror) -> None:
+        """Point this store at `mirror`. Used after `resume()`, which cannot take one."""
+        self.mirror = mirror
 
     @classmethod
     def resume(cls, runs_root: str | Path, arm: str) -> "RunStore":
@@ -87,6 +103,7 @@ class RunStore:
         store.timestamp = run_dir.name
         store.runs_root = root
         store.run_dir = run_dir
+        store.mirror = NullMirror()
         return store
 
     def truncate_to_step(self, step: int) -> None:
@@ -230,6 +247,7 @@ class RunStore:
     def write_meta(self, meta: Mapping[str, Any]) -> None:
         """Write meta.json. Called once, before the first rollout."""
         self._write_atomic(self.meta_path, _dumps(dict(meta)) + "\n")
+        self.mirror.start(meta)
 
     def append_rollout(self, record: RolloutRecord) -> None:
         """Append one rollout record."""
@@ -241,6 +259,7 @@ class RunStore:
             self.metrics_path,
             json.dumps(dict(row), ensure_ascii=False, allow_nan=False),
         )
+        self.mirror.step(row)
 
     def append_control_event(self, event: Mapping[str, Any]) -> None:
         """Append one control-file event, so an edit is never silent."""
@@ -255,6 +274,7 @@ class RunStore:
             self.labels_path,
             json.dumps(dict(row), ensure_ascii=False, allow_nan=False),
         )
+        self.mirror.labels()
 
     def read_labels(self) -> list[dict[str, Any]]:
         """Every label change and saved streak in file order, for a resume.
@@ -316,6 +336,7 @@ class RunStore:
         a half-written one.
         """
         self._write_atomic(self.eval_path, _dumps(dict(payload)) + "\n")
+        self.mirror.eval(payload)
 
     @staticmethod
     def _write_atomic(path: Path, text: str) -> None:

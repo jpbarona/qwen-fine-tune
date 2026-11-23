@@ -160,3 +160,12 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 142. New box now reaches the first step in about three minutes
 143. Step time is unchanged, so the container buys setup time only
 144. Dashboard refresh drops to half a second, payload builds in 0.4 seconds
+145. Dashboard command now starts MLflow on the same port
+146. The React page and the web layer are deleted
+147. Each run writes a parent run and a GPU child run
+148. Old runs import with rlvr import-mlflow
+149. Build the image once and pull it, never build per box
+150. uv and cache mounts cut the image build
+151. triton compiled its C driver as C++ and failed on CUDA 13
+152. Compiling that driver with gcc fixes the engine start
+153. The MLflow page is slow through this VM, so tunnel from the Mac

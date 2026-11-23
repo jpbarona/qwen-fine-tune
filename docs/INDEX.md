@@ -5,7 +5,7 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 
 ## Start here
 
-- [../README.md](../README.md): install, run, dashboard, data layout, contracts.
+- [../README.md](../README.md): install, run, MLflow dashboard, data layout, contracts.
 - `DECISIONS.md`: choices as they were made, newest last. D25 onward covers the
   parked-pool study.
 - `IDEAS.md`: proposals, two chunks each, newest first inside a topic.
@@ -13,6 +13,10 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 
 ## Designs and plans
 
+- [superpowers/specs/2026-11-23-mlflow-design.md](superpowers/specs/2026-11-23-mlflow-design.md):
+  the MLflow store, the parent and child runs, the tables and the importer.
+- [superpowers/plans/2026-11-23-mlflow.md](superpowers/plans/2026-11-23-mlflow.md):
+  the task breakdown for that change.
 - [superpowers/specs/2026-11-22-parked-and-train-queues-design.md](superpowers/specs/2026-11-22-parked-and-train-queues-design.md):
   saved queues, retirement, three-failure demotion.
 - [superpowers/plans/2026-11-22-parked-and-train-queues.md](superpowers/plans/2026-11-22-parked-and-train-queues.md):

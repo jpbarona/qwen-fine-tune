@@ -1,50 +1,36 @@
-"""A live progress dashboard served over a local HTTP server.
+"""Reads run folders into one payload for the MLflow mirror and the summary.
 
-The dashboard reads the same run folders the summary reads, but never fails on
-a run that is mid-write. It serves two resources:
+The read layer turns the same run folders the summary reads into one JSON
+payload. It never fails on a run that is mid-write. A missing file, a partial
+line or a bad JSON value becomes an empty value instead of an error.
 
-    GET /          one HTML page with the React bundle inlined
-    GET /data.json the JSON the page polls every half second
+The payload carries one section per arm. A section holds the step series, the
+evaluation points, the reward and test histograms, the stage progress and the
+questions table. Distributions come from the tail of `rollouts.jsonl`, so a long
+run does not re-read the whole file on every read. The per step memory split
+(live, cached, fragmented, device total, unaccounted) comes from the metrics
+rows the trainer writes, so the memory figures work on a machine with no GPU.
 
-The page is a monitoring tool, not a report. One section per arm, one KPI strip
-per section, and a grid of charts. Distributions come from the tail of
-`rollouts.jsonl`, so a long run does not re-read the whole file on every poll.
-GPU samples come from `nvidia-smi`, at most one every two seconds on the
-`/data.json` route, and the last 120 samples are kept in memory for the GPU
-chart. The per step memory split (live, cached, fragmented, device total,
-unaccounted) comes from the metrics rows the trainer writes, so the memory
-panel works on a machine with no GPU.
-
-The page is built from the Vite app in `dashboard/` and committed as a single
-HTML file in the `rlvr/web` package data. It fetches nothing from the network,
-so the dashboard works on a host with no internet access.
-
-The server binds to 127.0.0.1 and stops on Ctrl+C. Nothing here reads secrets
-or environment variables.
+The MLflow mirror and the summary read through this module. The GPU sampler
+lives in `gpu.py`, not here.
 """
 
 from __future__ import annotations
 
 import json
 import math
-import re
-import shutil
-import subprocess
-import time
 from copy import deepcopy
 from threading import RLock
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
-from urllib.parse import urlsplit
 
 from .dashboard_io import _all_rollout_records, _read_json, _read_jsonl, _read_tail_lines
 from .memory import MEMORY_METRIC_FIELDS
 from .stages import BANDS, UNSTAGED_STAGE
 
-__all__ = ["collect_dashboard", "render_html", "sample_gpu", "serve_dashboard"]
+__all__ = ["collect_dashboard", "target_steps"]
 
 METRICS_NAME = "metrics.jsonl"
 EVAL_NAME = "eval.json"
@@ -80,14 +66,6 @@ STALE_SECONDS = 900.0
 #: where the process list cannot be read.
 PROCESS_GRACE_SECONDS = 120.0
 
-#: Where to look for nvidia-smi when PATH does not carry it. A tmux server
-#: started from a different shell can have a PATH without the driver tools even
-#: though the binary is installed.
-NVIDIA_SMI_PATHS: tuple[str, ...] = (
-    "/usr/bin/nvidia-smi",
-    "/usr/local/nvidia/bin/nvidia-smi",
-)
-
 #: How many bytes of rollouts.jsonl to read from the tail for distributions.
 ROLLOUT_TAIL_BYTES = 4 * 1024 * 1024
 
@@ -98,10 +76,6 @@ REWARD_BINS = 20
 #: it. Negative rewards are common: a truncated answer scores -1.0.
 REWARD_MIN = -1.0
 REWARD_MAX = 1.0
-
-#: A GPU sample younger than this many seconds is reused instead of sampled
-#: again, so a page that polls fast does not spawn nvidia-smi every request.
-GPU_SAMPLE_SECONDS = 2.0
 
 TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 
@@ -141,10 +115,6 @@ COUNT_SERIES_FIELDS: tuple[str, ...] = (
 )
 
 LATEST_FIELDS: tuple[str, ...] = SERIES_FIELDS + ("rollouts",)
-
-#: The last 120 GPU samples, one per data request.
-_gpu_history: deque[dict[str, Any]] = deque(maxlen=120)
-_gpu_lock = RLock()
 
 
 def _number(value: Any) -> float | None:
@@ -331,7 +301,7 @@ def _fake_target_steps(config: Mapping[str, Any]) -> int | None:
     return _positive_int(fake.get("steps"))
 
 
-def _target_steps(meta: Mapping[str, Any]) -> int | None:
+def target_steps(meta: Mapping[str, Any]) -> int | None:
     """Target steps derivable from meta.json, or None when it is not recorded.
 
     `mode` picks the formula. A fake run stops after `[fake] steps`, so it must
@@ -368,7 +338,7 @@ def _prompt_sample_target(meta: Mapping[str, Any]) -> int | None:
         return None
     schedule_step = _schedule_step_prompts(meta)
     if schedule_step is not None:
-        target = _target_steps(meta)
+        target = target_steps(meta)
         if target is None:
             return None
         return target * schedule_step
@@ -1066,7 +1036,7 @@ def _collect_run(
         "status": _status(eval_payload, run_dir / METRICS_NAME, now, alive),
         "metrics_age_seconds": _metrics_age(run_dir / METRICS_NAME, now),
         "steps_done": _steps_done(rows),
-        "target_steps": _target_steps(meta),
+        "target_steps": target_steps(meta),
         "start_batch_prompts": _start_batch_prompts(meta),
         "prompt_samples": _prompt_samples(rows),
         "prompt_sample_target": _prompt_sample_target(meta),
@@ -1083,136 +1053,6 @@ def _collect_run(
         "questions": questions,
         "dropped": dropped,
     }
-
-
-_GPU_NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)")
-
-
-def _gpu_number(value: str) -> float | None:
-    """An nvidia-smi CSV field as a number, or None when it is not one.
-
-    nvidia-smi prints text tokens such as N/A, [N/A], [Not Supported] and
-    [Unknown Error] for a field it cannot report, so anything that does not
-    start with a number becomes None. A number with a unit still parses, so a
-    format that keeps `%` or `MiB` does not silently zero the field. Zero is a
-    real reading and stays zero.
-    """
-    text = value.strip()
-    if not text:
-        return None
-    match = _GPU_NUMBER.match(text)
-    if match is None:
-        return None
-    return _number(float(match.group(0)))
-
-
-def _nvidia_smi() -> str:
-    """The nvidia-smi binary by PATH, then by the usual install paths."""
-    found = shutil.which("nvidia-smi")
-    if found:
-        return found
-    for candidate in NVIDIA_SMI_PATHS:
-        if Path(candidate).is_file():
-            return candidate
-    return "nvidia-smi"
-
-
-def _gpu_read() -> dict[str, Any] | None:
-    """One nvidia-smi reading for every GPU, or None when nothing was read.
-
-    One CSV row per GPU. Utilisation and temperature take the hottest GPU and
-    memory is the sum over all of them, so a multi-GPU host reports the whole
-    machine rather than an arbitrary card. A row with a field nvidia-smi cannot
-    report keeps that field as None. A reading where every field is None is a
-    failure, not a sample, so it is not recorded or counted.
-    """
-    command = [
-        _nvidia_smi(),
-        "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
-        "--format=csv,noheader,nounits",
-    ]
-    try:
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0:
-        return None
-    rows: list[dict[str, float | None]] = []
-    for line in completed.stdout.strip().splitlines():
-        parts = [part.strip() for part in line.split(",")]
-        if len(parts) < 4:
-            continue
-        rows.append(
-            {
-                "utilization": _gpu_number(parts[0]),
-                "memory_used": _gpu_number(parts[1]),
-                "memory_total": _gpu_number(parts[2]),
-                "temperature": _gpu_number(parts[3]),
-            }
-        )
-    if not rows:
-        return None
-
-    def total(name: str) -> float | None:
-        values = [row[name] for row in rows if row[name] is not None]
-        if not values:
-            return None
-        return float(sum(values))
-
-    def highest(name: str) -> float | None:
-        values = [row[name] for row in rows if row[name] is not None]
-        if not values:
-            return None
-        return float(max(values))
-
-    sample = {
-        "utilization": highest("utilization"),
-        "memory_used": total("memory_used"),
-        "memory_total": total("memory_total"),
-        "temperature": highest("temperature"),
-    }
-    if all(value is None for value in sample.values()):
-        return None
-    return sample
-
-
-def sample_gpu(now: float | None = None) -> None:
-    """Sample nvidia-smi unless the last sample is still fresh.
-
-    The sample is kept in the rolling history. A sample younger than
-    `GPU_SAMPLE_SECONDS` is reused, so the 404 and HTML paths do not run
-    nvidia-smi and a fast poll does not either. A failed read adds nothing and
-    does not reset the last sample time, so the strip can show how long ago the
-    last real reading was.
-    """
-    with _gpu_lock:
-        current = time.time() if now is None else now
-        if _gpu_history:
-            age = current - _gpu_history[-1].get("t", 0.0)
-            if age < GPU_SAMPLE_SECONDS:
-                return
-        sample = _gpu_read()
-        if sample is not None:
-            sample["t"] = current
-            _gpu_history.append(sample)
-
-
-def _gpu_state(now: float | None = None) -> dict[str, Any]:
-    """The current sample, the history, and the age of the last reading.
-
-    `age_seconds` is None when no reading has ever succeeded. The page shows
-    that age next to the sample count, so a sampler that has stopped returning
-    readings is visible instead of looking like a quiet GPU.
-    """
-    with _gpu_lock:
-        history = [dict(sample) for sample in _gpu_history]
-    if not history:
-        return {"current": None, "history": [], "age_seconds": None}
-    latest = {key: value for key, value in history[-1].items() if key != "t"}
-    current = time.time() if now is None else now
-    age = round(current - history[-1].get("t", current), 1)
-    return {"current": latest, "history": history, "age_seconds": age}
-
 
 
 # Reuse unchanged run summaries across half-second polls. The rollout panels
@@ -1278,107 +1118,7 @@ def collect_dashboard(paths: Iterable[str | Path]) -> dict[str, Any]:
     return {
         "generated_at": generated_at,
         "runs": runs,
-        "gpu": _gpu_state(now),
     }
 
 
-def _embed_json(data: Mapping[str, Any]) -> str:
-    """JSON safe to put inside a script element."""
-    text = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
-    return (
-        text.replace("&", "\\u0026")
-        .replace("<", "\\u003c")
-        .replace(">", "\\u003e")
-    )
 
-
-WEB_DIR = Path(__file__).with_name("web")
-PAGE_NAME = "index.html"
-DATA_MARKER = "__RLVR_INITIAL_DATA__"
-
-_page_template: str | None = None
-
-_FALLBACK_PAGE = """<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>RLVR</title></head>
-<body style="background:#08080a;color:#9a9aa3;font:12px ui-monospace,monospace;padding:24px">
-the dashboard bundle is missing. run `npm install && npm run build` in dashboard/
-</body>
-</html>
-"""
-
-
-def _page_template_text() -> str:
-    """The built page, read once per process."""
-    global _page_template
-    if _page_template is None:
-        try:
-            _page_template = (WEB_DIR / PAGE_NAME).read_text(encoding="utf-8")
-        except OSError:
-            _page_template = _FALLBACK_PAGE
-    return _page_template
-
-
-def render_html(data: Mapping[str, Any]) -> str:
-    """The built dashboard page with the first payload inlined.
-
-    User strings ride in JSON and are rendered by React as text, so nothing
-    from a run folder becomes HTML markup here. The JS bundle was inlined by
-    the build, so the page makes no network requests beyond `/data.json`.
-    """
-    return _page_template_text().replace(DATA_MARKER, _embed_json(data), 1)
-
-
-class _DashboardHandler(BaseHTTPRequestHandler):
-    """One HTTP handler. Paths are bound on a subclass per server."""
-
-    paths: list[str] = []
-    server_version = "rlvr-dashboard"
-
-    def do_GET(self) -> None:
-        try:
-            self._route()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-
-    def _route(self) -> None:
-        path = urlsplit(self.path).path
-        if path in ("/", "/index.html"):
-            body = render_html(collect_dashboard(self.paths)).encode("utf-8")
-            self._send(200, "text/html; charset=utf-8", body)
-        elif path == "/data.json":
-            sample_gpu()
-            body = (json.dumps(collect_dashboard(self.paths), separators=(",", ":")) + "\n").encode("utf-8")
-            self._send(200, "application/json; charset=utf-8", body)
-        else:
-            self._send(404, "text/plain; charset=utf-8", b"not found\n")
-
-    def _send(self, code: int, content_type: str, body: bytes) -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store, max-age=0")
-        self.send_header("Pragma", "no-cache")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
-        pass
-
-
-def serve_dashboard(
-    paths: Iterable[str | Path], *, host: str = "127.0.0.1", port: int = 8081
-) -> None:
-    """Serve the dashboard until Ctrl+C."""
-    handler = type(
-        "_BoundHandler", (_DashboardHandler,), {"paths": [str(path) for path in paths]}
-    )
-    server = ThreadingHTTPServer((host, port), handler)
-    server.daemon_threads = True
-    print(f"dashboard: http://{host}:{port}  (Ctrl+C to stop)")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()

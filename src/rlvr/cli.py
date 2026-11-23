@@ -4,7 +4,8 @@
     rlvr screen --questions <path> [--samples <n>] --output <dir> [--fake]
     rlvr eval-band --band <band> [--count 100] [--seed 2026] [--checkpoint <dir>] [--out <path>]
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
-    rlvr dashboard [<run-dir> ...] [--runs-root <runs-root>] [--port 8081]
+    rlvr dashboard [--runs-root <runs-root>] [--port 8081]
+    rlvr import-mlflow --runs-root <runs-root> [--arm <arm>]
     rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
 
 This build runs both the fake path and, on a GPU host with the `train` extra
@@ -29,6 +30,10 @@ with arms side by side and writes a static, self-contained HTML report.
 `publish` force-pushes that report to a Pages branch. It needs a remote the
 caller's git can already write to.
 
+`import-mlflow` copies old run folders into the local MLflow store. It walks
+`runs/<arm>/<timestamp>/meta.json` when `--arm` is omitted, and replays each
+folder's metrics, tables and GPU samples.
+
 Exit codes: 0 success, 2 for a bad command line, unknown or unimplemented arm,
 bad config, a missing judge key, a bad run folder, a bad question set, or a
 failed publish. Messages for those cases go to stderr without a traceback.
@@ -38,10 +43,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from time import perf_counter
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 from .batching import START_PROMPTS, BatchSizePolicy
 from .config import Config, ConfigError, default_config_path, load_config
@@ -72,8 +78,11 @@ from .fake import (
     FakeTestRunner,
     fake_memory,
 )
+from .gpu import GPU_ROWS_NAME, GpuSampler
 from .judge import JudgeClient, MissingAPIKeyError
 from .memory import configure_expandable_segments, read_torch_memory
+from .mlflow_import import import_run, run_dirs
+from .mlflow_log import open_mirror
 from .pools import DEFAULT_PROMOTION_BAR, Pools, PoolsError, from_rows
 from .publish import PublishError, publish_report
 from .reward import (
@@ -106,6 +115,7 @@ __all__ = [
     "build_prompts",
     "build_screen_test_runner",
     "build_test_runner",
+    "dashboard_argv",
     "eval_band_command",
     "load_synthetic_rows",
     "main",
@@ -295,26 +305,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     dashboard = subparsers.add_parser(
-        "dashboard", help="serve a live progress dashboard in the browser"
-    )
-    dashboard.add_argument(
-        "paths",
-        nargs="*",
-        type=Path,
-        metavar="RUN",
-        help="run folders or arm folders to watch",
+        "dashboard", help="serve the MLflow tracking UI"
     )
     dashboard.add_argument(
         "--runs-root",
         type=Path,
-        default=None,
-        help="runs root that expands to each arm's latest run",
+        default=Path("runs"),
+        help="runs root that holds the MLflow store (default: ./runs)",
     )
     dashboard.add_argument(
         "--port",
         type=int,
         default=8081,
         help="port to serve on (default: 8081)",
+    )
+
+    import_mlflow = subparsers.add_parser(
+        "import-mlflow", help="copy old run folders into the MLflow store"
+    )
+    import_mlflow.add_argument(
+        "--runs-root",
+        type=Path,
+        default=Path("runs"),
+        help="folder that holds run folders (default: ./runs)",
+    )
+    import_mlflow.add_argument(
+        "--arm",
+        default=None,
+        help="only import this arm (default: every arm under the runs root)",
     )
 
     publish = subparsers.add_parser(
@@ -616,6 +634,20 @@ def build_screen_test_runner(questions, *, fake: bool):
     return DockerTestRunner(questions)
 
 
+def start_gpu_sampler(sampler: GpuSampler) -> GpuSampler | None:
+    """Start the sampler. A thread that cannot start leaves training running.
+
+    A host with no free threads, or a broken thread implementation, must not
+    stop a run. The caller gets None and skips the stop.
+    """
+    try:
+        sampler.start()
+    except Exception as error:  # noqa: BLE001 - the sampler must not stop training
+        print(f"gpu sampler did not start: {error}", file=sys.stderr)
+        return None
+    return sampler
+
+
 def run_command(args: argparse.Namespace) -> int:
     # PyTorch reads PYTORCH_CUDA_ALLOC_CONF once, at allocator startup, so set
     # it before anything can import torch. A value the user already set wins.
@@ -696,6 +728,15 @@ def run_command(args: argparse.Namespace) -> int:
         except OSError as error:
             raise UsageError(f"cannot create the run folder: {error}") from error
 
+    # The mirror copies each run write into the MLflow store. A disabled or
+    # broken store hands back a null mirror, so training never depends on it.
+    # On resume the store is attached after the truncation, so the rebuild
+    # replays the kept records.
+    mirror = open_mirror(args.runs_root, store.run_dir, config.mlflow.enabled)
+    store.attach_mirror(mirror)
+    if args.resume:
+        mirror.rebuild()
+
     test_runner = build_test_runner(config, fake=args.fake)
 
     control_path = args.control if args.control is not None else store.run_dir / CONTROL_NAME
@@ -724,7 +765,34 @@ def run_command(args: argparse.Namespace) -> int:
         batch_policy=batch_policy,
         control=control,
     )
-    summary = experiment.run()
+    # The GPU sampler runs beside training. It writes gpu.jsonl and copies each
+    # row to the child run. A failed read is dropped, so a host without
+    # nvidia-smi still trains.
+    #
+    # The child run opens at the first write_meta. A row sampled before that is
+    # already on disk, so the copy waits for the next tick instead of writing a
+    # startup error.
+    def sample_gpu(row: Mapping[str, Any]) -> None:
+        if mirror.gpu_run_id:
+            mirror.gpu_sample(row)
+
+    sampler = start_gpu_sampler(
+        GpuSampler(
+            store.run_dir / GPU_ROWS_NAME,
+            sample_gpu,
+            interval=config.mlflow.gpu_sample_seconds,
+        )
+    )
+    failed = False
+    try:
+        summary = experiment.run()
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        if sampler is not None:
+            sampler.stop()
+        mirror.close(status="FAILED" if failed else "FINISHED")
 
     print(f"arm={summary.arm} steps={summary.steps} rollouts={summary.rollouts}")
     print(
@@ -868,22 +936,69 @@ def summary_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def import_mlflow_command(args: argparse.Namespace) -> int:
+    """Copy old run folders into the local MLflow store."""
+    runs_root = args.runs_root
+    if not runs_root.is_dir():
+        raise UsageError(f"runs root not found: {runs_root}")
+    try:
+        folders = list(run_dirs(runs_root, args.arm))
+    except OSError as error:
+        raise UsageError(f"cannot read the runs root: {error}") from error
+    if not folders:
+        print(f"no run folders under {runs_root}")
+        return 0
+    for run_dir in folders:
+        try:
+            run_id = import_run(runs_root, run_dir)
+        except Exception as error:  # noqa: BLE001 - report the folder and stop
+            raise UsageError(f"cannot import {run_dir}: {error}") from error
+        label = f"{run_dir.parent.name}/{run_dir.name}"
+        if run_id is None:
+            print(f"skipped {label} (already imported)")
+        else:
+            print(f"imported {label} -> {run_id}")
+    return 0
+
+
+def dashboard_argv(runs_root: Path, port: int) -> list[str]:
+    """The command that starts the MLflow server.
+
+    The interpreter that runs `rlvr` also runs MLflow as a module. The `mlflow`
+    console script is not on PATH on a bare host, so the module form is the one
+    that works from `.venv/bin/rlvr`.
+    """
+    return [
+        sys.executable,
+        "-m",
+        "mlflow",
+        "server",
+        "--backend-store-uri",
+        f"sqlite:///{runs_root / 'mlflow.db'}",
+        "--artifacts-destination",
+        str(runs_root / "mlartifacts"),
+        "--host",
+        "0.0.0.0",
+        "--port",
+        str(port),
+        "--allowed-hosts",
+        os.environ.get("RLVR_ALLOWED_HOSTS", "*"),
+    ]
+
+
 def dashboard_command(args: argparse.Namespace) -> int:
-    """Serve the live dashboard until Ctrl+C."""
-    paths = [str(path) for path in args.paths]
-    if args.runs_root is not None:
-        paths.append(str(args.runs_root))
-    if not paths:
-        raise UsageError("dashboard needs a run folder, an arm folder, or --runs-root")
+    """Start the MLflow server on the runs root."""
     if not 0 < args.port <= 65535:
         raise UsageError(f"invalid port {args.port}")
-
-    from .dashboard import serve_dashboard
-
+    runs_root = args.runs_root
+    runs_root.mkdir(parents=True, exist_ok=True)
+    (runs_root / "mlartifacts").mkdir(parents=True, exist_ok=True)
+    command = dashboard_argv(runs_root, args.port)
+    print(f"dashboard: http://0.0.0.0:{args.port}  (Ctrl+C to stop)")
     try:
-        serve_dashboard(paths, host="127.0.0.1", port=args.port)
+        os.execv(command[0], command)
     except OSError as error:
-        raise UsageError(f"cannot start the dashboard server: {error}") from error
+        raise UsageError(f"cannot start mlflow server: {error}") from error
     return 0
 
 
@@ -919,6 +1034,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return summary_command(args)
         if args.command == "dashboard":
             return dashboard_command(args)
+        if args.command == "import-mlflow":
+            return import_mlflow_command(args)
         if args.command == "publish":
             return publish_command(args)
         raise UsageError(f"unknown command {args.command!r}")

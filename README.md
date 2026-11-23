@@ -63,7 +63,9 @@ rebuild.
 
 `docker-setup.sh` installs Docker and the NVIDIA container runtime when missing,
 logs in when `GHCR_TOKEN` is set, then pulls the image and the small Python image
-the test runner uses. A new box reaches the first step in about five minutes.
+the test runner uses. A new box reaches the first step in about ten minutes:
+three for the pull, one for the model, and the rest is the first vLLM kernel
+compile. Pull, never build, on a run box.
 
 `docker-run.sh` starts the container with:
 
@@ -74,16 +76,20 @@ the test runner uses. A new box reaches the first step in about five minutes.
 - a cache volume for the model and compiled kernels.
 
 The training user must be in the `docker` group. Without it every test records
-`runner_error` and the pass rate stays at zero.
+`runner_error` and the pass rate stays at zero. Open a new SSH session after the
+group change, because the current one keeps the old groups.
 
-Rebuild the image only when a dependency changes:
+Rebuild the image only when `pyproject.toml` or `docker/Dockerfile` changes:
 
 ```bash
-docker build -f docker/Dockerfile -t ghcr.io/jpbarona/rlvr:latest .
-docker push ghcr.io/jpbarona/rlvr:latest
+GHCR_TOKEN=... ./scripts/build-image.sh
 ```
 
-The build takes about 15 minutes. The image is 17.6 GB on disk.
+It tags the image with the UTC timestamp and `latest`, pushes both, and prints
+the digest. The run records the digest in `meta.json`.
+
+The build takes about 15 minutes and the image is 18.5 GB on disk. A fresh box
+pulls it in about three minutes.
 
 ## Bare metal
 
@@ -96,7 +102,8 @@ Use this when a container is not available.
 
 `setup.sh` installs what is missing and skips what is present. It checks Python
 3.12, the headers, `g++`, ninja, the CUDA toolkit that matches torch, and the
-screen. It fails with the exact fix command.
+screen. It fails with the exact fix command. The install uses the `vllm` and
+`tracking` extras, so `rlvr dashboard` can start MLflow from the same venv.
 
 `./setup.sh --check` reports without changing anything. `./setup.sh --fast`
 skips the optional convolution kernel.
@@ -180,10 +187,13 @@ runs/<arm>/<timestamp>/
     labels.jsonl     pool changes, zero-pass counts, saved queues
     eval.json        final pass@1 and every checkpoint evaluation
     control.json     live edits, see below
+    gpu.jsonl        one row per GPU sample, copied to the child run
+    mlflow.json      MLflow run ids and table append counts
     checkpoints/     adapter, optimizer state, manifest
 ```
 
-`<timestamp>` is UTC in the form `YYYYMMDDTHHMMSSZ`.
+`<timestamp>` is UTC in the form `YYYYMMDDTHHMMSSZ`. A store that fails appends
+one line to `mlflow-errors.log` and leaves the run folder intact.
 
 The step rows carry reward, pass rate, completion length, truncation, timings,
 GPU memory, gradient and update norms, pool counts, and the advantage share.
@@ -192,24 +202,55 @@ Copy a run off the box before you destroy it. The folder exists only there.
 
 ## Dashboard
 
+The view is MLflow. `rlvr dashboard` starts the MLflow server on the runs root:
+
 ```bash
 .venv/bin/rlvr dashboard --runs-root runs --port 8081
 ```
 
-It serves `http://127.0.0.1:8081` and refreshes twice per second while the tab is
-visible. It shows pass rate, pass@1, reward, truncation, step time, GPU memory,
-pool composition, group signal, and a questions table.
-
-The page reads process state as well as files. A run whose process is gone turns
-`stopped` after two minutes.
-
-Build the page after a UI change:
+The server binds `0.0.0.0:8081`. The store is `runs/mlflow.db` and the
+artifacts are under `runs/mlartifacts`. The step series, the GPU child run and
+the tables are in the MLflow UI. A run writes its folder into the store as it
+trains. A failed store loses a copy and never stops training. A venv made
+before tracking was an extra needs one install:
 
 ```bash
-cd dashboard && npm run build
+.venv/bin/python -m pip install -e '.[tracking]'
 ```
 
-The build writes `src/rlvr/web/index.html`, which is committed.
+The tunnel points at `127.0.0.1:8081` on the host. The fast path is a tunnel
+from your own machine straight to the box, because every request through this
+VM pays its slow link:
+
+```bash
+ssh -N -L 8083:127.0.0.1:8081 Ubuntu@<host>
+```
+
+Then open `http://127.0.0.1:8083/`.
+
+The fallback, when your machine cannot reach the box, goes through the VM:
+
+```bash
+ssh -N -L 100.67.80.52:8083:127.0.0.1:8081 -i ~/.ssh/id_ed25519 Ubuntu@<host>
+```
+
+That path adds about 1.2 seconds to every request, so the MLflow page takes a
+while to load. Prefer the direct tunnel.
+
+The server accepts the tunnel host name through `RLVR_ALLOWED_HOSTS`, which
+defaults to `*`. The port is published on the box loopback only.
+
+
+Then open `http://100.67.80.52:8083/`.
+
+An old run folder is imported once:
+
+```bash
+.venv/bin/rlvr import-mlflow --runs-root runs
+```
+
+A folder with no `gpu.jsonl` imports without error. `--arm <arm>` imports one
+arm only.
 
 ## Analysis
 
@@ -270,8 +311,10 @@ It takes four injected services.
 | `schedule.py` | Spread and sweep policies, promotion and demotion |
 | `reward.py` | Error classes, truncation, length term |
 | `docker_runner.py` | Runs one code sample against its tests |
-| `dashboard.py` | Live page and `data.json` |
-| `cli.py` | `run`, `screen`, `dashboard`, `summary`, `eval-band`, `publish` |
+| `mlflow_log.py` | Writes each run into the local MLflow store |
+| `mlflow_import.py` | Replays old run folders into the store |
+| `runread.py` | Reads run folders into the payload the mirror and summary use |
+| `cli.py` | `run`, `screen`, `dashboard`, `import-mlflow`, `summary`, `eval-band`, `publish` |
 
 The seams are `Generator`, `TestRunner`, `Judge` and `Store`. The fake versions
 in `fake.py` use SHA-256, so a fake run repeats on any machine.
@@ -342,7 +385,6 @@ hash under `judge-cache/`.
 
 ```bash
 .venv/bin/python -m pytest -q
-cd dashboard && npm test
 ```
 
 CPU only, no network, about 40 seconds. Docker tests skip when the image is
