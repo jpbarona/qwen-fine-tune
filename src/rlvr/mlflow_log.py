@@ -13,8 +13,8 @@ Every public call catches its own exceptions and appends one line to
 `mlflow-errors.log` in the run folder. A failed mirror never raises into the
 training loop.
 
-`eval`, `labels` and `rebuild` are placeholders until the tables, the resume
-rebuild and the importer land.
+`eval` pushes the run tables. `labels` and `rebuild` are placeholders until the
+resume rebuild and the importer land.
 """
 
 from __future__ import annotations
@@ -24,11 +24,13 @@ import json
 import math
 import os
 import tempfile
+import warnings
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
+from .dashboard_io import _read_json, _read_jsonl
 from .runread import collect_dashboard
 
 __all__ = ["Mirror", "MlflowMirror", "NullMirror", "open_mirror"]
@@ -38,6 +40,41 @@ DATABASE_NAME = "mlflow.db"
 ARTIFACTS_NAME = "mlartifacts"
 IDS_NAME = "mlflow.json"
 ERRORS_NAME = "mlflow-errors.log"
+EVAL_NAME = "eval.json"
+LABELS_NAME = "labels.jsonl"
+CONTROL_EVENTS_NAME = "control-events.jsonl"
+
+#: One questions and one distributions file per evaluation, under these
+#: folders. The step is in the name, so a later eval never replaces an earlier
+#: one.
+QUESTIONS_DIR = "questions"
+DISTRIBUTIONS_DIR = "distributions"
+
+#: Tables that grow over a run. Each eval appends the rows that arrived since
+#: the last one.
+EVALUATIONS_TABLE = "evaluations.json"
+LABELS_TABLE = "labels.json"
+DROPPED_TABLE = "dropped.json"
+CONTROL_EVENTS_TABLE = "control-events.json"
+
+#: MLflow 3.18 calls two pandas APIs that pandas 3 deprecates. Nothing here
+#: can fix that, so the two messages are dropped around a table write instead
+#: of printing once per eval in the training log.
+TABLE_WARNINGS: tuple[str, ...] = (
+    "For backward compatibility, 'str' dtypes are included by select_dtypes",
+    "The 'convert_dates' keyword in read_json is deprecated",
+)
+
+#: The evaluation fields kept in the table. `prompt_ids` and `subset` are left
+#: out, because a cell full of ids is unreadable.
+EVALUATION_FIELDS: tuple[str, ...] = (
+    "step",
+    "kind",
+    "stage",
+    "count",
+    "pass_at_1",
+    "evaluation_seconds",
+)
 
 #: MLflow reads this setting when system metrics logging starts, so setting it
 #: here covers the run the mirror opens next. A caller that set its own value
@@ -128,6 +165,83 @@ def _params(meta: Mapping[str, Any]) -> dict[str, Any]:
     return params
 
 
+def _table(rows: list[Mapping[str, Any]]) -> dict[str, list[Any]]:
+    """Rows as the column map `log_table` takes. An empty table is empty."""
+    if not rows:
+        return {}
+    columns = sorted({name for row in rows for name in row})
+    return {name: [row.get(name) for row in rows] for name in columns}
+
+
+def _payload_step(payload: Mapping[str, Any]) -> int:
+    """The step of the newest evaluation in an `eval.json` payload, or zero."""
+    step = payload.get("step")
+    if isinstance(step, int) and not isinstance(step, bool):
+        return step
+    evaluations = payload.get("evaluations")
+    if isinstance(evaluations, list):
+        for point in reversed(evaluations):
+            if not isinstance(point, Mapping):
+                continue
+            value = point.get("step")
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+    return 0
+
+
+def _evaluation_rows(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The evaluation points of `eval.json`, without the long id lists."""
+    evaluations = payload.get("evaluations")
+    if not isinstance(evaluations, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for point in evaluations:
+        if not isinstance(point, Mapping):
+            continue
+        rows.append({name: point[name] for name in EVALUATION_FIELDS if name in point})
+    return rows
+
+
+def _distribution_rows(distributions: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The two histograms side by side, one row per bin index."""
+    reward = distributions.get("reward")
+    reward = reward if isinstance(reward, Mapping) else {}
+    tests = distributions.get("tests_passed")
+    tests = tests if isinstance(tests, Mapping) else {}
+    reward_bins = reward.get("bins") or []
+    reward_counts = reward.get("counts") or []
+    test_bins = tests.get("bins") or []
+    test_counts = tests.get("counts") or []
+    length = max(
+        len(reward_bins), len(reward_counts), len(test_bins), len(test_counts)
+    )
+
+    def at(values: list[Any], index: int) -> Any:
+        return values[index] if index < len(values) else None
+
+    return [
+        {
+            "reward_bin": at(reward_bins, index),
+            "reward_count": at(reward_counts, index),
+            "tests_passed_bin": at(test_bins, index),
+            "tests_passed_count": at(test_counts, index),
+        }
+        for index in range(length)
+    ]
+
+
+def _dropped_rows(dropped: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """One row per dropped prompt, with the step it was dropped."""
+    ids = dropped.get("ids") or []
+    steps = dropped.get("steps")
+    steps = steps if isinstance(steps, Mapping) else {}
+    return [
+        {"prompt_id": prompt_id, "dropped_step": steps.get(prompt_id)}
+        for prompt_id in ids
+        if isinstance(prompt_id, str)
+    ]
+
+
 def _write_error(run_dir: Path, error: BaseException) -> None:
     """Append one line to the error log, and never raise."""
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -205,6 +319,14 @@ class MlflowMirror:
         self._gpu_step = 0
         self._mlflow: Any = None
         self._client: Any = None
+        self._question_steps: set[int] = set()
+        self._distribution_steps: set[int] = set()
+        self._logged_rows: dict[str, int] = {
+            EVALUATIONS_TABLE: 0,
+            LABELS_TABLE: 0,
+            DROPPED_TABLE: 0,
+            CONTROL_EVENTS_TABLE: 0,
+        }
         try:
             self._connect()
         except Exception as error:  # noqa: BLE001 - the mirror must not stop training
@@ -305,13 +427,83 @@ class MlflowMirror:
                 continue
             client.log_metric(self.run_id, name, value, step=index)
 
+    @_guarded
     def eval(self, payload: Mapping[str, Any]) -> None:
-        """Placeholder. The tables arrive with a later task."""
-        pass
+        """Log the run tables for the evaluation in `payload`."""
+        self.push_tables(_payload_step(payload))
 
     def labels(self) -> None:
-        """Placeholder. The label table arrives with a later task."""
+        """Placeholder. The label table is pushed with the other tables."""
         pass
+
+    @_guarded
+    def push_tables(self, step: int) -> None:
+        """Log the run tables for one evaluation.
+
+        The questions and distributions tables get one file per step, so a
+        later eval does not replace an earlier one. The event tables append,
+        and each call logs only the rows that arrived since the last call. A
+        table with no rows is not written. One failed table is logged and the
+        rest are still pushed.
+        """
+        self._require_client()
+        if not self.run_id:
+            raise RuntimeError("the parent run has not started")
+        index = int(step)
+        dashboard = collect_dashboard([self.run_dir])
+        runs = dashboard.get("runs") or []
+        run = runs[0] if runs else {}
+
+        questions = (run.get("questions") or {}).get("rows") or []
+        if index not in self._question_steps:
+            if self._push(f"{QUESTIONS_DIR}/step-{index}.json", questions):
+                self._question_steps.add(index)
+
+        distributions = run.get("distributions") or {}
+        if index not in self._distribution_steps:
+            rows = _distribution_rows(distributions)
+            if self._push(f"{DISTRIBUTIONS_DIR}/step-{index}.json", rows):
+                self._distribution_steps.add(index)
+
+        self._push_appended(
+            EVALUATIONS_TABLE, _evaluation_rows(_read_json(self.run_dir / EVAL_NAME))
+        )
+        self._push_appended(LABELS_TABLE, _read_jsonl(self.run_dir / LABELS_NAME))
+        self._push_appended(DROPPED_TABLE, _dropped_rows(run.get("dropped") or {}))
+        self._push_appended(
+            CONTROL_EVENTS_TABLE, _read_jsonl(self.run_dir / CONTROL_EVENTS_NAME)
+        )
+
+    def _push(self, artifact_file: str, rows: list[Mapping[str, Any]]) -> bool:
+        """Log one table. True when it was written."""
+        data = _table(rows)
+        if not data:
+            return False
+        try:
+            with warnings.catch_warnings():
+                for message in TABLE_WARNINGS:
+                    warnings.filterwarnings("ignore", message=message)
+                self._mlflow.log_table(
+                    data, artifact_file=artifact_file, run_id=self.run_id
+                )
+        except Exception as error:  # noqa: BLE001 - one table must not stop the rest
+            self._write_error(error)
+            return False
+        return True
+
+    def _push_appended(
+        self, artifact_file: str, rows: list[Mapping[str, Any]]
+    ) -> None:
+        """Append the rows this run has not pushed yet."""
+        seen = self._logged_rows.get(artifact_file, 0)
+        if seen > len(rows):
+            seen = 0
+        fresh = rows[seen:]
+        if not fresh:
+            self._logged_rows[artifact_file] = len(rows)
+            return
+        if self._push(artifact_file, fresh):
+            self._logged_rows[artifact_file] = len(rows)
 
     @_guarded
     def gpu_sample(self, row: Mapping[str, Any]) -> None:
