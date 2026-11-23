@@ -350,7 +350,7 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument(
         "--port",
         type=int,
-        default=8099,
+        default=None,
         help="local server port (default: 8099)",
     )
     dashboard.add_argument(
@@ -1151,9 +1151,11 @@ def dashboard_argv(runs_root: Path, port: int) -> list[str]:
         "--artifacts-destination",
         str(runs_root / "mlartifacts"),
         "--host",
-        "0.0.0.0",
+        "127.0.0.1",
         "--port",
         str(port),
+        "--workers",
+        "1",
         "--allowed-hosts",
         os.environ.get("RLVR_ALLOWED_HOSTS", "*"),
     ]
@@ -1161,20 +1163,26 @@ def dashboard_argv(runs_root: Path, port: int) -> list[str]:
 
 def dashboard_command(args: argparse.Namespace) -> int:
     """Print the tracking URI, or start a local MLflow server with --local."""
+    port = getattr(args, "port", None)
     if not getattr(args, "local", False):
+        if port is not None:
+            raise UsageError("--port needs --local")
         config_path = getattr(args, "config", None)
-        config = load_config(
-            config_path if config_path is not None else default_config_path()
-        )
+        if config_path is None:
+            print(DEFAULT_TRACKING_URI)
+            return 0
+        config = load_config(config_path)
         print(config.mlflow.tracking_uri or DEFAULT_TRACKING_URI)
         return 0
-    if not 0 < args.port <= 65535:
-        raise UsageError(f"invalid port {args.port}")
+    if port is None:
+        port = 8099
+    if not 0 < port <= 65535:
+        raise UsageError(f"invalid port {port}")
     runs_root = args.runs_root
     runs_root.mkdir(parents=True, exist_ok=True)
     (runs_root / "mlartifacts").mkdir(parents=True, exist_ok=True)
-    command = dashboard_argv(runs_root, args.port)
-    print(f"dashboard: http://0.0.0.0:{args.port}  (Ctrl+C to stop)")
+    command = dashboard_argv(runs_root, port)
+    print(f"dashboard: http://127.0.0.1:{port}  (Ctrl+C to stop)")
     try:
         os.execv(command[0], command)
     except OSError as error:

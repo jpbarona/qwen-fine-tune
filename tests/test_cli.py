@@ -1216,7 +1216,19 @@ def test_dashboard_prints_the_remote_store(capsys, monkeypatch) -> None:
         raise AssertionError("the remote path must not start a server")
 
     monkeypatch.setattr("rlvr.cli.os.execv", fail_exec)
-    args = Namespace(local=False, port=8081, runs_root=Path("runs"))
+    args = Namespace(local=False, port=None, runs_root=Path("runs"))
+    assert dashboard_command(args) == 0
+    assert "http://127.0.0.1:8081" in capsys.readouterr().out
+
+
+def test_dashboard_needs_no_config_file_for_the_remote_store(
+    capsys, monkeypatch
+) -> None:
+    def fail_load(path: str | Path):
+        raise AssertionError("the remote path must not load a config")
+
+    monkeypatch.setattr("rlvr.cli.load_config", fail_load)
+    args = Namespace(local=False, port=None, runs_root=Path("runs"))
     assert dashboard_command(args) == 0
     assert "http://127.0.0.1:8081" in capsys.readouterr().out
 
@@ -1231,9 +1243,21 @@ def test_dashboard_prints_the_configured_store(tmp_path, capsys, monkeypatch) ->
         CONFIG + '\n[mlflow]\ntracking_uri = "http://127.0.0.1:9000"\n',
         encoding="utf-8",
     )
-    args = Namespace(local=False, port=8081, runs_root=Path("runs"), config=path)
+    args = Namespace(local=False, port=None, runs_root=Path("runs"), config=path)
     assert dashboard_command(args) == 0
     assert "http://127.0.0.1:9000" in capsys.readouterr().out
+
+
+def test_dashboard_rejects_a_bad_config(tmp_path, capsys) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[model]\nname = 3\n", encoding="utf-8")
+    assert main(["dashboard", "--config", str(path)]) == 2
+    assert "config" in capsys.readouterr().err
+
+
+def test_dashboard_port_needs_local(capsys) -> None:
+    assert main(["dashboard", "--port", "8099"]) == 2
+    assert "--port needs --local" in capsys.readouterr().err
 
 
 def test_dashboard_local_still_starts_a_server(tmp_path, monkeypatch) -> None:
@@ -1253,6 +1277,8 @@ def test_dashboard_local_still_starts_a_server(tmp_path, monkeypatch) -> None:
     assert argv[argv.index("--backend-store-uri") + 1] == (
         f"sqlite:///{runs_root / 'mlflow.db'}"
     )
+    assert argv[argv.index("--host") + 1] == "127.0.0.1"
+    assert argv[argv.index("--workers") + 1] == "1"
     # The local server defaults to a port that cannot collide with the remote.
     assert argv[argv.index("--port") + 1] == "8099"
 
@@ -1286,8 +1312,9 @@ def test_dashboard_command_runs_mlflow_as_a_module(tmp_path, monkeypatch) -> Non
     assert path == sys.executable
     assert argv[0] == sys.executable
     assert argv[1:4] == ["-m", "mlflow", "server"]
-    assert argv[argv.index("--host") + 1] == "0.0.0.0"
+    assert argv[argv.index("--host") + 1] == "127.0.0.1"
     assert argv[argv.index("--port") + 1] == "8081"
+    assert argv[argv.index("--workers") + 1] == "1"
     assert argv[argv.index("--allowed-hosts") + 1] == "*"
     # The module form does not need the mlflow console script on PATH.
     assert "mlflow" not in os.environ.get("PATH", "")
