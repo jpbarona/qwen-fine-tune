@@ -23,14 +23,19 @@ SSH_STUB = """#!/usr/bin/env bash
 printf '%s\\n' "$@" >> "$FAKE_SSH_LOG"
 gateway=""
 probe=0
+launch=0
 for arg in "$@"; do
   case "$arg" in
     *"network inspect"*) gateway="$FAKE_GATEWAY" ;;
     *"curl "*) probe=1 ;;
+    *"docker-run.sh"*) launch=1 ;;
   esac
 done
 if [ -n "$gateway" ]; then
   printf '%s\\n' "$gateway"
+fi
+if [ "$launch" = 1 ]; then
+  exit "${FAKE_LAUNCH_STATUS:-0}"
 fi
 if [ "$probe" = 1 ]; then
   count=0
@@ -68,7 +73,11 @@ def write_stub(directory: Path, name: str, body: str) -> None:
 
 
 def fake_environment(
-    tmp_path: Path, *, health_mode: str = "ok", ssh_log: Path | None = None
+    tmp_path: Path,
+    *,
+    health_mode: str = "ok",
+    ssh_log: Path | None = None,
+    launch_status: int = 0,
 ) -> dict[str, str]:
     """A PATH whose ssh, curl and docker are stubs, plus fast probe settings."""
     bin_dir = tmp_path / "bin"
@@ -83,6 +92,7 @@ def fake_environment(
     environment["FAKE_SSH_COUNT"] = str(tmp_path / "ssh.count")
     environment["FAKE_GATEWAY"] = GATEWAY
     environment["FAKE_HEALTH_MODE"] = health_mode
+    environment["FAKE_LAUNCH_STATUS"] = str(launch_status)
     environment["FAKE_DOCKER_LOG"] = str(tmp_path / "docker.log")
     environment["FAKE_DOCKER_ENV_LOG"] = str(tmp_path / "docker.env")
     environment["FAKE_CURL_LOG"] = str(tmp_path / "curl.log")
@@ -104,12 +114,18 @@ def run_script(
     *args: str,
     health_mode: str = "ok",
     ssh_log: Path | None = None,
+    launch_status: int = 0,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(REPO_ROOT / "scripts" / "start-remote-run.sh"), *args],
         capture_output=True,
         text=True,
-        env=fake_environment(tmp_path, health_mode=health_mode, ssh_log=ssh_log),
+        env=fake_environment(
+            tmp_path,
+            health_mode=health_mode,
+            ssh_log=ssh_log,
+            launch_status=launch_status,
+        ),
         cwd=REPO_ROOT,
         timeout=60,
     )
@@ -149,6 +165,15 @@ def reverse_forwards(tmp_path: Path) -> list[str]:
     """Every token that follows a `-R` in the logged ssh argv."""
     lines = ssh_args(tmp_path)
     return [lines[index + 1] for index, line in enumerate(lines) if line == "-R"]
+
+
+def launch_command(tmp_path: Path) -> str:
+    """The remote command the launcher handed to ssh."""
+    lines = ssh_args(tmp_path)
+    for line in lines:
+        if "docker-run.sh" in line:
+            return line
+    return ""
 
 
 def wait_for_reverse_forward(tmp_path: Path, timeout: float = 5.0) -> list[str]:
@@ -194,19 +219,31 @@ def test_start_remote_run_uses_a_reverse_forward(tmp_path) -> None:
         stop_tunnel(tmp_path)
 
 
-def test_start_remote_run_exports_the_tracking_uri(tmp_path) -> None:
+def test_start_remote_run_launches_on_the_box(tmp_path) -> None:
     try:
         result = run_script(tmp_path, "code-score", HOST)
         assert result.returncode == 0, result.stderr
-        env_log = tmp_path / "docker.env"
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and not (
-            env_log.is_file() and env_log.read_text(encoding="utf-8").strip()
-        ):
-            time.sleep(0.02)
-        lines = env_log.read_text(encoding="utf-8").splitlines()
-        assert lines
-        assert set(lines) == {f"http://{GATEWAY}:8081"}
+        command = launch_command(tmp_path)
+        assert command.startswith("cd ~/rl-grpo")
+        assert "set -a" in command
+        assert ". ~/.env" in command
+        assert "set +a" in command
+        assert "code-score" in command
+        assert f"export MLFLOW_TRACKING_URI=http://{GATEWAY}:8081" in command
+        assert "./scripts/docker-run.sh" in command
+        # The container is launched on the box, not on this VM.
+        assert not (tmp_path / "docker.log").exists()
+        assert "run launched" in result.stdout
+    finally:
+        stop_tunnel(tmp_path)
+
+
+def test_start_remote_run_returns_the_launch_status(tmp_path) -> None:
+    try:
+        result = run_script(tmp_path, "code-score", HOST, launch_status=7)
+        assert result.returncode == 7
+        assert "run launched" not in result.stdout
+        assert "failed with status 7" in result.stderr
     finally:
         stop_tunnel(tmp_path)
 

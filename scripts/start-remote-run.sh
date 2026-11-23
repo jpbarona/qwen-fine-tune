@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Open the tunnel and launch a run on the box, detached.
+# Open the tunnel and launch a run on the box.
 #
 # Usage:
 #   ./scripts/start-remote-run.sh <arm> <host> [extra args]
@@ -7,7 +7,9 @@
 # The script opens the reverse tunnel, reads the gateway and port that
 # open-tunnel.sh actually bound, and checks the health endpoint from the box.
 # A run is not launched when that check never answers, because that run would
-# train with no store. Extra args pass through to `docker-run.sh`.
+# train with no store. The launch runs `docker-run.sh` on the box over ssh,
+# after sourcing the box environment file. Extra args pass through to
+# `docker-run.sh`.
 #
 # Environment:
 #   MLFLOW_PORT             forwarded port, default 8081
@@ -87,15 +89,29 @@ if [ "$ready" != true ]; then
   exit 1
 fi
 
-mkdir -p "$cache_dir" "$repo_root/.runner-tmp"
+mkdir -p "$cache_dir"
 log_file="$cache_dir/run-$arm-$safe_host.log"
 
 # docker-run.sh passes this to the container with `-e MLFLOW_TRACKING_URI`, so
-# the mirror writes to the store on this VM instead of local SQLite.
+# the mirror writes to the store on this VM instead of local SQLite. The
+# training container runs on the box, so the launch goes over ssh. The box
+# environment file holds the bucket keys, which docker-run.sh forwards.
 export MLFLOW_TRACKING_URI="http://$gateway:$port"
 
-setsid nohup "$repo_root/scripts/docker-run.sh" "$arm" "$@" >"$log_file" 2>&1 &
-runner_pid=$!
+quoted_args=""
+for arg in "$arm" "$@"; do
+  quoted_args="$quoted_args$(printf '%q' "$arg") "
+done
+remote_command="cd ~/rl-grpo && set -a && . ~/.env && set +a && export MLFLOW_TRACKING_URI=$(printf '%q' "$MLFLOW_TRACKING_URI") && ./scripts/docker-run.sh $quoted_args"
 
-echo "run launched on $bare_host (pid $runner_pid), log $log_file"
+ssh -o BatchMode=yes -o ConnectTimeout=10 -i "$key_path" \
+  "$target" "$remote_command" >"$log_file" 2>&1
+status=$?
+if [ "$status" -ne 0 ]; then
+  echo "start-remote-run.sh: the launch on $bare_host failed with status $status" >&2
+  echo "start-remote-run.sh: log $log_file" >&2
+  exit "$status"
+fi
+
+echo "run launched on $bare_host, log $log_file"
 echo "store: $health"
