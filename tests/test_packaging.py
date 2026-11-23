@@ -156,7 +156,7 @@ def test_docker_run_passes_the_bucket_credentials(tmp_path: Path) -> None:
 
 
 def test_the_box_configs_name_the_bucket() -> None:
-    for name in ("real.toml", "lfm-spread.toml"):
+    for name in ("real.toml", "lfm-spread.toml", "lfm-sweep.toml"):
         config = load_config(REPO_ROOT / "configs" / name)
         assert config.mlflow.bucket == "s3://opencodeagent1/runs/v1"
         assert config.mlflow.artifact_root == "s3://opencodeagent1/mlflow/v1/artifacts"
