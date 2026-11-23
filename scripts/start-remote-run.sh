@@ -90,6 +90,10 @@ fi
 mkdir -p "$cache_dir" "$repo_root/.runner-tmp"
 log_file="$cache_dir/run-$arm-$safe_host.log"
 
+# docker-run.sh passes this to the container with `-e MLFLOW_TRACKING_URI`, so
+# the mirror writes to the store on this VM instead of local SQLite.
+export MLFLOW_TRACKING_URI="http://$gateway:$port"
+
 setsid nohup "$repo_root/scripts/docker-run.sh" "$arm" "$@" >"$log_file" 2>&1 &
 runner_pid=$!
 

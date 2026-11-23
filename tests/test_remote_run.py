@@ -51,6 +51,7 @@ exit 0
 
 DOCKER_STUB = """#!/usr/bin/env bash
 printf '%s\\n' "$@" >> "$FAKE_DOCKER_LOG"
+printf '%s\\n' "${MLFLOW_TRACKING_URI:-}" >> "$FAKE_DOCKER_ENV_LOG"
 exit 0
 """
 
@@ -83,6 +84,7 @@ def fake_environment(
     environment["FAKE_GATEWAY"] = GATEWAY
     environment["FAKE_HEALTH_MODE"] = health_mode
     environment["FAKE_DOCKER_LOG"] = str(tmp_path / "docker.log")
+    environment["FAKE_DOCKER_ENV_LOG"] = str(tmp_path / "docker.env")
     environment["FAKE_CURL_LOG"] = str(tmp_path / "curl.log")
     environment["SSH_KEY"] = str(tmp_path / "id_ed25519")
     environment["RLVR_TUNNEL_DIR"] = str(tmp_path / "cache")
@@ -188,6 +190,23 @@ def test_start_remote_run_uses_a_reverse_forward(tmp_path) -> None:
         assert set(probe) == {f"curl -sSf http://{GATEWAY}:8081/health"}
         # No local curl, which would pass with a dead forward.
         assert not (tmp_path / "curl.log").exists()
+    finally:
+        stop_tunnel(tmp_path)
+
+
+def test_start_remote_run_exports_the_tracking_uri(tmp_path) -> None:
+    try:
+        result = run_script(tmp_path, "code-score", HOST)
+        assert result.returncode == 0, result.stderr
+        env_log = tmp_path / "docker.env"
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not (
+            env_log.is_file() and env_log.read_text(encoding="utf-8").strip()
+        ):
+            time.sleep(0.02)
+        lines = env_log.read_text(encoding="utf-8").splitlines()
+        assert lines
+        assert set(lines) == {f"http://{GATEWAY}:8081"}
     finally:
         stop_tunnel(tmp_path)
 
