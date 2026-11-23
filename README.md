@@ -63,7 +63,9 @@ rebuild.
 
 `docker-setup.sh` installs Docker and the NVIDIA container runtime when missing,
 logs in when `GHCR_TOKEN` is set, then pulls the image and the small Python image
-the test runner uses. A new box reaches the first step in about five minutes.
+the test runner uses. A new box reaches the first step in about ten minutes:
+three for the pull, one for the model, and the rest is the first vLLM kernel
+compile. Pull, never build, on a run box.
 
 `docker-run.sh` starts the container with:
 
@@ -74,7 +76,8 @@ the test runner uses. A new box reaches the first step in about five minutes.
 - a cache volume for the model and compiled kernels.
 
 The training user must be in the `docker` group. Without it every test records
-`runner_error` and the pass rate stays at zero.
+`runner_error` and the pass rate stays at zero. Open a new SSH session after the
+group change, because the current one keeps the old groups.
 
 Rebuild the image only when `pyproject.toml` or `docker/Dockerfile` changes:
 
@@ -85,7 +88,7 @@ GHCR_TOKEN=... ./scripts/build-image.sh
 It tags the image with the UTC timestamp and `latest`, pushes both, and prints
 the digest. The run records the digest in `meta.json`.
 
-The build takes about 15 minutes and the image is 17.6 GB on disk. A fresh box
+The build takes about 15 minutes and the image is 18.5 GB on disk. A fresh box
 pulls it in about three minutes.
 
 ## Bare metal
@@ -215,11 +218,28 @@ before tracking was an extra needs one install:
 .venv/bin/python -m pip install -e '.[tracking]'
 ```
 
-The tunnel points at `127.0.0.1:8081` on the host:
+The tunnel points at `127.0.0.1:8081` on the host. The fast path is a tunnel
+from your own machine straight to the box, because every request through this
+VM pays its slow link:
+
+```bash
+ssh -N -L 8083:127.0.0.1:8081 Ubuntu@<host>
+```
+
+Then open `http://127.0.0.1:8083/`.
+
+The fallback, when your machine cannot reach the box, goes through the VM:
 
 ```bash
 ssh -N -L 100.67.80.52:8083:127.0.0.1:8081 -i ~/.ssh/id_ed25519 Ubuntu@<host>
 ```
+
+That path adds about 1.2 seconds to every request, so the MLflow page takes a
+while to load. Prefer the direct tunnel.
+
+The server accepts the tunnel host name through `RLVR_ALLOWED_HOSTS`, which
+defaults to `*`. The port is published on the box loopback only.
+
 
 Then open `http://100.67.80.52:8083/`.
 

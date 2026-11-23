@@ -74,14 +74,29 @@ completion, and gives up after eight empty replies.
 
 ## Dashboard
 
-The view is MLflow. The server binds `0.0.0.0:8081`. Tunnel it from this VM:
+The view is MLflow. The server binds `0.0.0.0:8081` inside the container and is
+published on the box loopback only.
+
+The fast path is a tunnel from your own machine to the box. Every request
+through this VM pays the slow VM to box link, about 1.2 seconds per request:
+
+```bash
+ssh -N -L 8083:127.0.0.1:8081 Ubuntu@<host>
+```
+
+Then open `http://127.0.0.1:8083/`.
+
+The fallback, when your machine cannot reach the box, goes through this VM:
 
 ```bash
 ssh -N -L 100.67.80.52:8083:127.0.0.1:8081 -i ~/.ssh/id_ed25519 Ubuntu@<host>
 ```
 
-The tunnel points at `127.0.0.1:8081` on the host. Then open
-`http://100.67.80.52:8083/`.
+Then open `http://100.67.80.52:8083/`.
+
+The server accepts the tunnel host name through `RLVR_ALLOWED_HOSTS`, which
+defaults to `*`.
+
 
 The store and artifacts live under the runs root. The image serves the same
 server with `./scripts/docker-run.sh dashboard`. The store starts empty. Import

@@ -977,3 +977,29 @@ imported once with `rlvr import-mlflow`.
 Reason: the run folder already held every number the page showed. A local MLflow
 store gives the same series, the tables and the child run without a custom web
 server to maintain.
+
+## D45. The image is built with uv and pulled, never built per box
+
+Status: implemented 23 November 2026.
+
+A fresh box built the image in about 15 minutes, and the `causal_conv1d`
+compile took most of it. The build also failed on two avoidable faults. The
+`Ubuntu` user was not in the docker group, and triton 3.8.0 compiled its C
+driver with g++ against the CUDA 13 headers, which reject the int to enum
+conversions, so the first vLLM engine start died.
+
+Decision: build once on a GPU box, push to ghcr, and pull on every later box.
+The build uses uv with a BuildKit cache mount, apt cache mounts, and
+`scripts/build-image.sh`. The run records the image digest in `meta.json`.
+
+The triton driver now compiles with gcc. The Dockerfile patches
+`triton/runtime/build.py` for that, and the patch is why the first real step
+ran.
+
+Cost model: a hundred steps at 150 seconds costs about 250 minutes, so setup is
+5 percent of the rent. Pulling instead of building saves 11 minutes per box.
+Baking the model weights saves one minute and adds 5 GB to every pull, so the
+weights stay in the cache volume. The kernel cache stays in a volume too.
+
+The image stays private. The token lives on the VM, and `docker-setup.sh` logs
+in when `GHCR_TOKEN` is set.
