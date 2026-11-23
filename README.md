@@ -21,7 +21,8 @@ live rollouts.
 
 ## Before every run
 
-Three things to check. Skipping them costs an hour.
+The tools and credentials on this VM are in [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md). Three things
+to check. Skipping them costs an hour.
 
 **1. Pull main.**
 
@@ -433,7 +434,8 @@ hash under `judge-cache/`.
 .venv/bin/python -m pytest -q
 ```
 
-CPU only, no network, about 40 seconds. Docker tests skip when the image is
+CPU only, no network, about five minutes on this VM. Docker tests skip when the
+image is
 missing.
 
 ## Known limits

@@ -1125,3 +1125,20 @@ fails CI on an upward import. Tests mirror the packages.
 
 The training loop is still the orchestration point. The split moves code and
 breaks the cycles. It does not change the step loop.
+
+## D53. Docs have one home per fact
+
+Status: implemented 23 November 2026.
+
+AGENTS.md carried a copy of the tool and credential table that also belongs in
+an operator guide. Copies drift, and the README already claimed a 40 second test
+suite that takes five minutes.
+
+Decision: each fact has one file. The README explains the study and how to run
+it. `docs/ENVIRONMENT.md` explains this VM, its tokens and the MLflow server.
+`AGENTS.md` holds rules and pointers only. `docs/INDEX.md` is the map. Dated
+reports stay as reports and say so at the top. `SPEC.md`, `PLAN.md` and
+`SMOKE.md` were deleted because the code and the plans had moved past them.
+
+A test resolves every relative Markdown link in the shared docs, so a deleted
+file cannot leave a pointer behind.
