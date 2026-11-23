@@ -12,6 +12,8 @@ the store. `build_route` names the hash route that opens the view.
 The three headline charts sit in the core section in a fixed order. Their y
 ranges are fixed, so a low pass rate looks low. Every other chart keeps the
 auto range. The search filter keeps the parent runs and drops the GPU child.
+The view also carries deleted cards for the heartbeat and the system metrics,
+so the Chart view does not add sections for them.
 """
 
 from __future__ import annotations
@@ -52,6 +54,26 @@ TAG_LIMIT = 20000
 
 #: The parent run carries `rlvr/run_dir`. The GPU child does not.
 FILTER = "tags.`rlvr/run_dir` != ''"
+
+#: Keys the Chart view would add on its own. It adds a chart for every metric
+#: key missing from the view, so a deleted card blocks the add. A deleted card
+#: does not render, so the visible page stays at eight sections.
+HIDDEN_METRICS = (
+    "rlvr/heartbeat_seconds",
+    "system/cpu_utilization_percentage",
+    "system/disk_available_megabytes",
+    "system/disk_usage_megabytes",
+    "system/disk_usage_percentage",
+    "system/network_receive_megabytes",
+    "system/network_transmit_megabytes",
+    "system/system_memory_usage_megabytes",
+    "system/system_memory_usage_percentage",
+    "system/gpu_0_memory_usage_percentage",
+    "system/gpu_0_memory_usage_megabytes",
+    "system/gpu_0_utilization_percentage",
+    "system/gpu_0_power_usage_watts",
+    "system/gpu_0_power_usage_percentage",
+)
 
 #: Section order on the page. The UI keeps this order because each section
 #: sets `isReordered`.
@@ -166,6 +188,23 @@ def _card(metric: str, section_id: str) -> dict[str, Any]:
     return card
 
 
+def _hidden_card(metric: str, section_id: str) -> dict[str, Any]:
+    """A card the UI keeps and does not render. It blocks the auto-add."""
+    return {
+        "type": "LINE",
+        "uuid": _uuid("hidden", metric),
+        "metricSectionId": section_id,
+        "metricKey": metric,
+        "selectedMetricKeys": [metric],
+        "displayName": metric,
+        "xAxisKey": "step",
+        "yAxisKey": "metric",
+        "isGenerated": False,
+        "deleted": True,
+        "runsCountToCompare": 10,
+    }
+
+
 def build_view_state() -> dict[str, Any]:
     """The chart sections, the chart order, the ranges and the filter."""
     sections = [_section(name) for name in _SECTIONS]
@@ -175,8 +214,11 @@ def build_view_state() -> dict[str, Any]:
         for name in _SECTIONS
         for metric in _SECTION_METRICS[name]
     ]
+    # The hidden cards point at a real section, because the UI resolves the id
+    # before it drops the card.
+    hidden = [_hidden_card(metric, section_ids["core"]) for metric in HIDDEN_METRICS]
     return {
-        "compareRunCharts": cards,
+        "compareRunCharts": cards + hidden,
         "compareRunSections": sections,
         "isAccordionReordered": True,
         "autoRefreshEnabled": True,
