@@ -1023,3 +1023,88 @@ adds no noise to the model charts.
 The tag is one row, so a store rebuild is one command, and any browser shows the
 same layout. The run page stays for the tables, the artifacts and the GPU child
 run. Metric names, the run folder and the training path do not change.
+
+## D47. The store lives on this VM
+
+Status: implemented 23 November 2026.
+
+The store was SQLite inside the runs root on the rented GPU box. Hetzner reuses
+boxes, so each new box started with an empty store and the history died with the
+old box. The bucket held the run folders, and nothing read them back into a
+view.
+
+Decision: the store moves to this VM, which stays up, and the MLflow server runs
+as a systemd unit bound to `127.0.0.1:8081`. The box sends metrics over the
+tunnel while a run is live. The run folder stays the record and the bucket stays
+the archive.
+
+The store is rebuildable from the run folders, so a lost store costs a replay,
+not a run. `deploy/mlflow-backup.timer` copies the store nightly and keeps 14
+copies, which saves that replay.
+
+## D48. The tunnel replaces a public port
+
+Status: implemented 23 November 2026.
+
+The box needs to reach the server on this VM. A public listener would need a
+port, a host name and another credential to guard it.
+
+Decision: this VM opens an SSH reverse tunnel to the box. It binds the Docker
+bridge gateway on the box, so the training container reaches the server, and
+nothing listens off loopback on either end. `GatewayPorts clientspecified` lets
+sshd bind the gateway address. `scripts/docker-setup.sh` writes that line as a
+drop-in.
+
+The cost is one SSH connection per box and a reconnect loop.
+`scripts/open-tunnel.sh` keeps the loop alive and one tunnel serves every arm on
+the box. `scripts/start-remote-run.sh` waits for `/health` from the box before it
+launches, so a forward that did not bind stops the launch instead of producing a
+run with no store.
+
+## D49. Checkpoints go straight to the bucket
+
+Status: implemented 23 November 2026.
+
+An MLflow artifact upload of a 7.6 GB checkpoint would sit in the step path and
+store a second copy. A dead box would still lose the checkpoints.
+
+Decision: `src/rlvr/upload.py` copies `checkpoints/` after each checkpoint lands
+and the run files on close, on a background thread. The destination is
+`s3://opencodeagent1/runs/v1/<arm>/<started>/`, and the box key is scoped to the
+`runs/` prefix. MLflow records `rlvr/checkpoints_uri` as a tag on the run.
+
+A failed upload never stops a step or a run. It retries with backoff, records
+the error, and leaves the file for the next scan. `manifest.json` holds the
+schema, the config hash and a sha256 per file.
+
+## D50. Repair matches on the run name
+
+Status: implemented 23 November 2026.
+
+`rlvr sync-mlflow` replays a run folder into the store after a dropped link. The
+first version matched on the `rlvr/run_dir` tag. The container path `/app/runs`
+and the VM path are different strings, so the match found nothing and every call
+added a duplicate entry.
+
+Decision: a run's identity is `rlvr/run_name`, the arm and the start timestamp,
+and the tag is written at start. `_runs_for_folder` filters on that tag, and the
+rebuild deletes the runs it finds before it replays the folder. A second call on
+the same folder leaves one parent run and one GPU child run.
+
+The name is unique per experiment, because `start` writes the arm and the
+timestamp and two runs of the same arm have different timestamps.
+
+## D51. The store starts empty
+
+Status: implemented 23 November 2026.
+
+The old dumps hold runs from earlier boxes with their own local stores.
+Importing them would need a replay per folder and would mix the old artifact
+paths into the new store.
+
+Decision: the new store starts empty and only runs from now on appear in it.
+`dumps/` stays untouched. The new prefixes are `runs/v1/` and `mlflow/v1/`, and
+the `v1` segment lets a later layout change without breaking old prefixes.
+
+`rlvr import-mlflow` still replays an old folder by hand when one specific run
+has to appear.

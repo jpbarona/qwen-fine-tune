@@ -7,12 +7,16 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 
 - [../README.md](../README.md): install, run, MLflow dashboard, data layout, contracts.
 - `DECISIONS.md`: choices as they were made, newest last. D25 onward covers the
-  parked-pool study.
+  parked-pool study, and D47 onward covers the remote store.
 - `IDEAS.md`: proposals, two chunks each, newest first inside a topic.
 - `journal.md`: one line per problem and fix, newest at the bottom.
 
 ## Designs and plans
 
+- [superpowers/specs/2026-11-23-remote-tracking-store-design.md](superpowers/specs/2026-11-23-remote-tracking-store-design.md):
+  one store on the VM, the reverse tunnel, the bucket layout.
+- [superpowers/plans/2026-11-23-remote-tracking-store.md](superpowers/plans/2026-11-23-remote-tracking-store.md):
+  the task breakdown for that change.
 - [superpowers/specs/2026-11-23-mlflow-saved-view-design.md](superpowers/specs/2026-11-23-mlflow-saved-view-design.md):
   the saved view on the study page, the eight sections and the ranges.
 - [superpowers/plans/2026-11-23-mlflow-saved-view.md](superpowers/plans/2026-11-23-mlflow-saved-view.md):
@@ -59,7 +63,8 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 ## Outside the repository
 
 - `/home/opencode/Work/rl-grpo-data/`: the data index and two reports. The bulk
-  of the run data is in the Hetzner bucket under `dumps/`.
+  of the run data is in the Hetzner bucket under `dumps/`, and new runs upload
+  under `runs/v1/`.
 
 To refresh the docs, bring `DECISIONS.md` and `journal.md` up to date, fix this
 index, and leave the code alone.

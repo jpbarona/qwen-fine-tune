@@ -61,6 +61,9 @@ rebuild.
 ./scripts/docker-run.sh code-score --config configs/lfm-spread.toml --runs-root runs
 ```
 
+For a run that writes to the store on this VM, use
+`./scripts/start-remote-run.sh` instead. The Dashboard section covers it.
+
 `docker-setup.sh` installs Docker and the NVIDIA container runtime when missing,
 logs in when `GHCR_TOKEN` is set, then pulls the image and the small Python image
 the test runner uses. A new box reaches the first step in about ten minutes:
@@ -198,50 +201,71 @@ one line to `mlflow-errors.log` and leaves the run folder intact.
 The step rows carry reward, pass rate, completion length, truncation, timings,
 GPU memory, gradient and update norms, pool counts, and the advantage share.
 
-Copy a run off the box before you destroy it. The folder exists only there.
+Copy a run off the box before you destroy it. A run with `[mlflow] bucket` set
+also copies its folder to the bucket while it trains, and a run without a bucket
+exists only on the box.
 
 ## Dashboard
 
-The view is MLflow. `rlvr dashboard` starts the MLflow server on the runs root:
+The store lives on this VM, not on the box. One MLflow server serves every box,
+so a run keeps its history after the box is destroyed.
+
+The server is a systemd unit in `deploy/`, run as `opencode`. Once installed it
+binds `127.0.0.1:8081`, keeps its SQLite store at
+`/home/opencode/Work/rl-grpo-data/mlflow/mlflow.db`, and proxies artifacts to
+`s3://opencodeagent1/mlflow/v1`. `sudo deploy/install.sh` installs the unit and
+the backup timer. `deploy/README.md` has the details.
+
+The box reaches the server through an SSH reverse tunnel opened by this VM. The
+tunnel binds the Docker bridge gateway on the box, and it needs
+`GatewayPorts clientspecified` in the box `sshd_config`. `scripts/docker-setup.sh`
+writes that line as a drop-in.
+
+Open the tunnel and start a run:
 
 ```bash
-.venv/bin/rlvr dashboard --runs-root runs --port 8081
+./scripts/start-remote-run.sh code-score Ubuntu@<host> \
+  --config configs/lfm-spread.toml --runs-root runs
 ```
 
-The server binds `0.0.0.0:8081`. The store is `runs/mlflow.db` and the
-artifacts are under `runs/mlartifacts`. The step series, the GPU child run and
-the tables are in the MLflow UI. A run writes its folder into the store as it
-trains. A failed store loses a copy and never stops training. A venv made
-before tracking was an extra needs one install:
+The script opens the tunnel, waits for `/health` from the box, then launches the
+run detached. It launches nothing when the health check does not answer, because
+that run would train with no store. `./scripts/open-tunnel.sh Ubuntu@<host>`
+opens the tunnel alone. One tunnel serves every arm on the box, and it reconnects
+when the link drops.
+
+`rlvr dashboard` prints the store URL:
 
 ```bash
-.venv/bin/python -m pip install -e '.[tracking]'
+.venv/bin/rlvr dashboard
 ```
 
-The tunnel points at `127.0.0.1:8081` on the host. The fast path is a tunnel
-from your own machine straight to the box, because every request through this
-VM pays its slow link:
+Open the UI through the Mac to VM tunnel on port 8083. That tunnel already
+forwards `8083` to `127.0.0.1:8081` on this VM. Then open
+`http://127.0.0.1:8083/`.
+
+`rlvr dashboard --local` starts the old local server on port 8099 with the store
+under the runs root. It starts a server from the local venv and needs no tunnel.
+
+A run with `[mlflow] bucket` set copies its checkpoints and run folder to
+`s3://opencodeagent1/runs/v1/<arm>/<started>/` while it trains. The uploader
+reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `MLFLOW_S3_ENDPOINT_URL`
+from the box environment, so keep them in `$HOME/.env`. The key is scoped to the
+`runs/` prefix.
+
+After a dropped link, replay one run folder into the store:
 
 ```bash
-ssh -N -L 8083:127.0.0.1:8081 Ubuntu@<host>
+.venv/bin/rlvr sync-mlflow runs/code-score/<timestamp>
 ```
 
-Then open `http://127.0.0.1:8083/`.
+The command deletes and rebuilds that run's entries, so it is safe to repeat. It
+matches the run on `rlvr/run_name`, the arm and start timestamp.
 
-The fallback, when your machine cannot reach the box, goes through the VM:
+`deploy/mlflow-backup.timer` copies the store nightly and keeps 14 copies under
+`s3://opencodeagent1/mlflow/v1/backups/`.
 
-```bash
-ssh -N -L 100.67.80.52:8083:127.0.0.1:8081 -i ~/.ssh/id_ed25519 Ubuntu@<host>
-```
-
-That path adds about 1.2 seconds to every request, so the MLflow page takes a
-while to load. Prefer the direct tunnel.
-
-The server accepts the tunnel host name through `RLVR_ALLOWED_HOSTS`, which
-defaults to `*`. The port is published on the box loopback only.
-
-
-Then open `http://100.67.80.52:8083/`.
+The store starts empty. Old dumps under `dumps/` are untouched.
 
 An old run folder is imported once:
 
@@ -258,12 +282,13 @@ The study page is a saved MLflow view. Write the tag once, then open the link
 the command prints:
 
 ```bash
-.venv/bin/rlvr saved-view --runs-root runs
+.venv/bin/rlvr saved-view --runs-root /home/opencode/Work/rl-grpo-data/mlflow
 ```
 
 The command writes the tag to the `rlvr` experiment and prints a hash route
 such as `#/experiments/1/runs?viewStateShareKey=rlvr-study&compareRunsMode=CHART`.
-A second run replaces the same tag, so the store keeps one view.
+The runs root is the folder that holds `mlflow.db`, so point it at the store on
+this VM. A second run replaces the same tag, so the store keeps one view.
 
 Open the route on the dashboard origin, for example
 `http://127.0.0.1:8083/#/experiments/1/runs?viewStateShareKey=rlvr-study&compareRunsMode=CHART`.
@@ -336,10 +361,11 @@ It takes four injected services.
 | `schedule.py` | Spread and sweep policies, promotion and demotion |
 | `reward.py` | Error classes, truncation, length term |
 | `docker_runner.py` | Runs one code sample against its tests |
-| `mlflow_log.py` | Writes each run into the local MLflow store |
+| `mlflow_log.py` | Writes each run into the configured MLflow store |
 | `mlflow_import.py` | Replays old run folders into the store |
+| `upload.py` | Copies checkpoints and the run folder to the bucket |
 | `runread.py` | Reads run folders into the payload the mirror and summary use |
-| `cli.py` | `run`, `screen`, `dashboard`, `import-mlflow`, `summary`, `eval-band`, `publish` |
+| `cli.py` | `run`, `screen`, `dashboard`, `import-mlflow`, `sync-mlflow`, `summary`, `eval-band`, `publish` |
 
 The seams are `Generator`, `TestRunner`, `Judge` and `Store`. The fake versions
 in `fake.py` use SHA-256, so a fake run repeats on any machine.
