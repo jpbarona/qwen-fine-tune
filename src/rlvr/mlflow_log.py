@@ -418,7 +418,7 @@ def _ensure_experiment_id(client: Any, artifact_location: str) -> str:
 
 
 class MlflowMirror:
-    """Copies one run folder into the local MLflow store.
+    """Copies one run folder into the configured store.
 
     Construction sets the tracking URI and makes sure the experiment exists.
     `start` opens the parent and the GPU child run. `step` copies the newest
