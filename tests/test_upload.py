@@ -166,6 +166,8 @@ def test_checkpoint_is_uploaded_under_the_run_prefix(tmp_path: Path) -> None:
     keys = keys_of(client)
     assert f"{PREFIX}/checkpoints/000010/adapter.bin" in keys
     assert keys[-1] == f"{PREFIX}/{MANIFEST_NAME}"
+    # The close walk skips the checkpoint folder, so nothing is sent twice.
+    assert len(keys) == len(set(keys))
     assert not uploader.errors
 
 
@@ -488,13 +490,29 @@ def test_close_uploads_only_the_run_files_that_exist(tmp_path: Path) -> None:
     uploader.close()
 
     keys = keys_of(client)
-    assert keys[:3] == [
+    assert set(keys[:-1]) == {
         f"{PREFIX}/meta.json",
         f"{PREFIX}/metrics.jsonl",
         f"{PREFIX}/eval.json",
-    ]
-    assert f"{PREFIX}/labels.jsonl" not in keys
-    assert f"{PREFIX}/control-events.jsonl" not in keys
+    }
+    assert keys[-1] == f"{PREFIX}/{MANIFEST_NAME}"
+
+
+def test_close_uploads_every_remaining_run_file(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    for name in ("gpu.jsonl", "rollouts.jsonl", "mlflow.json"):
+        (run_dir / name).write_text("{}\n", encoding="utf-8")
+    client = StubS3()
+    uploader = RunUploader(
+        run_dir, "code-score", RUN_NAME, DESTINATION, client=client, interval=0.01
+    )
+    uploader.close()
+
+    keys = keys_of(client)
+    for name in ("gpu.jsonl", "rollouts.jsonl", "mlflow.json"):
+        assert f"{PREFIX}/{name}" in keys
+    assert keys[-1] == f"{PREFIX}/{MANIFEST_NAME}"
+    assert not uploader.errors
 
 
 def test_close_is_idempotent(tmp_path: Path) -> None:

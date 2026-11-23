@@ -158,11 +158,13 @@ run folder once with `rlvr import-mlflow --runs-root runs`.
 ## Before the box is destroyed
 
 A run with `[mlflow] bucket` set copies its folder to the bucket as it trains.
-Check the copy before you release the box:
+Every regular file in the run folder is copied, `gpu.jsonl`, `rollouts.jsonl`
+and `mlflow.json` included, and `manifest.json` is written last. The manifest
+is not in the local folder, so exclude it when you compare:
 
 ```bash
 rclone check <run folder> \
-  hetzner-dumps:opencodeagent1/runs/v1/<arm>/<started>
+  hetzner-dumps:opencodeagent1/runs/v1/<arm>/<started> --exclude manifest.json
 ```
 
 A run without a bucket exists only on the box. Copy it off:

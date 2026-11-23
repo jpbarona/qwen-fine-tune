@@ -3,8 +3,8 @@
 A training step must never wait on the network. `RunUploader` starts one
 background thread that scans `checkpoints/` every few seconds and hands changed
 files to a small pool of daemon worker threads. `close` stops the scan, runs
-one last scan, drains the queue, uploads the small run files, then writes
-`manifest.json` last.
+one last scan, drains the queue, uploads every remaining file in the run folder
+except `manifest.json` and `checkpoints/`, then writes `manifest.json` last.
 
 Every transfer, checkpoint or run file, holds one of two slots shared through
 `flock` files under `<runs root>/.upload-slots/`. Four arms on one box therefore
@@ -62,15 +62,6 @@ SLOT_COUNT = 2
 
 #: Version of the manifest layout. Bump it when a reader would need new code.
 MANIFEST_SCHEMA = 1
-
-#: Files uploaded from the run folder root when the uploader closes.
-RUN_FILES = (
-    "meta.json",
-    "metrics.jsonl",
-    "eval.json",
-    "labels.jsonl",
-    "control-events.jsonl",
-)
 
 CHECKPOINTS_NAME = "checkpoints"
 
@@ -244,10 +235,20 @@ class RunUploader:
             if not self._wait_idle(max(0.0, deadline - time.monotonic())):
                 self._record("close: uploads did not finish in time")
 
-        for name in RUN_FILES:
-            path = self.run_dir / name
-            if path.is_file():
-                self._upload_file(path, name)
+        # Copy every file the run left behind, not a fixed list. The checkpoint
+        # folder is already handled by the scan, and the manifest is written to
+        # the bucket last.
+        for path in sorted(self.run_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(self.run_dir).as_posix()
+            if relative == MANIFEST_NAME:
+                continue
+            if relative == CHECKPOINTS_NAME or relative.startswith(
+                f"{CHECKPOINTS_NAME}/"
+            ):
+                continue
+            self._upload_file(path, relative)
 
         self._upload_manifest()
 
