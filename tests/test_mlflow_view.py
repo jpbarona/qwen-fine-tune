@@ -21,7 +21,6 @@ from mlflow.tracking import MlflowClient  # noqa: E402
 import pytest  # noqa: E402
 
 from rlvr.mlflow_view import (  # noqa: E402
-    TAG_KEY,
     build_view_state,
     encode_view_state,
     write_view_tag,
@@ -93,7 +92,7 @@ def test_write_view_tag_replaces_the_tag(tmp_path: Path) -> None:
     write_view_tag(runs_root)
     first = MlflowClient().get_experiment_by_name("rlvr")
     assert first is not None
-    envelope = json.loads(first.tags[TAG_KEY])
+    envelope = json.loads(first.tags["mlflow.sharedViewState.rlvr-study"])
     state = json.loads(
         zlib.decompress(base64.b64decode(envelope["state"].removeprefix("deflate;")))
     )
@@ -103,5 +102,5 @@ def test_write_view_tag_replaces_the_tag(tmp_path: Path) -> None:
     second = MlflowClient().get_experiment_by_name("rlvr")
     assert second is not None
     keys = [key for key in second.tags if key.startswith("mlflow.sharedViewState.")]
-    assert keys == [TAG_KEY]
+    assert keys == ["mlflow.sharedViewState.rlvr-study"]
     assert second.experiment_id == first.experiment_id

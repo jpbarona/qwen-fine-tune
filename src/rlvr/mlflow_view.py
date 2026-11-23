@@ -219,8 +219,8 @@ def write_view_tag(runs_root: str | Path) -> str:
     from mlflow.tracking import MlflowClient
 
     root = Path(runs_root)
-    root.mkdir(parents=True, exist_ok=True)
     envelope = encode_view_state(build_view_state())
+    root.mkdir(parents=True, exist_ok=True)
 
     mlflow.set_tracking_uri(f"sqlite:///{root / DATABASE_NAME}")
     client = MlflowClient()
