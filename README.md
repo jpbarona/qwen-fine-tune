@@ -348,27 +348,22 @@ budget or the group size. Use a new run root for a different arm.
 
 ## Code map
 
-`src/rlvr/experiment.py` owns the step loop and is the only orchestration point.
-It takes four injected services.
+`rlvr.training.experiment` owns the step loop and is the only orchestration
+point. It takes four injected services. The packages below point one way, and
+`.importlinter` enforces the order in CI.
 
-| File | Role |
+| Package | Role |
 | --- | --- |
-| `experiment.py` | Step loop, pools, queues, labels, metrics |
-| `qwen.py` | GRPO trainer, LoRA, advantage, loss |
-| `vllm_backend.py` | Sampling and adapter handoff |
-| `pools.py` | Build the three pools from screen rows |
-| `queues.py` | Saved rotation for each pool |
-| `schedule.py` | Spread and sweep policies, promotion and demotion |
-| `reward.py` | Error classes, truncation, length term |
-| `docker_runner.py` | Runs one code sample against its tests |
-| `mlflow_log.py` | Writes each run into the configured MLflow store |
-| `mlflow_import.py` | Replays old run folders into the store |
-| `upload.py` | Copies checkpoints and the run folder to the bucket |
-| `runread.py` | Reads run folders into the payload the mirror and summary use |
-| `cli.py` | `run`, `screen`, `dashboard`, `import-mlflow`, `sync-mlflow`, `summary`, `eval-band`, `publish` |
+| `core` | Seam values, shared constants, run schema, stage labels, memory, batching, checkpoints, control file, config loader |
+| `training` | Step loop, pools, queues, schedule, reward, screening, budget |
+| `engine` | GRPO trainer, vLLM sampling, judge client, model profiles |
+| `evaluation` | Data loading, pass@1, Docker test runner, fakes, synthetic rows, repro helpers |
+| `tracking` | Run folder writer, MLflow mirror and importer, saved view, upload, run readers |
+| `report` | Static report from a finished run |
+| `app` | Command line and resume |
 
 The seams are `Generator`, `TestRunner`, `Judge` and `Store`. The fake versions
-in `fake.py` use SHA-256, so a fake run repeats on any machine.
+in `rlvr.evaluation.fake` use SHA-256, so a fake run repeats on any machine.
 
 ## Data contracts
 
