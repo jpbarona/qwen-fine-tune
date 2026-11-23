@@ -981,6 +981,8 @@ def dashboard_argv(runs_root: Path, port: int) -> list[str]:
         "0.0.0.0",
         "--port",
         str(port),
+        "--allowed-hosts",
+        os.environ.get("RLVR_ALLOWED_HOSTS", "*"),
     ]
 
 

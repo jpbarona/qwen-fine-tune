@@ -1221,9 +1221,16 @@ def test_dashboard_command_runs_mlflow_as_a_module(tmp_path, monkeypatch) -> Non
     assert argv[1:4] == ["-m", "mlflow", "server"]
     assert argv[argv.index("--host") + 1] == "0.0.0.0"
     assert argv[argv.index("--port") + 1] == "8081"
+    assert argv[argv.index("--allowed-hosts") + 1] == "*"
     # The module form does not need the mlflow console script on PATH.
     assert "mlflow" not in os.environ.get("PATH", "")
     assert dashboard_argv(runs_root, 8081) == argv
+
+
+def test_dashboard_allowed_hosts_can_be_set(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RLVR_ALLOWED_HOSTS", "example.test:8083")
+    argv = dashboard_argv(tmp_path, 8081)
+    assert argv[argv.index("--allowed-hosts") + 1] == "example.test:8083"
 
 
 def test_dashboard_help_mentions_mlflow() -> None:
