@@ -152,3 +152,11 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 134. Likely cause is a rate too high with no KL anchor
 135. The run stopped at step 54 and the GPU is now free
 136. Arm rate drops to 3e-5 after the second collapse
+137. Pass rate sat at zero because the user had no docker access
+138. Adding Ubuntu to the docker group made the tests run again
+139. Container had no docker client, so every test failed the same way
+140. The host daemon could not see the container temporary task folder
+141. Mounting the repo at its host path fixed the task folder
+142. New box now reaches the first step in about three minutes
+143. Step time is unchanged, so the container buys setup time only
+144. Dashboard refresh drops to half a second, payload builds in 0.4 seconds

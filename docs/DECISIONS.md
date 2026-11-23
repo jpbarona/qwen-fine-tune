@@ -858,7 +858,7 @@ The operator's read is that 1e-4 is too high once the pool produces dense
 advantage. The next arm uses 3e-5. Data is in
 `/home/opencode/Work/rl-grpo-data/2026-11-22-lfm-spread-collapse/`.
 
-## D39. The capped run collapsed, and the box went away
+## D41. The capped run collapsed, and the box went away
 
 Status: observed 22 November 2026. The box became unreachable during this entry.
 
@@ -897,7 +897,7 @@ the trainer. Steps 35 to 54 were never pulled and are lost if the box is gone.
 Next settings, when a box returns: cap 1,536, length term soft limit 600 at
 0.002 per token with a floor of 1.0, and rate 3e-5 from the step-30 checkpoint.
 
-## D41. The pools use saved queues, three failures demote, and solved prompts retire
+## D42. The pools use saved queues, three failures demote, and solved prompts retire
 
 Status: implemented 22 November 2026.
 
@@ -927,3 +927,33 @@ The eight-sample probe is held. The second-passing-group idea is dropped.
 
 Spec: `docs/superpowers/specs/2026-11-22-parked-and-train-queues-design.md`.
 Plan: `docs/superpowers/plans/2026-11-22-parked-and-train-queues.md`.
+
+## D43. Runs happen inside a container image
+
+Status: implemented 22 November 2026.
+
+A fresh box took about 25 minutes to reach the first step, and four of those
+minutes were spent on avoidable failures. Python 3.12 was absent, the headers
+were absent, `gcc` was version 12 while `g++` was 11, and the CUDA toolkit in
+the environment was 13.5 while torch was built with 13.0. Each one stopped a run
+after the model had downloaded.
+
+Decision: build one image with the runtime and pull it on each box. The
+repository mounts over the image, so code changes need no rebuild.
+
+The image is `ghcr.io/jpbarona/rlvr:latest`, based on
+`nvidia/cuda:13.0.3-devel-ubuntu22.04`, 17.6 GB. It holds Python 3.12, torch,
+vLLM, ninja, the Docker client and `causal_conv1d` built for `sm_86`. The run
+needs `--gpus all`, `--ipc=host`, the host Docker socket, and a cache volume.
+
+Two container faults cost time and are fixed. The image had no Docker client, so
+the test runner failed. The runner writes tasks to a temporary folder, so the
+host daemon could see the folder only after the wrapper mounted the repository at
+its own host path and set `TMPDIR` there.
+
+Measured effect: a new box reaches the first step in about five minutes. Step
+time is unchanged, 81 seconds at 10 groups. The container buys setup time, not
+throughput.
+
+The image is private, so a box needs `GHCR_TOKEN` once. Making the package
+public removes that step.

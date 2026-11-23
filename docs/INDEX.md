@@ -1,50 +1,57 @@
-# rl-grpo docs index
+# Docs index
 
-Qwen3-0.6B and LFM2.5-2.6B GRPO reward study. Documentation lives here. Code and data stay in the repo root.
+The study compares GRPO training on a small code model across two parked-prompt
+schedules. Code sits in the repository root. This folder holds the reasoning.
 
-Docs, all in this folder:
+## Start here
 
-- [postmortem-run17.md](postmortem-run17.md) — why the 313 step curve looked flat, and what the model actually did.
-- [postmortem-run17.pdf](postmortem-run17.pdf) — the same report with three charts, three pages.
-- [6.1-sol-xhigh-pass.md](6.1-sol-xhigh-pass.md) — repository organization, LFM support, throughput changes, assumptions, and validation.
-- `DECISIONS.md` — decisions as they are made, newest last.
-- [superpowers/specs/2026-11-19-lfm-all-linear-lora-design.md](superpowers/specs/2026-11-19-lfm-all-linear-lora-design.md) — the approved design for all-linear LoRA on LFM.
-- [superpowers/plans/2026-11-19-lfm-all-linear-lora.md](superpowers/plans/2026-11-19-lfm-all-linear-lora.md) — the task breakdown for that change.
-- [../issues/19-parked-pools-spec.md](../issues/19-parked-pools-spec.md) — spec for measured pools and the two parked re-screen policies.
-- [superpowers/plans/2026-11-21-parked-pools.md](superpowers/plans/2026-11-21-parked-pools.md) — task breakdown with the binding values.
-- [superpowers/specs/2026-11-22-parked-and-train-queues-design.md](superpowers/specs/2026-11-22-parked-and-train-queues-design.md) — the approved design for the pool queues, retirement and three-failure demotion.
-- [superpowers/plans/2026-11-22-parked-and-train-queues.md](superpowers/plans/2026-11-22-parked-and-train-queues.md) — the task breakdown for that change.
-- `../issues/20` to `../issues/26` — the seven tickets for that change.
-- [superpowers/plans/2026-11-21-parked-pools.md](superpowers/plans/2026-11-21-parked-pools.md): the task breakdown for measured pools and the two parked re-screen arms.
-- [IDEAS.md](IDEAS.md): one or two chunk proposals, newest first, with dates. The long version is in `/home/opencode/Work/Garbage/ideas-old.md`.
-- `journal.md` — running problem and fix chunks, 10 to 12 words each.
-- `SPEC.md` — the deferred four-arm study design.
-- `PLAN.md` — the original ticket breakdown.
-- `SMOKE.md` — smoke run result.
-- `DEPLOY.md` — instance and deploy notes.
-- `JUDGE_MODEL.md` — judge model research, local only.
+- [../README.md](../README.md): install, run, dashboard, data layout, contracts.
+- `DECISIONS.md`: choices as they were made, newest last. D25 onward covers the
+  parked-pool study.
+- `IDEAS.md`: proposals, two chunks each, newest first inside a topic.
+- `journal.md`: one line per problem and fix, newest at the bottom.
 
-Repo items, relative to this folder:
+## Designs and plans
 
-- `../issues/09-spec-single-arm-curriculum.md` — current spec, single arm.
-- `../issues/10` to `../issues/17` — the implemented tickets.
-- `../issues/18-reward-and-checkpoint-fixes.md` — the reward and checkpoint fix plan.
-- `../issues/19-parked-pools-spec.md`: the measured pool spec and its two re-screen policies.
-- `../issues/20` to `../issues/26`: the tickets for the vLLM-only engine, pool build, arm configs and runbook.
-- `../README.md`: install, run, and test commands, including the two parked-pool arms and `rlvr eval-band`.
-- `../configs/`: `real.toml`, `smoke.toml`, `lfm.toml`, `lfm-smoke.toml`, the two parked-pool arms `lfm-spread.toml` and `lfm-sweep.toml`, the two twenty step Qwen probes `probe-1e4.toml` and `probe-1e3.toml`, the two LFM probes `lfm-probe-1e4.toml` and `lfm-probe-1e3.toml`, and the sixty step Qwen baseline `qwen-alllinear-60.toml`.
-- `../dashboard/` — React and Tailwind source for the live dashboard.
-- `../src/rlvr/web/index.html` — the committed single file build.
-- `../data/mbpp_full.jsonl` — 961 MBPP rows, pinned split of 711 train and 250 test, with `../data/split_seed1234.json` holding the ids.
-- `../data/difficulty_labels.jsonl` — one band per training row.
-- `../data/synthetic_easy.jsonl` — 50 very easy rows for the first stage.
-- `../src/rlvr/` — package source.
-- `../tests/` — CPU regression tests and optional model-runtime and Docker integration checks.
-- `../runs/` — run folders, kept as study data.
+- [superpowers/specs/2026-11-22-parked-and-train-queues-design.md](superpowers/specs/2026-11-22-parked-and-train-queues-design.md):
+  saved queues, retirement, three-failure demotion.
+- [superpowers/plans/2026-11-22-parked-and-train-queues.md](superpowers/plans/2026-11-22-parked-and-train-queues.md):
+  the task breakdown for that change.
+- [superpowers/plans/2026-11-21-parked-pools.md](superpowers/plans/2026-11-21-parked-pools.md):
+  the earlier breakdown for measured pools and the two arms.
+- [../issues/19-parked-pools-spec.md](../issues/19-parked-pools-spec.md): the
+  pool spec. Tickets `20` to `26` cover that build.
+- [superpowers/specs/2026-11-19-lfm-all-linear-lora-design.md](superpowers/specs/2026-11-19-lfm-all-linear-lora-design.md):
+  all-linear LoRA on LFM.
+- `SPEC.md`: the deferred four-arm sampling study.
+- `PLAN.md`: the original ticket breakdown.
 
-Pulled run data lives outside this repo, in
-`/home/opencode/Work/rl-grpo-data/`, one folder per pull.
+## Reports
 
-To update the docs, say "go and update the docs". That means: bring
-`DECISIONS.md` and `journal.md` up to date, keep this index accurate, and leave
-the code untouched.
+- `postmortem-run17.md` and `postmortem-run17.pdf`: why the 313-step curve looked
+  flat.
+- `6.1-sol-xhigh-pass.md`: repository layout, LFM support, throughput, and the
+  validation record.
+- `SMOKE.md`: the smoke run result.
+- `DEPLOY.md`: host, user, key, and run commands.
+- `JUDGE_MODEL.md`: judge model research, kept local.
+
+## Data
+
+- `../data/mbpp_full.jsonl`: 961 MBPP rows.
+- `../data/split_seed1234.json`: the pinned 711 and 250 split.
+- `../data/train_split.jsonl`: the 711 training rows.
+- `../data/difficulty_labels.jsonl`: one band per training row.
+- `../screens/mbpp-base/`: the base-model screen. Ignored by git, restored from
+  the bucket. See the README.
+- `../runs/`: run folders, kept as study data.
+- `../configs/`: arm configs, starting with `lfm-spread.toml` and
+  `lfm-sweep.toml`.
+
+## Outside the repository
+
+- `/home/opencode/Work/rl-grpo-data/`: the data index and two reports. The bulk
+  of the run data is in the Hetzner bucket under `dumps/`.
+
+To refresh the docs, bring `DECISIONS.md` and `journal.md` up to date, fix this
+index, and leave the code alone.

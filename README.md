@@ -1,818 +1,310 @@
 # rlvr
 
-A study of whether an LLM judge can train a small code model as well as unit
-tests. See `docs/SPEC.md` for the study design and `docs/PLAN.md` for the task breakdown.
-`docs/journal.md` holds the running problem and fix notes. `docs/DECISIONS.md` records
-the current choices.
+A study of whether a small code model can be trained with group relative policy
+optimization, and whether gains in Python carry to other languages.
 
-## Install
+Two models run the same pipeline. Qwen3-0.6B and LFM2.5-2.6B. The data is MBPP,
+961 rows, split into 711 train and 250 test by `data/split_seed1234.json`.
 
-### Container, the fast path
+## What one run does
 
-One image holds Python 3.12, torch, vLLM, CUDA 13.0 and the compiled kernels. A
-new box pulls it and starts training. The repository mounts over it at run time,
-so a code change needs no rebuild.
+1. Read a screen. The screen is the base model, 16 samples on each of the 711
+   training questions.
+2. Split the questions into three pools from that screen.
+3. Train for a fixed number of steps. Each step samples a group per prompt,
+   scores the code with hidden tests, and takes one optimizer update.
+4. Evaluate on a pinned subset every few steps.
+5. Write everything to a run folder.
+
+The screen is a one-time input. Training never re-screens. Promotions come from
+live rollouts.
+
+## Before every run
+
+Three things to check. Skipping them costs an hour.
+
+**1. Pull main.**
+
+```bash
+git pull origin main
+```
+
+The box and this repository must hold the same code, or the results are not
+comparable and a resume can be rejected.
+
+**2. The screen file.** It is not in git, because `screens/` is ignored.
+
+```bash
+rclone copy hetzner-dumps:opencodeagent1/dumps/vm/rl-grpo-data/2026-11-21-lfm-screen \
+  screens/mbpp-base
+```
+
+The file is `screens/mbpp-base/rows.jsonl`, 711 rows, with `summary.json` beside
+it. The arm configs name it with `screen_rows`.
+
+**3. The image token.** The training image is private. A fresh box needs the
+token once, either as `GHCR_TOKEN` or through a manual `docker login`. The setup
+script reads `GHCR_TOKEN` and `GHCR_USER`. Without it the pull fails with
+`unauthorized`.
+
+To drop the token step, make the package public once at
+`https://github.com/users/jpbarona/package/container/rlvr/settings`.
+
+## Start a run in the container
+
+This is the fast path. The image holds Python 3.12, torch, vLLM, CUDA 13.0 and
+the compiled kernels. The repository mounts over it, so code changes need no
+rebuild.
 
 ```bash
 ./scripts/docker-setup.sh
 ./scripts/docker-run.sh code-score --config configs/lfm-spread.toml --runs-root runs
 ```
 
-`docker-setup.sh` installs Docker and the NVIDIA container runtime if they are
-missing, logs in if `GHCR_TOKEN` is set, and pulls the image plus the small
-Python image the test runner uses. It takes about two minutes on a host with a
-fast link.
+`docker-setup.sh` installs Docker and the NVIDIA container runtime when missing,
+logs in when `GHCR_TOKEN` is set, then pulls the image and the small Python image
+the test runner uses. A new box reaches the first step in about five minutes.
 
-The run needs three mounts, and `docker-run.sh` sets them: the repository at
-`/app`, the host Docker socket for the sandboxed test runner, and a cache volume
-so the kernels compile once. It also passes `--gpus all` and `--ipc=host`.
+`docker-run.sh` starts the container with:
 
-The training user on the host must be in the `docker` group. Without it every
-test fails with `runner_error`, because the test runner cannot start containers.
+- the GPU,
+- host shared memory (`--ipc=host`), because vLLM fails without it,
+- the repository at `/app`,
+- the host Docker socket, because the test runner starts containers,
+- a cache volume for the model and compiled kernels.
 
-Build and publish the image when a dependency changes:
+The training user must be in the `docker` group. Without it every test records
+`runner_error` and the pass rate stays at zero.
+
+Rebuild the image only when a dependency changes:
 
 ```bash
 docker build -f docker/Dockerfile -t ghcr.io/jpbarona/rlvr:latest .
 docker push ghcr.io/jpbarona/rlvr:latest
 ```
 
-### Bare metal
+The build takes about 15 minutes. The image is 17.6 GB on disk.
 
-Two commands on a fresh GPU host:
+## Bare metal
+
+Use this when a container is not available.
 
 ```bash
 ./setup.sh
 ./run.sh code-score --config configs/lfm-spread.toml --runs-root runs
 ```
 
-`setup.sh` installs everything that is missing and skips everything that is
-already there, so running it twice costs seconds. It installs the Python 3.12
-runtime, the compiler and headers, the venv, the pinned torch and vLLM stack,
-the CUDA toolkit that matches torch, the fast convolution kernel, and the screen
-file. It ends with a READY line and the run command.
+`setup.sh` installs what is missing and skips what is present. It checks Python
+3.12, the headers, `g++`, ninja, the CUDA toolkit that matches torch, and the
+screen. It fails with the exact fix command.
 
-Use `./setup.sh --check` to see the state without changing anything.
+`./setup.sh --check` reports without changing anything. `./setup.sh --fast`
+skips the optional convolution kernel.
 
-`run.sh` exports `CUDA_HOME` and `CC` for every run, so the fast kernels build
-without any manual export. Without a toolkit the run still works, but FlashInfer
-and `causal_conv1d` fall back to slow reference kernels.
-
-The `vllm` extra pins vLLM 0.34.0, torch 2.14.0, Transformers 5.22.2, PEFT
-0.18.1 and Accelerate 1.8.1. The torch wheel is built for CUDA 13.0, so the host
-driver must support it and the toolkit must match it. Every rollout in training
-and in the screen samples with vLLM.
+`run.sh` exports `CUDA_HOME` and `CC` for every run, so the kernels build without
+a manual export.
 
 ## Setup cost
 
-The box costs 0.57 dollars an hour, which is 0.0095 dollars a minute. Money is
-not the reason to make setup fast.
+The box costs 0.57 dollars an hour, which is 0.0095 a minute.
 
 | Event | Time | Cost |
 | --- | --- | --- |
-| Fresh box to first step, measured | about 25 min | 0.24 dollars |
-| Snapshot restore to first step | about 2 min | 0.02 dollars |
-| One hundred steps at 10 groups | about 2.2 h | 1.24 dollars |
-| Full run, 100 steps, four boxes | about 8.7 h | 4.95 dollars |
-
-The optional convolution kernel costs 3 to 5 minutes to build. It saves part of
-a step, so it pays back only if a run is long. The one-time vLLM kernel compile
-costs 3 to 5 minutes, then every step samples faster, so it pays back inside a
-few steps.
-
-Three rules follow.
-
-1. Never hold training for an optional kernel. Start the run, then build the
-   extra kernel in a quiet window.
-2. Snapshot a box after one successful setup and clone that image for the next
-   run. This cuts 25 minutes to about 2.
-3. Configure several boxes at the same time, not one after another.
-
-`./setup.sh --fast` skips the optional convolution kernel and starts the rest
-without pausing for builds. Use it when the run is short or the box will be
-discarded.
-
-## LFM2.5-2.6B
-
-LFM uses the same environment, GRPO trainer, reward arms, measured pool,
-evaluation, controls, and checkpoint workflow. Its model profile selects the
-tokenizer behavior and attention projection names. vLLM must be 0.17 or newer
-for LoRA over the fused MLP and short convolution, and the extra pins 0.34.0.
-`scripts/smoke_lfm_vllm.py` serves the model, loads an adapter, samples, and
-swaps in a second adapter without training.
-
-Use separate run roots for the smoke and full runs if both need to be resumed.
-Add `--resume` with the original config and run root to continue a checkpoint.
-Model identity, revision, split seed, and fake/real mode are checked against
-saved metadata before run records are truncated.
-
-The LFM profile pins `LiquidAI/LFM2.5-2.6B` at revision
-`7141b56cd4650af95c7c7b86983443aed050c96a`.
-The native LFM template always opens a reasoning block, including for screening
-and evaluation. The comparison starts from Qwen's hyperparameters. The
-`[training] lora_targets` key chooses the adapter placement: `attention` adapts
-the four attention projections, and `all-linear` adapts every linear layer.
-`configs/lfm.toml` and `configs/qwen-alllinear-60.toml` use `all-linear`.
-`configs/lfm-smoke.toml` stays `attention`. Full-weight GPU performance still
-needs measurement.
-The assumptions, implementation details, and validation are recorded in
-[the pass notes](docs/6.1-sol-xhigh-pass.md).
-
-## Development and throughput
-
-```bash
-.venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest -q
-cd dashboard
-npm ci
-npm run build
-```
-
-The dashboard build embeds JavaScript and CSS in `src/rlvr/web/index.html`.
-Commit this generated file with frontend changes. Pull request checks run the
-CPU suite and rebuild the dashboard to detect stale embedded assets.
-
-Training can run up to `training.test_workers` isolated test containers at once
-(default 4). `training.prefetch_scoring` defaults to true and scores the next
-already-generated group while the current group runs its backward pass.
-`training.eval_batch_size` defaults to 8 and shrinks on CUDA memory exhaustion.
-The training thread owns model calls and optimizer updates, with one optimizer
-step per generated prompt batch.
-
-Metrics record generation time, scoring time, time waiting for scores, update
-time, step time, and completion tokens per second. Scoring and update times can
-overlap. Step time covers generation through the optimizer update. Evaluation
-records its own duration. Use these together with the dashboard's GPU samples
-when comparing runs on the same GPU and profile.
-
-The source map and GPU validation procedure are in
-[the pass notes](docs/6.1-sol-xhigh-pass.md).
-
-## Run the fake pipeline
-
-The fake path needs no GPU, no network, no Docker, and no model download. It is
-deterministic: the same command produces the same rollout records. The CLI
-still reads the committed MBPP split and the synthetic easy file, so the run
-trains on the 711 MBPP train questions plus the 50 synthetic easy questions, and
-evaluates the 250 held-out test questions. Only the model, judge, and Docker
-runner are replaced by fakes.
-
-```bash
-.venv/bin/rlvr run --arm code-score --fake
-```
-
-Arms: `code-score`, `hybrid`, `gated-judge`, `gated-process`. All four are
-implemented on the fake path. The process arm judges the reasoning trace and
-the code separately, and only on a full test pass.
-Flags: `--config PATH` (default: the packaged config at
-`src/rlvr/resources/default_config.toml`) and `--runs-root PATH` (default
-`./runs`). Unknown arms, a missing config, and an invalid config print one
-message on stderr and exit 2.
-
-## Difficulty screening
-
-The screen samples the base model on a question set and writes a difficulty
-table. It never trains, builds no optimizer, writes no checkpoint, and writes
-into its own output folder, not a run folder.
-
-```bash
-.venv/bin/rlvr screen \
-    --questions data/train_split.jsonl \
-    --output screens/mbpp-base
-```
-
-`--questions` is a JSONL file in the MBPP row schema, so the synthetic easy set
-and the MBPP rows both work. `--samples` is the number of model samples per
-question. It defaults to sixteen, which is the group size of the two parked-pool
-arms. The screen asks for thinking off, at the completion cap from
-`[training] max_completion_tokens`, because training uses that cap. Qwen honors
-the toggle. The LFM template always opens a reasoning block, so the toggle is
-ignored for LFM and the screen samples thinking at the same completion cap.
-
-A screen for a parked-pool arm must cover exactly the 711 training questions.
-The arm runbook below writes that question file. A screen over the full 961 row
-file also measures the held-out questions, which the pool builder rejects.
-
-The output folder holds two files:
-
-```
-rows.jsonl      one row per question: prompt_id, samples, passed, pass_rate
-summary.json    the pass rate histogram from 0.0 to 1.0, and the
-                zero_pass, partial_pass, and full_pass question counts
-```
-
-A sample counts as passed only when every task test passed. A rerun reads the
-rows already written and skips those question ids, so an interrupted screen
-continues where it stopped. A final row without a newline is rewritten with one,
-and a torn final line is dropped in that rewrite, before the restart appends.
-Rows must keep the same sample count and belong to the same question set, so two
-screens cannot be mixed by accident.
-
-`--fake` replaces the model and Docker with the deterministic fakes and needs no
-GPU, network, or Docker. It exercises the same writer, summary, and resume path.
-
-## The two parked-pool arms
-
-The study compares two ways to re-screen parked prompts.
-`configs/lfm-spread.toml` joins a parked block to every step.
-`configs/lfm-sweep.toml` covers the parked pool in consecutive steps, then
-trains for a gap. The two configs are identical except the policy keys. Both
-run 100 steps from base weights at group size 16, a 304 sequence rollout budget,
-rate 3e-5, all-linear LoRA rank 16 and alpha 32, a 1,024 token completion cap,
-and a recorded but unenforced thinking budget of 1,024.
-
-Install with the one vLLM environment in the Install section. The screen uses
-the same environment.
-
-First the screen input. `data/train_split.jsonl` already holds the 711 training
-questions of the pinned split, in the MBPP row schema, so no generation step is
-needed. The arm config reads `screens/mbpp-base/rows.jsonl`, so the screen output
-folder must be `screens/mbpp-base`.
-
-Evaluations run every 5 steps and checkpoints every 10. A resumed run evaluates
-the checkpoint it loads before the first new step.
-
-Then screen the base model. Leave out `--samples` so the default sixteen is
-used. The command resumes if it is interrupted.
-
-```bash
-.venv/bin/rlvr screen \
-    --questions screens/mbpp-train.jsonl \
-    --output screens/mbpp-base \
-    --config configs/lfm-spread.toml
-```
-
-The summary must report 711 questions, and `zero_pass`, `partial_pass` and
-`full_pass` must add up to 711. The zero and full counts are the parked and
-retired pools. The partial count is the train pool. `samples_per_question`
-must be 16, the same as `[training] generations_per_prompt`. A run stops at load
-if they differ, so an old eight sample folder cannot be reused by accident.
-
-Run the arms one at a time. Use a separate run root for each so `--resume`
-cannot pick the other arm's folder.
-
-```bash
-OPENROUTER_API_KEY=... ./run.sh code-score \
-    --config configs/lfm-spread.toml --runs-root runs-spread
-OPENROUTER_API_KEY=... ./run.sh code-score \
-    --config configs/lfm-sweep.toml --runs-root runs-sweep
-```
-
-After a crash, resume with the matching config and run root:
-
-```bash
-OPENROUTER_API_KEY=... ./run.sh code-score \
-    --config configs/lfm-sweep.toml --runs-root runs-sweep --resume
-```
-
-Pull these files back. Keep the screen folder, because the run metadata records
-its path.
-
-```
-screens/mbpp-base/rows.jsonl
-screens/mbpp-base/summary.json
-runs-spread/code-score/<timestamp>/meta.json
-runs-spread/code-score/<timestamp>/metrics.jsonl
-runs-spread/code-score/<timestamp>/rollouts.jsonl
-runs-spread/code-score/<timestamp>/labels.jsonl
-runs-spread/code-score/<timestamp>/eval.json
-runs-spread/code-score/<timestamp>/checkpoints/
-runs-sweep/code-score/<timestamp>/  the same files
-```
-
-Pull them back before you destroy the box. The run folders exist only on that
-machine until they are copied.
-
-```bash
-rsync -av <host>:<repo>/screens/mbpp-base screens/mbpp-base
-rsync -av <host>:<repo>/runs-spread/ runs-spread/
-rsync -av <host>:<repo>/runs-sweep/ runs-sweep/
-```
-
-To see both runs side by side, pass the two run folders to `summary`, or point
-the dashboard at the two arm folders:
-
-```bash
-.venv/bin/rlvr summary runs-spread/code-score/<timestamp> \
-    runs-sweep/code-score/<timestamp> --html report.html
-.venv/bin/rlvr dashboard runs-spread/code-score runs-sweep/code-score
-```
-
-The four measurements are read from those files:
-
-1. Non-zero advantage share. Average `advantage_share` over the `metrics.jsonl`
-   rows. A row counts groups whose rewards hold more than one distinct value.
-2. Mean absolute advantage. Group `rollouts.jsonl` by step and prompt id, apply
-   the training normalisation `(reward - group mean) / group std`, and average
-   the absolute values. A group with zero std contributes zero.
-3. Promotions per thousand parked rollouts. Count `labels.jsonl` rows with
-   `reason = "promoted"`. Divide by the parked rollouts, which is the sum of
-   `parked_prompts * 16` over `metrics.jsonl`, and multiply by 1,000.
-4. Pass@1 on the pinned 100. Read the checkpoint `pass_at_1` values from
-   `eval.json`. The base score on the same cohort is 0.51.
-
-A sweep run spends part of its 100 step budget on parked steps. Its train
-passes are therefore fewer than a spread run at the same step count. The spread
-run keeps a train block in every step, so its parked share is the block size
-over the step size.
-
-## Real training
-
-One command per arm, no manual edits:
-
-```bash
-OPENROUTER_API_KEY=... ./run.sh code-score
-```
-
-`run.sh` reads the judge key from the environment, passes every extra argument
-to `rlvr run`, and defaults to `configs/real.toml`. The four arms are
-`code-score`, `hybrid`, `gated-judge`, `gated-process`. The real path trains in
-`src/rlvr/qwen.py` and samples with vLLM through `src/rlvr/vllm_backend.py`,
-behind the same `Experiment` seam. The Docker test runner and the judge client
-sit behind their own seams.
-
-A smoke run validates a fresh GPU in minutes:
-
-```bash
-OPENROUTER_API_KEY=... ./run.sh code-score --config configs/smoke.toml
-```
-
-The smoke profile runs 8 training steps. A step starts with two prompt groups
-and grows while free GPU memory stays above the floor, so it runs at least 128
-generations. It also runs two checkpoint evaluations on 4 questions and a final
-evaluation on 8 questions. Expected runtime is roughly 5 to 10 minutes,
-dominated by the Docker test runs. This estimate is unverified: there is no GPU
-in this environment.
-
-Without a pool policy, each step takes a batch of prompts, one group of the
-configured group size per prompt, all sampled in one padded call. The batch
-starts at two prompts. After each step the free memory is read. While it stays
-at or above `[training] memory_floor_mib` the
-next step takes one more prompt. The first step below the floor settles the size
-at the largest batch that fit, and the run keeps that size.
-`[training] max_prompts` caps the prompt count per step when memory would allow
-more. An absent key means no cap. The cap limits sequences per step. A run with
-a pool policy does not use this growth path. Its step size is the rollout budget
-divided by the group size, which is 19 prompts in the two arm configs. Step time
-is unverified, because test containers and judge calls run outside the batch.
-Gradients accumulate
-across the prompt groups and the optimizer steps once at the end of the step, so
-the step count is the number of weight updates. A group is normalised on its own
-rewards, never across the batch.
-
-## Deploy on Massed Compute
-
-Rent one RTX A6000: 48GB VRAM, 96GB system RAM, 300GB disk, $0.57 per hour. Use the
-Ubuntu Server 24.04 image and set `OPENROUTER_API_KEY` at deploy time.
-
-After the instance boots, install Docker, then run the install, smoke, and full
-arm commands from the sections above:
-
-```bash
-sudo apt install -y docker.io
-OPENROUTER_API_KEY=... ./run.sh code-score --config configs/smoke.toml
-OPENROUTER_API_KEY=... ./run.sh code-score
-```
-
-## Checkpoints and resume
-
-A checkpoint is saved every `[run] checkpoint_every_steps` steps (default 20). `configs/real.toml` sets 10. Fifteen checkpoints are kept per run.
-Each checkpoint directory holds the LoRA adapter, the optimizer state, the step
-number, and a `checkpoint.json` manifest. After a crash, resume from the last
-checkpoint:
-
-```bash
-OPENROUTER_API_KEY=... ./run.sh code-score --resume
-```
-
-Resume opens the latest run folder for the arm, restores the model, optimizer,
-and step, truncates any records past the checkpoint, and continues appending to
-the same folder. Records are never duplicated.
-
-## Budget guards
-
-`[budget] max_steps` and `[budget] max_judge_calls` cap the run. The loop stops
-cleanly at the cap, writes the final evaluation, and records the reason
-(`completed`, `max_steps`, `max_judge_calls`, or `out_of_memory`) in
-`eval.json`.
-
-## Tests
-
-```bash
-.venv/bin/pytest
-```
-
-CPU only. No network, no GPU. Docker is used by two files and those tests skip
-when the image is missing. The suite runs in about 35 seconds.
-
-`tests/test_environment_solvable.py` is the cold check on the environment: it
-runs every synthetic reference solution through the real container harness, so a
-prompt that names the wrong function fails here instead of during a run.
-
-## Run folder layout
+| Fresh box to first step, bare metal | about 25 min | 0.24 |
+| Fresh box to first step, container | about 5 min | 0.05 |
+| One hundred steps at 19 groups | about 4.5 h | 2.6 |
+
+The money is small. The cost is your attention and the serial delay across
+boxes. Start the run before you tune anything optional.
+
+## The pools
+
+Each prompt goes to one pool from its screen count.
+
+| Screen result | Pool | Trained |
+| --- | --- | --- |
+| 0 of 16 pass | parked | Re-screened in training steps |
+| 1 to 15 pass | train | Every solution step |
+| 16 of 16 pass | retired | Never |
+
+The current screen gives 267 parked, 270 train and 174 retired. Retired prompts
+have zero reward spread, so a group of them carries no gradient.
+
+A parked prompt promotes to train at 2 passes out of 16. A train prompt demotes
+to parked after 3 zero-pass groups across the run. A passing group does not clear
+the count, and a demotion resets it.
+
+## The schedules
+
+Both arms use 304 sequences per step. At 16 samples per prompt that is 19
+prompts, 9 parked and 10 train in the spread arm.
+
+| Policy | Shape |
+| --- | --- |
+| `spread` | Joins a parked block to every step |
+| `sweep` | Covers the parked pool in consecutive steps, then trains for a gap |
+
+Spread keeps a queue per pool. A step takes a block from the front and moves it
+to the back, so every prompt shows once before any repeat. Sweep keeps a saved
+parked order and a train queue for the gap steps. Both save their queues in
+`labels.jsonl` after each step, so a restart continues the same order.
+
+## Run configuration
+
+`configs/lfm-spread.toml` and `configs/lfm-sweep.toml` hold the arm settings.
+They differ only in the policy keys.
+
+| Key | Value |
+| --- | --- |
+| model | `LiquidAI/LFM2.5-2.6B`, revision `7141b56` |
+| learning rate | 3e-5 |
+| rollouts per step | 304 |
+| generations per prompt | 16 |
+| completion cap | 1024 tokens |
+| thinking budget | 1024, recorded but not enforced by vLLM |
+| LoRA | all linear, rank 16, alpha 32 |
+| steps | 100 |
+| evaluation | every 5 steps, pinned 100 questions, seed 2026 |
+| checkpoint | every 10 steps |
+
+`[budget] max_steps` and `[budget] max_judge_calls` stop a run cleanly. The stop
+reason lands in `eval.json`.
+
+## Run folder
 
 ```
 runs/<arm>/<timestamp>/
-    meta.json        arm, timestamp, git commit, versions, model revision,
-                     judge model, split seed, the full config
-    rollouts.jsonl   one record per rollout, schema below
-    metrics.jsonl    one row per step: mean reward, pass rate, completion
-                     length, cache hits, the GPU memory split, and entropy
-                     on a measurement step
-    eval.json        final pass@1 plus every checkpoint evaluation
-    checkpoints/     one directory per saved step: LoRA adapter, optimizer
-                     state, and a checkpoint.json manifest
+    meta.json        arm, commit, versions, model revision, full config, pools
+    metrics.jsonl    one row per step
+    rollouts.jsonl   one record per rollout
+    labels.jsonl     pool changes, zero-pass counts, saved queues
+    eval.json        final pass@1 and every checkpoint evaluation
+    control.json     live edits, see below
+    checkpoints/     adapter, optimizer state, manifest
 ```
 
-`<timestamp>` is UTC as `YYYYMMDDTHHMMSSZ`.
+`<timestamp>` is UTC in the form `YYYYMMDDTHHMMSSZ`.
 
-## Evaluation
+The step rows carry reward, pass rate, completion length, truncation, timings,
+GPU memory, gradient and update norms, pool counts, and the advantage share.
 
-Every `[run] eval_every_steps` steps (default 100) the run evaluates a fixed
-subset of the test pool with greedy decoding. The subset is
-`[run] eval_questions` questions (default 100), chosen once per run by
-`[run] eval_subset_seed` (default 2026). That seed is separate from the data
-split seed, and the subset is a seeded sample, not the first questions in file
-order. The subset keeps the pool order.
+Copy a run off the box before you destroy it. The folder exists only there.
 
-### Scoring one difficulty band
-
-`eval-band` scores a fixed number of prompts from one labelled band, so a
-checkpoint can be compared per band without a full run.
+## Dashboard
 
 ```bash
-.venv/bin/rlvr eval-band --config configs/lfm.toml --band medium \
-    --count 100 --seed 2026 --checkpoint runs/lfm/20261119T101500Z/checkpoints/step-000020
+.venv/bin/rlvr dashboard --runs-root runs --port 8081
 ```
 
-The bands are `very easy`, `medium`, `hard`, and `very hard`. The prompts come
-from the training split, which carries the labels. Once training uses those
-prompts they are no longer held out, so a band score after training is a
-training score for that band, not a generalization score. The command prints
-one JSON line with `model`, `band`, `pass_at_1`, `count`, `passed`, and
-`seconds`. `--out PATH` writes the same line to a file. Without `--checkpoint`
-it scores the base model. A band that holds fewer prompts than `--count` stops
-with an error rather than scoring a smaller set.
+It serves `http://127.0.0.1:8081` and refreshes twice per second while the tab is
+visible. It shows pass rate, pass@1, reward, truncation, step time, GPU memory,
+pool composition, group signal, and a questions table.
 
-## Live dashboard
+The page reads process state as well as files. A run whose process is gone turns
+`stopped` after two minutes.
 
-The dashboard reads a run folder and shows reward, pass rate, pass@1, completion
-length, truncation, and memory. Two things worth knowing:
-
-- the system tiles report GPU memory in GiB,
-- the stage completion panel plots how much of the current band has been solved.
-  A prompt counts as solved only when all 8 of its rollouts pass, and the
-  denominator is the band's starting pool from `meta.json`, so the line shows
-  progress that does not move backwards.
-
-A pooled run names its re-screen policy in the run header and adds a pool
-composition panel. The upper chart plots the train prompts and the parked
-prompts per step. The lower chart plots the advantage share from 0 to 1. All
-three series come from the step rows, so an older run without them shows the
-panel empty rather than an error.
-
-The questions tab lists every prompt the run sampled, one row each: steps,
-rollouts, full-pass steps, per-rollout pass rate, best result, last error, last
-step, and solved. It streams `rollouts.jsonl` once and keeps counters per
-prompt. Prompts with no full pass come first and stay red. The sort and stage
-and solved filters run in the page. Prompt text is read from
-`data/mbpp_full.jsonl` and `data/synthetic_easy.jsonl` when those files are
-present, and the tab still works from prompt ids when they are missing.
-
-Dropped prompts are hidden by default. The tab says how many were dropped and
-offers a control to show them, with the step they were dropped.
-
-GPU utilisation is `nvidia-smi`'s figure: the share of the sample window in
-which any kernel was running. It reads 70 to 85 percent on a step of 16
-sequences and on a step of 152, because one kernel runs almost continuously
-either way. It says busy, not saturated. Throughput, not utilisation, is the
-number that moves with batch size, and it is not logged yet.
-
-Status comes from the process table, not only from file age. A live
-`rlvr run --arm <arm>` keeps the run `running` through a long evaluation. A run
-whose process is gone turns `stopped` after a two minute grace. A GPU reading
-that cannot be taken renders as `-`, never as zero, and the strip carries
-`last sample Ns ago` so a stalled sampler is visible. Progress counts prompt
-samples against the plan rather than steps against a starting batch size.
-
-The page is a React and Tailwind app in `dashboard/`. The build is committed as
-`src/rlvr/web/index.html`, a single file with the bundle inlined, so serving it
-needs no network. Rebuild after changing the UI:
+Build the page after a UI change:
 
 ```bash
-cd dashboard && npm install && npm run build
+cd dashboard && npm run build
 ```
 
-## Measuring a short run
+The build writes `src/rlvr/web/index.html`, which is committed.
 
-Two optional keys make a short experiment cheap. `[budget] max_steps` caps a
-real run, and `training.eval_every_steps` sets the evaluation cadence, so a
-twenty step probe is a config copy with a changed learning rate and
-`max_steps = 20`. `configs/probe-1e4.toml` and `configs/probe-1e3.toml` are
-that copy.
-
-Every step row carries two norm fields. `grad_norm` is the L2 norm of the
-trainable gradients, taken after the accumulated gradient is divided by the
-group count and before the optimiser step. `update_norm` is the L2 norm of the
-parameter delta that the step produced. Both are null when the value is not
-finite.
-
-Read `update_norm` when comparing learning rates. AdamW normalises the step by
-the gradient history, so `grad_norm` stays close across rates and only shows a
-collapse. `update_norm` tracks how far the weights actually moved.
-
-## Editing a run in place
-
-Each run folder holds `control.json`. Edit it while training runs and the change
-applies at the next step, no restart:
-
-```json
-{"drop": ["mbpp-679", "mbpp-536"],
- "tests": {"mbpp-535": ["assert topbottom_surfacearea(10) == 314.15000000000003"]}}
-```
-
-- `drop` removes a prompt from the train pool or the parked pool. Rollouts
-  already recorded stay in the history.
-- `tests` replaces the hidden tests for one prompt from the next step.
-- A bad key or a test that does not compile is rejected. The previous state
-  stays in force, and the error lands in `control-events.jsonl`.
-
-`--control PATH` uses a different file. The event log records the step of every
-change, so a prompt edited mid-run can be split out of an analysis.
-
-A resume must leave the adapter trainable. `PeftModel.from_pretrained` defaults
-to a frozen adapter, which then builds an optimizer over no parameters and
-fails with `optimizer got an empty parameter list`. The loader passes
-`is_trainable=True`.
-
-## One measured pool
-
-Training runs from one pool built from a screen. Each training prompt is
-measured at sixteen rollouts. A prompt that passes some but not all of them goes
-to train. A prompt that passes all sixteen is retired and is not trained.
-A prompt that passes none goes to parked. There are no curriculum stages.
-
-The labels come from screens. Training rollouts may demote a train prompt after
-three zero-pass groups across the run. A passing group does not clear the count,
-and a demotion resets it. They never promote a prompt, because a prompt selected
-for a low pass count regresses upward on the next measurement. A parked prompt
-is promoted at two passes of sixteen or more.
-
-Spread keeps a queue per pool. A step takes its block from the front and moves
-that block to the back, so a pool covers every prompt once before any repeat.
-The prompts that stay in the pool keep their place. Sweep keeps a fixed parked
-order and a train queue for its gap steps. In spread a promoted prompt joins the
-back of the train queue and a demoted prompt joins the back of the parked queue.
-In sweep a promoted prompt joins the back of the train queue and a demoted
-prompt joins the end of the parked order. The queues and the order are saved in
-`labels.jsonl` after each step, and a resume continues the same order.
-
-Two schedules put parked prompts back into training. The spread policy joins a
-parked block to every step. The block is half of the step, with a minimum of
-four prompts, and it is capped at one fewer than the step. So a step of 19
-prompts runs 9 parked and 10 train. The sweep policy covers the whole parked
-pool in consecutive steps, then trains for a gap. Both use the same rollout
-budget per step. The run prints a warning when the parked pool holds fewer
-prompts than the planned parked block. The arm runbook above runs one arm per
-policy.
-
-There is one pool and no stage ladder. Every record keeps the `stage` field at
-`unstaged` so older readers still find it. Older runs also wrote a per-stage
-evaluation entry with `kind` `"stage"` and a band name. New runs have no stage,
-so `eval.json` holds only checkpoint and final entries.
-
-The final evaluation always covers the whole test pool, which is the 250
-held-out questions for a real run. pass@1 is the only metric: the fraction of
-questions whose greedy generation passed every task test.
-
-`eval.json` has the final result at the top level and every evaluation in a
-list. It is replaced atomically after each evaluation, so a crash keeps the
-last checkpoint result.
-
-```json
-{
-  "arm": "hybrid",
-  "timestamp": "20261112T000000Z",
-  "step": 1000,
-  "pass_at_1": 0.42,
-  "count": 250,
-  "subset": {"method": "seeded_sample", "seed": 2026,
-             "requested": 100, "selected": 100, "pool_size": 250},
-  "evaluations": [
-    {"step": 100, "kind": "checkpoint", "pass_at_1": 0.31, "count": 100,
-     "prompt_ids": ["..."], "subset": {"...": "the same selector"}},
-    {"step": 400, "kind": "stage", "stage": "very easy", "pass_at_1": 0.55,
-     "count": 12, "prompt_ids": ["..."], "subset": null},
-    {"step": 1000, "kind": "final", "pass_at_1": 0.42, "count": 250,
-     "prompt_ids": ["..."], "subset": null}
-  ]
-}
-```
-
-The CLI loads the pinned MBPP split with `data.load_split`, uses the 711 train
-questions plus the 50 synthetic easy questions as training prompts, and the 250
-test questions as eval prompts. Fake mode uses the same set, so a fake run also
-evaluates held-out questions and never evaluates a training question. The
-`Experiment` itself has no fallback. It refuses to run when `eval_prompts` is
-empty. A wrong or empty split stops the command before a run folder is made.
-
-The prompt names the function the hidden tests call. MBPP problem text often
-leaves the name out, so the model used to invent one and every test failed with
-`NameError`. `data.expected_function_name` takes every call in every test,
-drops keywords and module attributes, and keeps the one name all tests share.
-`format_prompt` puts it in the first line, with the number of arguments the
-first test passes:
-``Write a Python function named `topbottom_surfacearea` that takes 1 argument ...``.
-All 1014 rows get a name and an argument count. Test bodies and expected values
-never enter the prompt.
-
-## Completion length and sampled entropy
-
-`completion_tokens` is the completion length. It feeds the length penalty.
-
-Entropy is not a rollout field. It is measured on the update pass, on the same
-forward logits the policy loss uses, every `[training] entropy_every_steps`
-training steps (default 500). Every prompt group updated in that step is
-measured. Zero disables it. The value is the mean Shannon entropy in nats
-over the generated tokens, estimated from at most 64 evenly spaced positions
-when a completion is longer than that. It is logged, not rewarded, and it is
-not bounded by 1.
-
-`metrics.jsonl` carries `mean_entropy` only on a step that measured it. A step
-without a measurement omits the key. The summary and the dashboard treat the
-key as absent, never as zero. The fake generator returns one deterministic
-value per prompt on the same cadence.
-
-## GPU memory
-
-Each metric row carries the allocator split in MiB: `gpu_live_mib`,
-`gpu_cached_mib`, `gpu_fragmented_mib`, `gpu_total_mib`, and
-`gpu_unaccounted_mib`. The first three come from `torch.cuda.memory_stats()`
-inside the training process, read after the update. Live plus cached plus
-fragmented is the allocator's reserved total. Unaccounted is the device total
-minus that, which covers other processes, the CUDA context, and the driver.
-
-A run sets `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` at the entry
-point, before torch is imported, so segments grow instead of fragmenting on a
-new size. A value already set by the caller is left alone. The fake path writes
-zeros, so the dashboard memory panel renders on a machine with no GPU.
-
-## Rollout record schema (frozen)
-
-One JSON object per line, fields in this order. Defined in
-`src/rlvr/schema.py`. Later tasks read these records, so field names, order,
-and types are a contract.
-
-| Field | Type | Notes |
-|---|---|---|
-| `arm` | str | one of the four arm names |
-| `step` | int | 1-based step within the run |
-| `prompt_id` | str | MBPP-style id, stable across arms |
-| `reasoning` | str | thinking trace, kept apart from code |
-| `code` | str | generated code only |
-| `prompt_tokens` | int | |
-| `completion_tokens` | int | completion length for the length study |
-| `tests_passed` | int | |
-| `tests_total` | int | |
-| `error_class` | str | `pass` when every test passed, otherwise the failure class set by task 2 |
-| `code_score` | float | passed / total, in [0, 1] |
-| `judge_score` | float or null | null when the arm does not judge or tests failed |
-| `process_score` | float or null | null except in `gated-process` on a pass |
-| `reward` | float | the arm reward, clipped to [-1, 1] |
-| `stage` | str | `unstaged`, kept so older readers find the field |
-| `cache_hit` | bool | true when any judge call was served from cache |
-
-Timestamps and truncation flags are deliberately out of this record. Truncation
-rate is a step-level metric, added in a later task.
-
-## Summary and static report
-
-`summary` takes one or more run folders. A `runs/` root, or a single arm folder,
-also works and expands to every `<timestamp>` folder below it.
+## Analysis
 
 ```bash
-.venv/bin/rlvr summary runs
-.venv/bin/rlvr summary runs/code-score/20261112T000000Z runs/hybrid/20261113T000000Z
 .venv/bin/rlvr summary runs --html report.html
-.venv/bin/rlvr summary runs --no-html
-```
-
-It prints four plain tables, one per metric: reward, pass@1, entropy, and
-completion length. Steps are rows and arms are columns, so arms sit side by
-side. pass@1 shows only at steps where an evaluation ran. The entropy column
-shows a value only on a step that measured it, and a dash elsewhere.
-
-The HTML report is written to `report.html` in the current folder unless
-`--html` says otherwise. It is one static file: inline CSS, no script, no
-external font, stylesheet, or image. There is one section per arm with a
-per-step table, and a small comparison table at the top.
-
-## Publish to GitHub Pages
-
-`publish` copies the report into a throwaway git repository as `index.html`,
-adds `.nojekyll`, commits it, and force-pushes that commit to the Pages branch.
-The branch is replaced each time, which is intended for generated output.
-
-```bash
+.venv/bin/rlvr eval-band --config configs/lfm-spread.toml --band medium \
+    --count 100 --seed 2026 --checkpoint runs/code-score/<timestamp>/checkpoints/step-000010
 .venv/bin/rlvr publish --report report.html \
     --remote git@github.com:<user>/<repo>.git --branch gh-pages
 ```
 
-Credentials come from the caller's git setup. This command does not read a
-token. Use a deploy key with write access to the repository. It is not run in
-the test suite, which pushes to a local bare repository instead.
+`summary` prints reward, pass@1, entropy and completion length side by side.
+`eval-band` scores one difficulty band from a checkpoint. `publish` replaces a
+Pages branch with the report.
 
-## The seam
+The four measurements for the schedule comparison are the advantage share, the
+mean absolute advantage, promotions per thousand parked rollouts, and pass@1 on
+the pinned 100.
 
-`Experiment` (`src/rlvr/experiment.py`) is the only orchestration point. It
-takes four injected services and nothing else touches a model, API, container,
-or the filesystem during a run.
+## Editing a run in place
 
-```python
-Generator.generate(prompt, *, n, temperature) -> list[Generation]
-Generator.generate_batch(prompts, *, n, temperature) -> list[list[Generation]]
-Generator.accumulate(prompt, generations, rewards, *, measure_entropy) -> float | None
-Generator.apply_update() -> None
-Generator.save_checkpoint(directory) -> None
-Generator.load_checkpoint(directory) -> None
-TestRunner.run(prompt, code) -> Outcome
-Judge.score_output(prompt, code) -> JudgeResult
-Judge.score_process(prompt, reasoning) -> JudgeResult
-Store.write_meta(meta) / append_rollout(record) / append_metric(row) / write_eval(payload)
-Store.arm, Store.timestamp, Store.run_dir, Store.checkpoints_dir
+Write `control.json` while a run is live. The change applies at the next step.
+
+```json
+{"drop": ["mbpp-679"],
+ "tests": {"mbpp-535": ["assert topbottom_surfacearea(10) == 314.15"]}}
 ```
 
-`temperature` is `0.0` for greedy evaluation. `n` is the number of generations
-per prompt, which is the configured group size in training and one in
-evaluation. One training step samples
-every prompt group in one `generate_batch` call, runs and judges each group,
-logs the records, accumulates the group rewards one group at a time, then calls
-`apply_update` once. That is the only weight update in the step. The judge sees
-the problem and the code, or the problem and the trace. It never sees the tests.
+`drop` removes a prompt from its pool. `tests` replaces hidden tests for one
+prompt. A bad edit is rejected and the previous state stays in force. The error
+lands in `control-events.jsonl`.
 
-Fakes in `src/rlvr/fake.py`: output depends on prompt id and decoding mode, test
-outcome on prompt id and code, judge score on judge kind, prompt id, and text.
-Judge scores and test outcomes come from SHA-256, so they repeat across
-machines. They carry no meaning.
+## Checkpoints and resume
 
-## Judge client
+```bash
+./run.sh code-score --config configs/lfm-spread.toml --runs-root runs --resume
+```
 
-`JudgeClient` in `src/rlvr/judge.py` implements the `Judge` seam. It uses
-OpenRouter by default: endpoint `https://openrouter.ai/api/v1/chat/completions`,
-model `deepseek/deepseek-v4.1-flash-1017`, temperature 0, JSON output, and
-`reasoning_effort` `medium`. The model id is the one listed by
-`https://openrouter.ai/api/v1/models`, and `reasoning_effort` is one of that
-model's supported parameters. OpenRouter requests send `Authorization`,
-`Content-Type`, `User-Agent: rlvr/0.1 (research judge)`, and `X-Title: rlvr`.
-`HTTP-Referer` is not sent: the docs mark it optional and describe it as app
-attribution for the public rankings page.
+Resume restores the adapter, optimizer and step, truncates records past the
+checkpoint, and appends to the same folder. Fifteen checkpoints are kept per run.
 
-The `[judge]` table picks the backend:
+A resume is rejected when the saved run and the requested config disagree on the
+arm, the split seed, the model revision, the screen, the pool policy, the rollout
+budget or the group size. Use a new run root for a different arm.
 
-| Key | Default | Meaning |
-|---|---|---|
-| `provider` | `openrouter` | `openrouter` or `opencode` |
-| `base_url` | the provider endpoint | full chat completions URL |
-| `api_key_env` | the provider variable | name of the env var that holds the key |
-| `model` | (required) | model id, must match the provider |
+## Code map
 
-With `provider = "opencode"` the client uses
-`https://opencode.ai/inference/go/openai/v1/chat/completions`, model
-`deepseek-v4.1-flash`, and the same four headers plus `Accept` and a stable
-`x-opencode-session` header. That gateway rejects the default urllib User-Agent.
-The OpenCode-only session header is never sent to OpenRouter.
+`src/rlvr/experiment.py` owns the step loop and is the only orchestration point.
+It takes four injected services.
 
-So the two run configurations are: `openrouter` with
-`model = "deepseek/deepseek-v4.1-flash-1017"` and `OPENROUTER_API_KEY`, or
-`opencode` with `model = "deepseek-v4.1-flash"` and `OPENCODE_GO_API_KEY`.
-Provider, base URL, and model must be changed together.
+| File | Role |
+| --- | --- |
+| `experiment.py` | Step loop, pools, queues, labels, metrics |
+| `qwen.py` | GRPO trainer, LoRA, advantage, loss |
+| `vllm_backend.py` | Sampling and adapter handoff |
+| `pools.py` | Build the three pools from screen rows |
+| `queues.py` | Saved rotation for each pool |
+| `schedule.py` | Spread and sweep policies, promotion and demotion |
+| `reward.py` | Error classes, truncation, length term |
+| `docker_runner.py` | Runs one code sample against its tests |
+| `dashboard.py` | Live page and `data.json` |
+| `cli.py` | `run`, `screen`, `dashboard`, `summary`, `eval-band`, `publish` |
 
-The key comes from the variable named by `[judge] api_key_env`, which defaults
-to `OPENROUTER_API_KEY`. `JudgeClient.from_config` reads it and fails with
-`MissingAPIKeyError` before any request. The key is only used in the
-Authorization header. It is never written to the cache, an error message, or
-`meta.json`.
+The seams are `Generator`, `TestRunner`, `Judge` and `Store`. The fake versions
+in `fake.py` use SHA-256, so a fake run repeats on any machine.
 
-The output judge sees the problem and code. The process judge sees the problem
-and reasoning trace. Neither prompt has a way to receive task tests.
+## Data contracts
 
-Calls retry on 408, 429, 5xx, timeouts, and connection errors with exponential
-backoff plus jitter. `[judge] max_attempts` caps the attempts. Other 4xx
-responses raise `UnrecoverableJudgeError` at once.
+One rollout record per line. Field order and types are fixed.
 
-Scores are cached in `[judge] cache_dir` (default `judge-cache/`). The key is
-SHA-256 over provider, base URL, model, judge kind, full prompt text, and rubric
-version. Writes use `os.replace`. Identical requests return `cache_hit=true`.
-Changing the provider or the base URL starts a separate cache generation, so a
-switched provider cannot reuse the other one's scores.
+| Field | Type | Notes |
+| --- | --- | --- |
+| `arm` | str | one of the four arm names |
+| `step` | int | 1 based |
+| `prompt_id` | str | stable across arms |
+| `reasoning` | str | thinking trace |
+| `code` | str | generated code |
+| `prompt_tokens` | int | |
+| `completion_tokens` | int | |
+| `tests_passed` | int | |
+| `tests_total` | int | |
+| `error_class` | str | `pass`, `syntax_error`, `wrong_answer`, `runtime_error`, `runner_error` |
+| `code_score` | float | passed over total |
+| `judge_score` | float or null | null when not judged |
+| `process_score` | float or null | process arm only |
+| `reward` | float | clipped to [-1, 1] |
+| `stage` | str | always `unstaged`, kept for older readers |
+| `cache_hit` | bool | judge cache |
 
-`score_batch` runs requests on a bounded pool of `[judge] concurrency` threads
-(default 32) and preserves input order.
+Each screen row holds `prompt_id`, `samples`, `passed` and `pass_rate`.
 
-## Reward table (frozen, from SPEC.md)
+## Rewards
 
 | Arm | Tests fail | Tests pass |
-|---|---|---|
+| --- | --- | --- |
 | `code-score` | 0.45 at one test, up to 0.75 | 1.0 |
 | `hybrid` | 0 | `0.5 + 0.5 * judge` |
 | `gated-judge` | 0 | `judge` |
@@ -821,44 +313,46 @@ switched provider cannot reuse the other one's scores.
 Fixed outcomes in `code-score`:
 
 | Outcome | Reward |
-|---|---|
-| truncated rollout | `-1.0` |
-| code that does not compile | `-0.3` |
-| code that raises while it runs | `0.0` |
-| closing marker, zero tests passed | flat `0.05` |
-| clean failure, not closed | `0.0` |
-| length above 900 tokens | `-0.001` per token, capped at `-0.2` |
+| --- | --- |
+| truncated | -1.0 |
+| does not compile | -0.3 |
+| raises while running | 0.0 |
+| closed marker, zero tests | 0.05 |
+| clean failure | 0.0 |
+| over 900 tokens | -0.001 per token, capped at -0.2 |
 
-The sum is clipped to `-1` and `1`. The thinking budget is one fixed value per
-run, `[training] thinking_budget`, which is 1,024 in the arm configs. vLLM 0.34
-records it but does not enforce it.
+The sum is clipped to [-1, 1].
 
-Any failed test closes the gate, so a gated arm makes no judge call. For the
-gated arms zero tests counts as a failure. For `code-score` zero tests is an
-error: a rollout with nothing to run must fail loudly, not score 0.
+## Judge
 
-`gated-process` calls the process judge with the problem and the reasoning
-trace, then the output judge with the problem and the code. Both scores are
-stored in the rollout record. An empty trace is sent to the judge like any
-other trace.
+`[judge]` picks the backend.
 
-For a real run, the judge client is built at startup only for arms that use the
-judge, so a missing `OPENROUTER_API_KEY` fails before any rollout. The fake
-path uses the fake judge and needs no key.
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `provider` | `openrouter` | `openrouter` or `opencode` |
+| `base_url` | the provider endpoint | chat completions URL |
+| `api_key_env` | `OPENROUTER_API_KEY` | name of the key variable |
+| `model` | required | provider model id |
 
-## Status
+The key is read at startup and fails before the first rollout when missing. It is
+never written to a cache, a log or `meta.json`. Scores are cached by content
+hash under `judge-cache/`.
 
-Tasks 1 to 8 are done: the fake end-to-end path, config, schema, run folders,
-merged MBPP split, Docker test runner, the judge client, all four reward arms,
-entropy and length logging, the checkpoint and final evaluation schedule, the
-summary command, the static HTML report, and the Pages publish command. Task 8
-adds the real Qwen generator and GRPO trainer, the pinned GPU environment, one
-command per arm, checkpoint resume, budget guards, and the smoke profile.
+## Tests
 
-The real generator, GRPO update, and the 15-minute smoke runtime are not
-verified here because this environment has no GPU. The Pages publish command
-exists but is not run live here: it needs a writable remote.
+```bash
+.venv/bin/python -m pytest -q
+cd dashboard && npm test
+```
 
-## Remote instance
+CPU only, no network, about 40 seconds. Docker tests skip when the image is
+missing.
 
-See `docs/DEPLOY.md` for the live host, user, SSH key, and run commands.
+## Known limits
+
+- The thinking budget is recorded but not enforced under vLLM.
+- GPU utilisation reads high on any batch, so use throughput to compare sizes.
+- A 100-question cohort carries about five points of noise. Do not compare it
+  with a 250-question score.
+- The container needs the model and kernel caches rebuilt on a new box, about
+  eight minutes once.

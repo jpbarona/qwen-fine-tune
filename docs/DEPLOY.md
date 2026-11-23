@@ -1,51 +1,105 @@
-# Deployment instance
+# Deployment
 
-Massed Compute RTX A6000 48GB, Ubuntu Server 24.04.
+One rented GPU box. Massed Compute, RTX A6000 with 48 GB, 96 GB RAM, 300 GB
+disk, 0.57 dollars an hour.
 
 ## Access
 
-- Host: `209.137.198.122`
+- Host: read it from the provider panel. It changes per instance.
 - User: `Ubuntu`
-- Key: `/home/opencode/.ssh/id_ed25519` (`opencode-agent`)
-- Login: `ssh -i ~/.ssh/id_ed25519 Ubuntu@209.137.198.122`
+- Key: `/home/opencode/.ssh/id_ed25519`, comment `opencode-agent`
+- Login: `ssh -i ~/.ssh/id_ed25519 Ubuntu@<host>`
 
-The instance accepts the `opencode-agent` key and jpbarona's Mac key. Password login was used once to install those keys. No password is stored in this repo.
+The instance trusts the `opencode-agent` key and the Mac key. No password is
+stored in this repository.
 
-## Remote layout
-
-- Project: `~/rl-grpo`
-- Virtualenv: `~/rl-grpo/.venv`
-- Judge key: `OPENROUTER_API_KEY` is required and read from `~/.env` at startup. The judge uses OpenRouter by default.
-- Old key: `OPENCODE_GO_API_KEY` is only read when `[judge] provider = "opencode"`.
-- Docker is installed and the `Ubuntu` user is in the `docker` group.
-
-## Every detached job gets a watcher
-
-Start the job and its watcher in the same action. A detached job with no local
-waiter is a job nobody hears about, and that has already cost a probe.
+A fresh box gets a new SSH host key. Remove the old entry before connecting:
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 Ubuntu@HOST 'setsid nohup ./run.sh code-score > ~/run.log 2>&1 < /dev/null &'
-./scripts/watch-remote.sh Ubuntu@HOST "configs/lfm.toml"
+ssh-keygen -f ~/.ssh/known_hosts -R <host>
 ```
 
-`watch-remote.sh` reports only on exit, treats a failed ssh as a retry rather
-than completion, and gives up after eight empty replies.
+## First boot
+
+```bash
+scp -i ~/.ssh/id_ed25519 -r docker scripts configs \
+  Ubuntu@<host>:~/rl-grpo/
+ssh -i ~/.ssh/id_ed25519 Ubuntu@<host>
+cd ~/rl-grpo
+GHCR_TOKEN=... ./scripts/docker-setup.sh
+```
+
+The box does not clone the repository. It is private and the box has no key, so
+copy the tree from this VM. `scp` and `rsync` both work.
+
+The screen file is not in git either. Restore it once:
+
+```bash
+rclone copy hetzner-dumps:opencodeagent1/dumps/vm/rl-grpo-data/2026-11-21-lfm-screen \
+  screens/mbpp-base
+```
+
+## Keys
+
+`OPENROUTER_API_KEY` is read from the environment. Keep it in `~/.env` on the box.
+
+```bash
+set -a && . ~/.env && set +a
+```
+
+`OPENCODE_GO_API_KEY` is read only when `[judge] provider = "opencode"`.
+
+The code arm needs no judge key. The hybrid and gated arms do.
 
 ## Run
 
 ```bash
 cd ~/rl-grpo
 set -a && . ~/.env && set +a
-./run.sh code-score --config configs/smoke.toml
-./run.sh code-score
+./scripts/docker-run.sh code-score --config configs/lfm-spread.toml --runs-root runs
 ```
 
-## Copy the repo again
-
-From this VM:
+Detached, with a watcher from this VM:
 
 ```bash
-rsync -az --exclude .venv --exclude runs --exclude .git \
-  /home/opencode/Work/rl-grpo/ Ubuntu@209.137.198.122:~/rl-grpo/
+ssh -i ~/.ssh/id_ed25519 Ubuntu@<host> \
+  'cd ~/rl-grpo && setsid nohup ./scripts/docker-run.sh code-score \
+   --config configs/lfm-spread.toml --runs-root runs \
+   > ~/run.log 2>&1 < /dev/null &'
+./scripts/watch-remote.sh Ubuntu@<host> "rlv[r] run" 60
 ```
+
+`watch-remote.sh` reports on exit, treats a failed SSH as a retry rather than
+completion, and gives up after eight empty replies.
+
+## Dashboard
+
+The dashboard binds to localhost. Tunnel it from this VM:
+
+```bash
+ssh -N -L 100.67.80.52:8083:127.0.0.1:8081 -i ~/.ssh/id_ed25519 Ubuntu@<host>
+```
+
+Then open `http://100.67.80.52:8083/`.
+
+## Before the box is destroyed
+
+Copy the run folders off. They exist only on the box.
+
+```bash
+rclone copy <run folder> hetzner-dumps:opencodeagent1/dumps/gpu/<timestamp> --progress
+rclone check <run folder> hetzner-dumps:opencodeagent1/dumps/gpu/<timestamp>
+```
+
+Delete the local copy only after the check reports zero differences. Update
+`/home/opencode/Work/rl-grpo-data-INDEX.md`.
+
+## Costs
+
+Idle time bills at the same rate. Release the box when no run is active.
+
+| Event | Cost |
+| --- | --- |
+| One hour | 0.57 |
+| Fresh setup, container | about 0.05 |
+| One hundred steps | about 2.60 |

@@ -154,7 +154,7 @@ resumes.
 Files: `README.md`, `docs/DECISIONS.md`, `docs/IDEAS.md`, `docs/INDEX.md`,
 config comments.
 
-- Add D41 to `docs/DECISIONS.md` with the queue, share, retirement and demotion
+- Add D42 to `docs/DECISIONS.md` with the queue, share, retirement and demotion
   decisions, and the 22 November evidence.
 - In `docs/IDEAS.md`, mark parked coverage, demotion and retirement as chosen.
   Remove the second-passing-group idea and the old rehearsal-set idea. Rewrite
