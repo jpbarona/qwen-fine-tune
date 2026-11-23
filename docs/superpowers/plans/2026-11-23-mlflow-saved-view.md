@@ -17,8 +17,9 @@ Files:
 
 Acceptance:
 
-- The builder returns six sections in order, the three core cards in order and
-  the three core ranges. Other cards have no range.
+- The builder returns eight sections in order, the exact membership the spec
+  names, the three core cards in order and the three core ranges. Other cards
+  have no range.
 - The filter is ``tags.`rlvr/run_dir` != ''``.
 - The encoder returns the envelope with a `deflate;` state that zlib can
   inflate, and raises above 20000 characters.
