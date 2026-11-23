@@ -352,6 +352,47 @@ def test_close_records_an_error_when_uploads_do_not_finish(tmp_path: Path) -> No
     assert any("did not finish in time" in error for error in uploader.errors)
 
 
+def test_close_writes_the_upload_errors_and_prints_the_count(
+    tmp_path: Path, capsys
+) -> None:
+    run_dir = make_run(tmp_path)
+    make_checkpoint(run_dir)
+    client = StubS3(fail_times=100)
+    uploader = RunUploader(
+        run_dir,
+        "code-score",
+        RUN_NAME,
+        DESTINATION,
+        client=client,
+        retries=1,
+        interval=0.01,
+        backoff=0.01,
+    )
+    uploader.start()
+    uploader.wait_for_idle()
+    uploader.close()
+
+    log = run_dir / "upload-errors.log"
+    assert log.is_file()
+    text = log.read_text(encoding="utf-8")
+    assert "OSError: boom" in text
+    err = capsys.readouterr().err
+    assert f"uploader: {len(uploader.errors)} upload error(s)" in err
+    assert "upload-errors.log" in err
+
+
+def test_close_writes_no_error_log_without_failures(tmp_path: Path, capsys) -> None:
+    run_dir = make_run(tmp_path)
+    client = StubS3()
+    uploader = RunUploader(
+        run_dir, "code-score", RUN_NAME, DESTINATION, client=client, interval=0.01
+    )
+    uploader.close()
+
+    assert not (run_dir / "upload-errors.log").exists()
+    assert "upload error" not in capsys.readouterr().err
+
+
 def test_upload_retries_then_gives_up_without_raising(tmp_path: Path) -> None:
     run_dir = make_run(tmp_path)
     make_checkpoint(run_dir)

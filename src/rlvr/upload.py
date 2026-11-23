@@ -12,9 +12,11 @@ adapter or optimizer file is never uploaded. A file that fails its retries is
 left unseen, so the next scan tries it again. A file pruned while it sits in
 the queue is skipped without an error.
 
-Every failure is retried with backoff and then recorded in `errors`. No upload
-raises into the caller, so a bad bucket or a dead network leaves the run
-folder intact and the run keeps going.
+Every failure is retried with backoff and then recorded in `errors`. On close,
+a non-empty `errors` list is written to `upload-errors.log` in the run folder
+and the count is printed once to stderr. No upload raises into the caller, so a
+bad bucket or a dead network leaves the run folder intact and the run keeps
+going.
 
 The bucket destination looks like `s3://bucket/runs/v1`. The run lands under
 `s3://bucket/runs/v1/<arm>/<started>/`. The default client is built with boto3,
@@ -29,14 +31,24 @@ import io
 import json
 import os
 import queue
+import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-__all__ = ["MANIFEST_NAME", "MANIFEST_SCHEMA", "RunUploader", "upload_prefix"]
+__all__ = [
+    "MANIFEST_NAME",
+    "MANIFEST_SCHEMA",
+    "UPLOAD_ERRORS_NAME",
+    "RunUploader",
+    "upload_prefix",
+]
 
 MANIFEST_NAME = "manifest.json"
+
+#: Failure log written in the run folder when an upload gave up.
+UPLOAD_ERRORS_NAME = "upload-errors.log"
 
 #: Version of the manifest layout. Bump it when a reader would need new code.
 MANIFEST_SCHEMA = 1
@@ -185,6 +197,23 @@ class RunUploader:
             self._record(f"close: {error}")
         finally:
             self._closed = True
+            self._write_errors()
+
+    def _write_errors(self) -> None:
+        """Write the failure log and print its count once, when there is one."""
+        with self._lock:
+            errors = list(self.errors)
+        if not errors:
+            return
+        path = self.run_dir / UPLOAD_ERRORS_NAME
+        try:
+            path.write_text("\n".join(errors) + "\n", encoding="utf-8")
+        except OSError as error:
+            print(f"uploader: cannot write {path}: {error}", file=sys.stderr)
+        print(
+            f"uploader: {len(errors)} upload error(s), see {path}",
+            file=sys.stderr,
+        )
 
     def _close(self, timeout: float) -> None:
         self._stop.set()
