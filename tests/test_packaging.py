@@ -10,6 +10,8 @@ from types import ModuleType
 
 import pytest
 
+from rlvr.config import load_config
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -87,6 +89,24 @@ def test_env_example_lists_the_bucket_variables() -> None:
         "AWS_DEFAULT_REGION",
     ):
         assert name in text
+
+
+def test_docker_run_passes_the_bucket_credentials() -> None:
+    text = (REPO_ROOT / "scripts" / "docker-run.sh").read_text(encoding="utf-8")
+    for name in (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "MLFLOW_S3_ENDPOINT_URL",
+        "AWS_DEFAULT_REGION",
+    ):
+        assert f"-e {name}" in text
+
+
+def test_the_box_configs_name_the_bucket() -> None:
+    for name in ("real.toml", "lfm-spread.toml"):
+        config = load_config(REPO_ROOT / "configs" / name)
+        assert config.mlflow.bucket == "s3://opencodeagent1/runs/v1"
+        assert config.mlflow.artifact_root == "s3://opencodeagent1/mlflow/v1/artifacts"
 
 
 def test_backup_script_is_importable_and_has_a_main() -> None:

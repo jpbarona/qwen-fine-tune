@@ -67,5 +67,9 @@ exec docker run --rm --gpus all --ipc=host \
   -e OPENROUTER_API_KEY \
   -e OPENCODE_GO_API_KEY \
   -e MLFLOW_TRACKING_URI \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e MLFLOW_S3_ENDPOINT_URL \
+  -e AWS_DEFAULT_REGION \
   -w /app \
   "$image" /app/run.sh "$arm" "$@"
