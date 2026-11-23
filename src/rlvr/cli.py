@@ -980,7 +980,10 @@ def saved_view_command(args: argparse.Namespace) -> int:
     """Write the saved view tag and print the route that opens it."""
     try:
         experiment_id = write_view_tag(args.runs_root)
-    except (OSError, ValueError) as error:
+    except ValueError as error:
+        # The tag limit message is already plain, so it keeps its own branch.
+        raise UsageError(f"cannot write the saved view: {error}") from error
+    except Exception as error:  # noqa: BLE001 - report the store fault and stop
         raise UsageError(f"cannot write the saved view: {error}") from error
     print(build_route(experiment_id))
     return 0
