@@ -41,7 +41,7 @@ import json
 import sys
 from pathlib import Path
 from time import perf_counter
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 from .batching import START_PROMPTS, BatchSizePolicy
 from .config import Config, ConfigError, default_config_path, load_config
@@ -72,6 +72,7 @@ from .fake import (
     FakeTestRunner,
     fake_memory,
 )
+from .gpu import GPU_ROWS_NAME, GpuSampler
 from .judge import JudgeClient, MissingAPIKeyError
 from .memory import configure_expandable_segments, read_torch_memory
 from .mlflow_log import open_mirror
@@ -734,12 +735,32 @@ def run_command(args: argparse.Namespace) -> int:
         batch_policy=batch_policy,
         control=control,
     )
+    # The GPU sampler runs beside training. It writes gpu.jsonl and copies each
+    # row to the child run. A failed read is dropped, so a host without
+    # nvidia-smi still trains.
+    #
+    # The child run opens at the first write_meta. A row sampled before that is
+    # already on disk, so the copy waits for the next tick instead of writing a
+    # startup error.
+    def sample_gpu(row: Mapping[str, Any]) -> None:
+        if mirror.gpu_run_id:
+            mirror.gpu_sample(row)
+
+    sampler = GpuSampler(
+        store.run_dir / GPU_ROWS_NAME,
+        sample_gpu,
+        interval=config.mlflow.gpu_sample_seconds,
+    )
+    sampler.start()
+    failed = False
     try:
         summary = experiment.run()
     except BaseException:
-        mirror.close(status="FAILED")
+        failed = True
         raise
-    mirror.close()
+    finally:
+        sampler.stop()
+        mirror.close(status="FAILED" if failed else "FINISHED")
 
     print(f"arm={summary.arm} steps={summary.steps} rollouts={summary.rollouts}")
     print(

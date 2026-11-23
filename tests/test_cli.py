@@ -210,6 +210,7 @@ def test_run_writes_the_four_files(config_path, tmp_path) -> None:
         "checkpoints",
         "control.json",
         "eval.json",
+        "gpu.jsonl",
         "meta.json",
         "metrics.jsonl",
         "mlflow.json",
