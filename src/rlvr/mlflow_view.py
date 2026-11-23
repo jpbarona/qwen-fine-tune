@@ -218,10 +218,11 @@ def encode_view_state(state: Mapping[str, Any]) -> str:
 
 
 def write_view_tag(runs_root: str | Path) -> str:
-    """Write the saved view to the `rlvr` experiment and return the tag value.
+    """Write the saved view to the `rlvr` experiment and return its id.
 
     The experiment is created when the store does not have it yet. A second
-    call replaces the same tag, so reruns do not pile up views.
+    call replaces the same tag, so reruns do not pile up views. The id names the
+    route, so the caller does not look the experiment up a second time.
     """
     import mlflow
     from mlflow.tracking import MlflowClient
@@ -241,7 +242,7 @@ def write_view_tag(runs_root: str | Path) -> str:
     else:
         experiment_id = experiment.experiment_id
     client.set_experiment_tag(experiment_id, TAG_KEY, envelope)
-    return envelope
+    return experiment_id
 
 
 def build_route(experiment_id: str) -> str:

@@ -252,6 +252,30 @@ An old run folder is imported once:
 A folder with no `gpu.jsonl` imports without error. `--arm <arm>` imports one
 arm only.
 
+### Saved view
+
+The study page is a saved MLflow view. Write the tag once, then open the link
+the command prints:
+
+```bash
+.venv/bin/rlvr saved-view --runs-root runs
+```
+
+The command writes the tag to the `rlvr` experiment and prints a hash route
+such as `#/experiments/1/runs?viewStateShareKey=rlvr-study&compareRunsMode=CHART`.
+A second run replaces the same tag, so the store keeps one view.
+
+Open the route on the dashboard origin, for example
+`http://127.0.0.1:8083/#/experiments/1/runs?viewStateShareKey=rlvr-study&compareRunsMode=CHART`.
+The route opens the experiment Chart view.
+
+The view has eight sections in this order: core, quality, optim, speed, data,
+gpu, band, stage. Core holds mean reward, pass rate and advantage share. Their
+ranges are fixed: -1 to 1 for mean reward, and 0 to 1 for pass rate and
+advantage share. Every other chart keeps the auto range. A filter keeps the
+parent runs and drops the GPU child. The run page stays as it was, so the
+tables, the artifacts and the GPU child run are still there.
+
 ## Analysis
 
 ```bash
