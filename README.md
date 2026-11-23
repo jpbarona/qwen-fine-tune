@@ -76,14 +76,17 @@ the test runner uses. A new box reaches the first step in about five minutes.
 The training user must be in the `docker` group. Without it every test records
 `runner_error` and the pass rate stays at zero.
 
-Rebuild the image only when a dependency changes:
+Rebuild the image only when `pyproject.toml` or `docker/Dockerfile` changes:
 
 ```bash
-docker build -f docker/Dockerfile -t ghcr.io/jpbarona/rlvr:latest .
-docker push ghcr.io/jpbarona/rlvr:latest
+GHCR_TOKEN=... ./scripts/build-image.sh
 ```
 
-The build takes about 15 minutes. The image is 17.6 GB on disk.
+It tags the image with the UTC timestamp and `latest`, pushes both, and prints
+the digest. The run records the digest in `meta.json`.
+
+The build takes about 15 minutes and the image is 17.6 GB on disk. A fresh box
+pulls it in about three minutes.
 
 ## Bare metal
 

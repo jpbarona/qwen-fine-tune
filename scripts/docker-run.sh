@@ -19,6 +19,7 @@ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image="${RLVR_IMAGE:-ghcr.io/jpbarona/rlvr:latest}"
+image_ref="$(docker image inspect "$image" --format '{{index .RepoDigests 0}}' 2>/dev/null || printf '%s' "$image")"
 
 arm="$1"
 shift
@@ -36,6 +37,7 @@ case "$arm" in
       -v /var/run/docker.sock:/var/run/docker.sock \
       -v rlvr-kernel-cache:/root/.cache \
       -p "127.0.0.1:$port:$port" \
+      -e RLVR_IMAGE_REF="$image_ref" \
       -w /app \
       "$image" rlvr dashboard --runs-root runs --port "$port"
     ;;
@@ -68,6 +70,7 @@ exec docker run --rm --gpus all --ipc=host \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v rlvr-kernel-cache:/root/.cache \
   -e RLVR_VENV=/opt/venv \
+  -e RLVR_IMAGE_REF="$image_ref" \
   -e TMPDIR="$runner_tmp" \
   -e OPENROUTER_API_KEY \
   -e OPENCODE_GO_API_KEY \

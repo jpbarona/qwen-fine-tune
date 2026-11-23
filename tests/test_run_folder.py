@@ -75,6 +75,12 @@ def test_meta_json_records_reproducibility_fields(run_fake, monkeypatch) -> None
     assert meta["config"]["fake"]["steps"] == 3
 
 
+def test_meta_records_the_image_digest(run_fake, monkeypatch) -> None:
+    monkeypatch.setenv("RLVR_IMAGE_REF", "ghcr.io/jpbarona/rlvr@sha256:abc")
+    meta = read_json(run_fake("code-score")[0] / "meta.json")
+    assert meta["image"] == "ghcr.io/jpbarona/rlvr@sha256:abc"
+
+
 def test_meta_git_commit_is_null_when_git_is_unavailable(run_fake, monkeypatch) -> None:
     import rlvr.repro as repro
 

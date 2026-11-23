@@ -15,3 +15,4 @@ screens/
 
 # Task directories shared with the host Docker daemon.
 .runner-tmp
+docker/last-digest.txt

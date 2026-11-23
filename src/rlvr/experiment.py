@@ -55,6 +55,7 @@ after the checkpoint.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -650,6 +651,7 @@ class Experiment:
             "timestamp": self.store.timestamp,
             "mode": "fake" if self.fake else "real",
             "git_commit": repro.git_commit(),
+            "image": os.environ.get("RLVR_IMAGE_REF"),
             "versions": repro.package_versions(),
             "model_revision": config.model_revision,
             "judge_model": config.judge_model,
