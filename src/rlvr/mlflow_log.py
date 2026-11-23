@@ -392,6 +392,30 @@ class NullMirror:
         pass
 
 
+def _ensure_experiment_id(client: Any, artifact_location: str) -> str:
+    """The experiment id, creating the experiment if it is not there yet.
+
+    Four arms can reach this at the same moment. One create wins and the
+    others get an `already exists` failure, so those re-read the experiment by
+    name instead of failing the mirror.
+    """
+    experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
+    if experiment is not None:
+        return experiment.experiment_id
+    try:
+        return client.create_experiment(
+            EXPERIMENT_NAME,
+            artifact_location=artifact_location,
+        )
+    except Exception as error:  # noqa: BLE001 - match the race, re-raise the rest
+        if "already exists" not in str(error).lower():
+            raise
+        experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
+        if experiment is None:
+            raise
+        return experiment.experiment_id
+
+
 class MlflowMirror:
     """Copies one run folder into the local MLflow store.
 
@@ -454,19 +478,12 @@ class MlflowMirror:
             self.tracking_uri or f"sqlite:///{self.runs_root / DATABASE_NAME}"
         )
         client = MlflowClient()
-        experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
-        if experiment is None:
-            artifact_location = (
-                self.artifact_root
-                if self.artifact_root is not None
-                else str(self.runs_root / ARTIFACTS_NAME)
-            )
-            experiment_id = client.create_experiment(
-                EXPERIMENT_NAME,
-                artifact_location=artifact_location,
-            )
-        else:
-            experiment_id = experiment.experiment_id
+        artifact_location = (
+            self.artifact_root
+            if self.artifact_root is not None
+            else str(self.runs_root / ARTIFACTS_NAME)
+        )
+        experiment_id = _ensure_experiment_id(client, artifact_location)
         mlflow.set_experiment(EXPERIMENT_NAME)
         self._mlflow = mlflow
         self._client = client

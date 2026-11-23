@@ -157,6 +157,39 @@ def test_a_broken_store_is_logged_and_stays_quiet(tmp_path: Path, monkeypatch) -
     assert text.count("store unavailable") == 1
 
 
+def test_a_creation_race_re_reads_the_experiment_by_name() -> None:
+    class RacingClient:
+        def __init__(self) -> None:
+            self.lookups = 0
+
+        def get_experiment_by_name(self, name):
+            self.lookups += 1
+            if self.lookups == 1:
+                return None
+            return type("Experiment", (), {"experiment_id": "42"})()
+
+        def create_experiment(self, name, artifact_location=None):
+            raise RuntimeError("RESOURCE_ALREADY_EXISTS: experiment already exists")
+
+    client = RacingClient()
+    experiment_id = mlflow_log._ensure_experiment_id(client, "s3://bucket/artifacts")
+
+    assert experiment_id == "42"
+    assert client.lookups == 2
+
+
+def test_a_creation_failure_that_is_not_a_race_still_raises() -> None:
+    class BrokenClient:
+        def get_experiment_by_name(self, name):
+            return None
+
+        def create_experiment(self, name, artifact_location=None):
+            raise RuntimeError("permission denied")
+
+    with pytest.raises(RuntimeError, match="permission denied"):
+        mlflow_log._ensure_experiment_id(BrokenClient(), "s3://bucket/artifacts")
+
+
 def test_open_mirror_respects_the_flag(tmp_path: Path) -> None:
     run_dir = make_run(tmp_path)
     assert isinstance(open_mirror(tmp_path / "runs", run_dir, False), NullMirror)
