@@ -426,6 +426,10 @@ class MlflowMirror:
         # A mirror that found an existing `mlflow.json` only owns the table
         # counts, not the run ids an earlier mirror wrote.
         self._owns_ids = False
+        # A run copied to another machine keeps its name, so the name is the
+        # identity a rebuild matches on. The folder path is not, because the
+        # same run folder has a different path on each machine.
+        self.run_key = self._run_name(_read_json(self.run_dir / META_NAME))[2]
         # A mirror rebuilt over the same run folder picks up the counts from
         # the last one, so a restart does not append the same rows twice.
         self._logged_rows: dict[str, int] = _load_table_counts(self.run_dir)
@@ -821,18 +825,19 @@ class MlflowMirror:
             client.log_metric(self.gpu_run_id, name, value, step=index)
 
     def _runs_for_folder(self) -> list[str]:
-        """Every run in the experiment whose `rlvr/run_dir` tag is this folder.
+        """Every run in the experiment whose `rlvr/run_name` tag is this run.
 
         A crash between `start_run` and the ids write leaves a run that
-        `mlflow.json` does not name. The tag finds it. The child runs of each
-        matching parent are included too, so a rebuild leaves no GPU run
-        behind.
+        `mlflow.json` does not name. The tag finds it. The name is used rather
+        than `rlvr/run_dir`, because a folder copied to another machine has a
+        different path but the same name. The child runs of each matching
+        parent are included too, so a rebuild leaves no GPU run behind.
         """
         client = self._require_client()
-        escaped = str(self.run_dir.resolve()).replace("'", "\\'")
+        escaped = self.run_key.replace("'", "\\'")
         runs = client.search_runs(
             experiment_ids=[self.experiment_id],
-            filter_string=f"tags.`rlvr/run_dir` = '{escaped}'",
+            filter_string=f"tags.`rlvr/run_name` = '{escaped}'",
         )
         found: list[str] = []
         for run in runs:
@@ -852,9 +857,10 @@ class MlflowMirror:
     def rebuild(self) -> None:
         """Replace the runs for this folder with a replay of the local files.
 
-        A resumed run deletes every run whose `rlvr/run_dir` tag names this
-        folder, then recreates the parent and child runs. The tag finds a run
-        left by a crash before `mlflow.json` was written. The local files are
+        A resumed run deletes every run whose `rlvr/run_name` tag is this run,
+        then recreates the parent and child runs. The tag finds a run left by a
+        crash before `mlflow.json` was written, and a run copied from another
+        machine under a different folder path. The local files are
         already truncated to the last checkpoint, so the replay holds no point
         past it. The active run this process owns is ended first, so the new
         run can open.

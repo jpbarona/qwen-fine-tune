@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -306,3 +307,29 @@ def test_rebuild_logs_one_band_point_for_two_steps(
     solved = client.get_metric_history(mirror.run_id, "stage/easy/solved")
     assert [(point.step, point.value) for point in solved] == [(1, 1.0), (2, 2.0)]
     mirror.close()
+
+
+def test_rebuild_finds_a_run_copied_to_another_path(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    first = make_run(tmp_path)
+    mirror = MlflowMirror(runs_root, first)
+    mirror.start({"arm": "code-score", "timestamp": RUN_NAME})
+    mirror.close("FINISHED")
+
+    copy = tmp_path / "elsewhere" / "code-score" / RUN_NAME
+    shutil.copytree(first, copy)
+    # The copy came from another machine, so the ids it carries name runs in
+    # that machine's store. Only the name can find the run here.
+    (copy / "mlflow.json").unlink()
+    rebuilt = MlflowMirror(runs_root, copy)
+    rebuilt.rebuild()
+    rebuilt.close("FINISHED")
+
+    runs = MlflowClient().search_runs(
+        experiment_ids=[rebuilt.experiment_id],
+        filter_string=(
+            "attributes.status = 'FINISHED' and "
+            f"attributes.run_name = 'code-score-{RUN_NAME}'"
+        ),
+    )
+    assert len(runs) == 1
