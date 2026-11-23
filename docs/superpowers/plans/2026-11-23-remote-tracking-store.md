@@ -194,11 +194,18 @@ def test_rebuild_finds_a_run_copied_to_another_path(tmp_path: Path) -> None:
     rebuilt.rebuild()
     rebuilt.close("FINISHED")
 
-    runs = MlflowClient().search_runs(
-        experiment_ids=[rebuilt.experiment_id],
-        filter_string="attributes.status = 'FINISHED'",
-    )
-    assert len(runs) == 1
+    clients = MlflowClient()
+    parents = [
+        run for run in clients.search_runs(
+            experiment_ids=[rebuilt.experiment_id],
+            filter_string=(
+                "attributes.status = 'FINISHED' and "
+                f"attributes.run_name = 'code-score-{RUN_NAME}'"
+            ),
+        )
+        if run.data.tags.get("mlflow.parentRunId") is None
+    ]
+    assert len(parents) == 1
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
