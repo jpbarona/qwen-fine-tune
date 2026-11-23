@@ -747,7 +747,13 @@ def run_command(args: argparse.Namespace) -> int:
     # broken store hands back a null mirror, so training never depends on it.
     # On resume the store is attached after the truncation, so the rebuild
     # replays the kept records.
-    mirror = open_mirror(args.runs_root, store.run_dir, config.mlflow.enabled)
+    mirror = open_mirror(
+        args.runs_root,
+        store.run_dir,
+        config.mlflow.enabled,
+        tracking_uri=config.mlflow.tracking_uri,
+        artifact_root=config.mlflow.artifact_root,
+    )
     store.attach_mirror(mirror)
     if args.resume:
         mirror.rebuild()

@@ -191,6 +191,37 @@ def test_start_writes_the_step_target_as_max_steps(tmp_path: Path) -> None:
     mirror.close()
 
 
+def test_mirror_uses_the_configured_tracking_uri(tmp_path: Path) -> None:
+    store = tmp_path / "store"
+    store.mkdir()
+    run_dir = make_run(tmp_path)
+    uri = f"sqlite:///{store / 'other.db'}"
+    mirror = MlflowMirror(tmp_path / "runs", run_dir, tracking_uri=uri)
+    mirror.start({"arm": "code-score"})
+    assert (store / "other.db").exists()
+    assert not (tmp_path / "runs" / "mlflow.db").exists()
+    mirror.close()
+
+
+def test_mirror_creates_the_experiment_at_the_artifact_root(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    root = "s3://opencodeagent1/mlflow/v1/artifacts"
+    mirror = MlflowMirror(tmp_path / "runs", run_dir, artifact_root=root)
+    mirror.start({"arm": "code-score"})
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("rlvr")
+    assert experiment.artifact_location == root
+    mirror.close()
+
+
+def test_mirror_without_a_uri_keeps_the_local_store(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score"})
+    assert (tmp_path / "runs" / "mlflow.db").exists()
+    mirror.close()
+
+
 def test_eval_logs_both_pass_at_1_series(tmp_path: Path) -> None:
     run_dir = make_run(tmp_path)
     mirror = MlflowMirror(tmp_path / "runs", run_dir)

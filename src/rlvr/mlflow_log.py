@@ -396,9 +396,18 @@ class MlflowMirror:
     value of every series. `close` terminates both runs.
     """
 
-    def __init__(self, runs_root: str | Path, run_dir: str | Path) -> None:
+    def __init__(
+        self,
+        runs_root: str | Path,
+        run_dir: str | Path,
+        *,
+        tracking_uri: str | None = None,
+        artifact_root: str | None = None,
+    ) -> None:
         self.runs_root = Path(runs_root)
         self.run_dir = Path(run_dir)
+        self.tracking_uri = tracking_uri
+        self.artifact_root = artifact_root
         self.run_id = ""
         self.gpu_run_id = ""
         self.experiment_id = ""
@@ -431,13 +440,20 @@ class MlflowMirror:
         import mlflow
         from mlflow.tracking import MlflowClient
 
-        mlflow.set_tracking_uri(f"sqlite:///{self.runs_root / DATABASE_NAME}")
+        mlflow.set_tracking_uri(
+            self.tracking_uri or f"sqlite:///{self.runs_root / DATABASE_NAME}"
+        )
         client = MlflowClient()
         experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
         if experiment is None:
+            artifact_location = (
+                self.artifact_root
+                if self.artifact_root is not None
+                else str(self.runs_root / ARTIFACTS_NAME)
+            )
             experiment_id = client.create_experiment(
                 EXPERIMENT_NAME,
-                artifact_location=str(self.runs_root / ARTIFACTS_NAME),
+                artifact_location=artifact_location,
             )
         else:
             experiment_id = experiment.experiment_id
@@ -950,7 +966,14 @@ class MlflowMirror:
         _write_atomic(path, json.dumps(payload, indent=2) + "\n")
 
 
-def open_mirror(runs_root: Path, run_dir: Path, enabled: bool) -> Mirror:
+def open_mirror(
+    runs_root: Path,
+    run_dir: Path,
+    enabled: bool,
+    *,
+    tracking_uri: str | None = None,
+    artifact_root: str | None = None,
+) -> Mirror:
     """The mirror for one run. A disabled or broken mirror does nothing.
 
     A store that could not be opened at construction leaves one line in
@@ -960,7 +983,12 @@ def open_mirror(runs_root: Path, run_dir: Path, enabled: bool) -> Mirror:
     if not enabled:
         return NullMirror()
     try:
-        mirror = MlflowMirror(runs_root, run_dir)
+        mirror = MlflowMirror(
+            runs_root,
+            run_dir,
+            tracking_uri=tracking_uri,
+            artifact_root=artifact_root,
+        )
     except Exception as error:  # noqa: BLE001 - the mirror must not stop training
         _write_error(Path(run_dir), error)
         return NullMirror()
