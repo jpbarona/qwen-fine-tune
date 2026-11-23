@@ -369,6 +369,37 @@ def test_a_bad_mlflow_setting_is_named(tmp_path, line: str, key: str) -> None:
         load_config(path)
 
 
+def test_mlflow_remote_keys_parse(write_config) -> None:
+    config = load_config(
+        write_config(
+            GOOD
+            + "\n[mlflow]\n"
+            'tracking_uri = "http://172.17.0.1:8081"\n'
+            'artifact_root = "s3://opencodeagent1/mlflow/v1/artifacts"\n'
+            'bucket = "s3://opencodeagent1/runs/v1"\n'
+            "upload_concurrency = 3\n"
+        )
+    )
+    assert config.mlflow.tracking_uri == "http://172.17.0.1:8081"
+    assert config.mlflow.artifact_root == "s3://opencodeagent1/mlflow/v1/artifacts"
+    assert config.mlflow.bucket == "s3://opencodeagent1/runs/v1"
+    assert config.mlflow.upload_concurrency == 3
+
+
+def test_mlflow_remote_keys_default_to_none(write_config) -> None:
+    config = load_config(write_config(GOOD))
+    assert config.mlflow.tracking_uri is None
+    assert config.mlflow.artifact_root is None
+    assert config.mlflow.bucket is None
+    assert config.mlflow.upload_concurrency == 2
+
+
+def test_mlflow_upload_concurrency_must_be_positive(write_config) -> None:
+    path = write_config(GOOD + "\n[mlflow]\nupload_concurrency = 0\n")
+    with pytest.raises(ConfigError, match="mlflow.upload_concurrency"):
+        load_config(path)
+
+
 @pytest.mark.parametrize(
     "line, key",
     [
