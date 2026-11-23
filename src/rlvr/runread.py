@@ -218,7 +218,11 @@ def _resolve_paths(paths: Iterable[str | Path]) -> list[tuple[str, Path | None]]
             continue
         if not path.is_dir():
             continue
-        children = sorted(child for child in path.iterdir() if child.is_dir())
+        children = sorted(
+            child
+            for child in path.iterdir()
+            if child.is_dir() and not child.name.startswith(".")
+        )
         run_children = [child for child in children if _looks_like_run(child)]
         if run_children:
             latest = max(run_children, key=lambda child: child.name)
