@@ -3,6 +3,11 @@
 The study compares GRPO training on a small code model across two parked-prompt
 schedules. Code sits in the repository root. This folder holds the reasoning.
 
+## Current work
+
+- [PR #4](https://github.com/jpbarona/qwen-fine-tune/pull/4): the store moves to
+  this VM, live metrics over one SSH tunnel, checkpoints to the bucket.
+
 ## Start here
 
 - [../README.md](../README.md): install, run, MLflow dashboard, data layout, contracts.
@@ -38,6 +43,22 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 - `SPEC.md`: the deferred four-arm sampling study.
 - `PLAN.md`: the original ticket breakdown.
 
+## Deploy and scripts
+
+- [../deploy/README.md](../deploy/README.md): the server unit, the nightly
+  backup, the install steps and the restore steps.
+- `../deploy/mlflow.service`: the server on `127.0.0.1:8081`, one worker,
+  sqlite backend, S3 artifacts.
+- `../deploy/mlflow-backup.timer` and `mlflow-backup.service`: the nightly
+  `sqlite3 .backup` copy to the bucket, 14 kept.
+- `../scripts/open-tunnel.sh`: the reverse forward, the retry loop and the
+  health probe from the box.
+- `../scripts/start-remote-run.sh`: tunnel, health gate, detached launch of one
+  arm on the box.
+- `../configs/real.toml` and `../configs/lfm-spread.toml`: the `[mlflow]` table
+  names the bucket and the artifact root. The tracking URI comes from the
+  tunnel, never from a config file.
+
 ## Reports
 
 - `postmortem-run17.md` and `postmortem-run17.pdf`: why the 313-step curve looked
@@ -56,7 +77,9 @@ schedules. Code sits in the repository root. This folder holds the reasoning.
 - `../data/difficulty_labels.jsonl`: one band per training row.
 - `../screens/mbpp-base/`: the base-model screen. Ignored by git, restored from
   the bucket. See the README.
-- `../runs/`: run folders, kept as study data.
+- `../runs/`: the box run folders. The live store is
+  `/home/opencode/Work/rl-grpo-data/mlflow/mlflow.db` and is rebuildable from
+  these folders.
 - `../configs/`: arm configs, starting with `lfm-spread.toml` and
   `lfm-sweep.toml`.
 
