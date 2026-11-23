@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib
 import os
 import subprocess
 import sys
@@ -1199,3 +1200,20 @@ def test_training_steps_keeps_the_starting_batch_without_a_policy(tmp_path) -> N
 
     # The old path starts at two prompts per step.
     assert training_steps(config, prompts, None) == config.epochs * 100
+
+
+def test_dashboard_help_mentions_mlflow() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "rlvr", "dashboard", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "mlflow" in result.stdout.lower()
+
+
+def test_the_dashboard_module_is_gone() -> None:
+    sys.modules.pop("rlvr.dashboard", None)
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("rlvr.dashboard")
+

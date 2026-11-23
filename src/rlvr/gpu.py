@@ -5,10 +5,9 @@ memory and temperature, reads the torch allocator for the five memory splits,
 appends one row to `gpu.jsonl`, and then hands the row to the MLflow mirror. A
 mirror that fails loses a copy and never a row.
 
-The `nvidia-smi` reader is copied from `runread.py`. The dashboard copy stays
-until the web layer is removed. The duplication is deliberate: the read layer
-and the sampler are moving apart, and the sampler must not import torch at
-module level.
+The `nvidia-smi` reader lives here and nowhere else. The web layer that used
+to hold a second copy is gone. The sampler must not import torch at module
+level, so the reader stays separate from the torch memory read.
 
 A missing `nvidia-smi`, a torch import that fails and a full disk all end the
 same way: the tick is dropped and the thread keeps going. A broken mirror

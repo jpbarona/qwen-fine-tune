@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from time import perf_counter
@@ -303,20 +304,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     dashboard = subparsers.add_parser(
-        "dashboard", help="serve a live progress dashboard in the browser"
-    )
-    dashboard.add_argument(
-        "paths",
-        nargs="*",
-        type=Path,
-        metavar="RUN",
-        help="run folders or arm folders to watch",
+        "dashboard", help="serve the MLflow tracking UI"
     )
     dashboard.add_argument(
         "--runs-root",
         type=Path,
-        default=None,
-        help="runs root that expands to each arm's latest run",
+        default=Path("runs"),
+        help="runs root that holds the MLflow store (default: ./runs)",
     )
     dashboard.add_argument(
         "--port",
@@ -963,21 +957,29 @@ def import_mlflow_command(args: argparse.Namespace) -> int:
 
 
 def dashboard_command(args: argparse.Namespace) -> int:
-    """Serve the live dashboard until Ctrl+C."""
-    paths = [str(path) for path in args.paths]
-    if args.runs_root is not None:
-        paths.append(str(args.runs_root))
-    if not paths:
-        raise UsageError("dashboard needs a run folder, an arm folder, or --runs-root")
+    """Start the MLflow server on the runs root."""
     if not 0 < args.port <= 65535:
         raise UsageError(f"invalid port {args.port}")
-
-    from .dashboard import serve_dashboard
-
+    runs_root = args.runs_root
+    runs_root.mkdir(parents=True, exist_ok=True)
+    (runs_root / "mlartifacts").mkdir(parents=True, exist_ok=True)
+    command = [
+        "mlflow",
+        "server",
+        "--backend-store-uri",
+        f"sqlite:///{runs_root / 'mlflow.db'}",
+        "--artifacts-destination",
+        str(runs_root / "mlartifacts"),
+        "--host",
+        "0.0.0.0",
+        "--port",
+        str(args.port),
+    ]
+    print(f"dashboard: http://0.0.0.0:{args.port}  (Ctrl+C to stop)")
     try:
-        serve_dashboard(paths, host="127.0.0.1", port=args.port)
+        os.execvp(command[0], command)
     except OSError as error:
-        raise UsageError(f"cannot start the dashboard server: {error}") from error
+        raise UsageError(f"cannot start mlflow server: {error}") from error
     return 0
 
 

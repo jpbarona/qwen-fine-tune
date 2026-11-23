@@ -203,14 +203,6 @@ pool composition, group signal, and a questions table.
 The page reads process state as well as files. A run whose process is gone turns
 `stopped` after two minutes.
 
-Build the page after a UI change:
-
-```bash
-cd dashboard && npm run build
-```
-
-The build writes `src/rlvr/web/index.html`, which is committed.
-
 ## Analysis
 
 ```bash

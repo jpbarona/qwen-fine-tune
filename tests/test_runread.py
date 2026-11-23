@@ -1,18 +1,19 @@
-"""Tests for the live dashboard data collection and page shell.
+"""Tests for the run folder read layer.
 
 No model, judge, Docker, or network is involved. Each run folder is a few JSONL
-rows, one eval.json, and one meta.json written by hand. GPU sampling is never
-run in these tests, so the GPU section stays empty.
+rows, one eval.json, and one meta.json written by hand. The web page and the
+GPU sampler are gone, so these tests cover the data the MLflow mirror reads.
 """
 
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
 
-from rlvr.runread import collect_dashboard, render_html
+from rlvr.runread import collect_dashboard
 
 TIMESTAMP = "20261112T000000Z"
 
@@ -118,11 +119,6 @@ def test_dashboard_shows_the_prompt_and_sequence_counts_per_step(tmp_path) -> No
     assert run["series"]["prompts"] == [2, 3]
     assert run["series"]["sequences"] == [16, 24]
 
-    html = render_html(data)
-    assert "prompts per step" in html
-    assert "sequences per step" in html
-    assert "prompts and sequences per step" in html
-
 
 def test_reward_histogram_covers_negative_rewards(tmp_path) -> None:
     rollouts = [
@@ -205,7 +201,6 @@ def test_a_stage_evaluation_is_surfaced_with_its_band(tmp_path) -> None:
     points = data["runs"][0]["evaluations"]
     assert points[0]["stage"] == "very easy"
     assert points[1]["stage"] is None
-    assert "very easy" in render_html(data)
 
 
 def test_dashboard_shows_the_active_stage_and_pass_rate_per_band(tmp_path) -> None:
@@ -247,9 +242,6 @@ def test_dashboard_shows_the_active_stage_and_pass_rate_per_band(tmp_path) -> No
         {"band": "very easy", "rollouts": 2, "pass_rate": 0.5},
         {"band": "medium", "rollouts": 1, "pass_rate": 1.0},
     ]
-    html = render_html(data)
-    assert "pass rate per band" in html
-    assert "very easy" in html
 
 
 def test_a_waiting_run_has_no_stage(tmp_path) -> None:
@@ -299,16 +291,6 @@ def test_collect_dashboard_separates_the_memory_figures(tmp_path) -> None:
     assert run["latest"]["gpu_unaccounted_mib"] == pytest.approx(875.0)
     assert run["series"]["gpu_live_mib"] == [pytest.approx(100.0)]
 
-    html = render_html(data)
-    for label in (
-        "gpu live GiB",
-        "gpu cached GiB",
-        "gpu fragmented GiB",
-        "gpu unaccounted GiB",
-        "gpu total GiB",
-    ):
-        assert label in html
-
 
 def test_a_fake_run_without_a_gpu_shows_zero_memory(run_fake) -> None:
     run_dir, _ = run_fake("code-score")
@@ -319,7 +301,6 @@ def test_a_fake_run_without_a_gpu_shows_zero_memory(run_fake) -> None:
     assert latest["gpu_cached_mib"] == 0.0
     assert latest["gpu_fragmented_mib"] == 0.0
     assert latest["gpu_total_mib"] == 0.0
-    assert "gpu memory per step (GiB)" in render_html(data)
 
 
 def test_collect_dashboard_ignores_a_truncated_rollout_line(tmp_path) -> None:
@@ -564,8 +545,6 @@ def test_an_old_run_has_empty_pool_series_and_no_policy(tmp_path) -> None:
     assert run["latest"]["advantage_share"] is None
     assert run["latest"]["group_spread"] is None
     assert run["latest"]["group_sd"] is None
-    assert "pool composition" in render_html(collect_dashboard([run_dir]))
-    assert "group signal" in render_html(collect_dashboard([run_dir])).lower()
 
 
 def test_started_is_shown_as_a_readable_utc_timestamp(tmp_path) -> None:
@@ -574,332 +553,11 @@ def test_started_is_shown_as_a_readable_utc_timestamp(tmp_path) -> None:
     assert data["runs"][0]["started"] == "20261112T013045Z"
     assert data["runs"][0]["started_utc"] == "2026-11-12 01:30:45Z"
 
-    html = render_html(data)
-    assert "2026-11-12 01:30:45Z" in html
-    assert "started " in html
-
 
 def test_an_unparsable_started_value_is_shown_as_is(tmp_path) -> None:
     run_dir = write_run(tmp_path / "runs", "code-score", timestamp="not-a-time")
     data = collect_dashboard([run_dir])
     assert data["runs"][0]["started_utc"] == "not-a-time"
-
-
-def test_gpu_read_parses_the_csv_output(monkeypatch) -> None:
-    from rlvr import runread as runread_module
-
-    def fake_run(command, **kwargs):
-        return runread_module.subprocess.CompletedProcess(
-            args=command, returncode=0, stdout="20, 19610, 49140, 41\n", stderr=""
-        )
-
-    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
-    sample = runread_module._gpu_read()
-
-    assert sample is not None
-    assert sample["utilization"] == 20
-    assert sample["memory_used"] == 19610
-    assert sample["memory_total"] == 49140
-    assert sample["temperature"] == 41
-
-
-def test_gpu_read_returns_none_for_unsupported_fields(monkeypatch) -> None:
-    from rlvr import runread as runread_module
-
-    def fake_run(command, **kwargs):
-        return runread_module.subprocess.CompletedProcess(
-            args=command, returncode=0, stdout="[N/A], [N/A], 49140, 41\n", stderr=""
-        )
-
-    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
-    sample = runread_module._gpu_read()
-
-    assert sample is not None
-    assert sample["utilization"] is None
-    assert sample["memory_used"] is None
-    assert sample["memory_total"] == 49140
-    assert sample["temperature"] == 41
-
-
-def test_gpu_read_keeps_a_real_zero_reading(monkeypatch) -> None:
-    """A recorded sample from the A6000: an idle GPU is 0%, not a missing read."""
-    from rlvr import runread as runread_module
-
-    def fake_run(command, **kwargs):
-        return runread_module.subprocess.CompletedProcess(
-            args=command, returncode=0, stdout="0, 35, 49140, 24\n", stderr=""
-        )
-
-    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
-    sample = runread_module._gpu_read()
-
-    assert sample == {
-        "utilization": 0.0,
-        "memory_used": 35.0,
-        "memory_total": 49140.0,
-        "temperature": 24.0,
-    }
-
-
-def test_gpu_read_handles_not_supported_and_units(monkeypatch) -> None:
-    from rlvr import runread as runread_module
-
-    def fake_run(command, **kwargs):
-        return runread_module.subprocess.CompletedProcess(
-            args=command,
-            returncode=0,
-            stdout="[Not Supported], 0 MiB, 49140 MiB, [N/A]\n",
-            stderr="",
-        )
-
-    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
-    sample = runread_module._gpu_read()
-
-    assert sample is not None
-    assert sample["utilization"] is None
-    assert sample["memory_used"] == 0.0
-    assert sample["memory_total"] == 49140.0
-    assert sample["temperature"] is None
-
-
-def test_gpu_read_returns_none_when_no_field_can_be_read(monkeypatch) -> None:
-    from rlvr import runread as runread_module
-
-    def fake_run(command, **kwargs):
-        return runread_module.subprocess.CompletedProcess(
-            args=command,
-            returncode=0,
-            stdout="[N/A], [Not Supported], [Unknown Error], [N/A]\n",
-            stderr="",
-        )
-
-    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
-    assert runread_module._gpu_read() is None
-
-
-def test_gpu_read_sums_memory_across_gpus_and_takes_the_hottest(monkeypatch) -> None:
-    from rlvr import runread as runread_module
-
-    def fake_run(command, **kwargs):
-        return runread_module.subprocess.CompletedProcess(
-            args=command,
-            returncode=0,
-            stdout="85, 30000, 49140, 51\n10, 1000, 24570, 60\n",
-            stderr="",
-        )
-
-    monkeypatch.setattr(runread_module.subprocess, "run", fake_run)
-    sample = runread_module._gpu_read()
-
-    assert sample is not None
-    assert sample["utilization"] == 85.0
-    assert sample["memory_used"] == 31000.0
-    assert sample["memory_total"] == 73710.0
-    assert sample["temperature"] == 60.0
-
-
-def test_a_failed_gpu_read_is_not_counted_as_a_sample(monkeypatch) -> None:
-    from rlvr import runread as runread_module
-
-    runread_module._gpu_history.clear()
-    monkeypatch.setattr(runread_module, "_gpu_read", lambda: None)
-    try:
-        runread_module.sample_gpu(now=100.0)
-        state = runread_module._gpu_state(now=105.0)
-        assert state == {"current": None, "history": [], "age_seconds": None}
-    finally:
-        runread_module._gpu_history.clear()
-
-
-def test_the_gpu_state_reports_the_age_of_the_last_sample(monkeypatch) -> None:
-    from rlvr import runread as runread_module
-
-    runread_module._gpu_history.clear()
-    sample = {
-        "utilization": 80.0,
-        "memory_used": 1000.0,
-        "memory_total": 2000.0,
-        "temperature": 50.0,
-    }
-    monkeypatch.setattr(runread_module, "_gpu_read", lambda: dict(sample))
-    try:
-        runread_module.sample_gpu(now=100.0)
-        state = runread_module._gpu_state(now=107.5)
-        assert state["age_seconds"] == 7.5
-        assert state["current"] == sample
-        assert state["history"][0]["t"] == 100.0
-    finally:
-        runread_module._gpu_history.clear()
-
-
-def test_the_system_strip_shows_a_dash_when_no_sample_exists() -> None:
-    data = {
-        "generated_at": "now",
-        "runs": [],
-        "gpu": {"current": None, "history": [], "age_seconds": None},
-    }
-    html = render_html(data)
-    assert "gpu util" in html
-    assert "last sample" in html
-
-
-def test_gpu_sample_is_reused_when_younger_than_two_seconds(monkeypatch) -> None:
-    from rlvr import runread as runread_module
-
-    runread_module._gpu_history.clear()
-    calls: list[int] = []
-
-    def fake_read() -> dict:
-        calls.append(1)
-        return {
-            "utilization": 10.0,
-            "memory_used": 20.0,
-            "memory_total": 30.0,
-            "temperature": 40.0,
-        }
-
-    monkeypatch.setattr(runread_module, "_gpu_read", fake_read)
-    try:
-        runread_module.sample_gpu(now=100.0)
-        runread_module.sample_gpu(now=101.9)
-        assert len(calls) == 1
-
-        runread_module.sample_gpu(now=102.0)
-        assert len(calls) == 2
-        assert len(runread_module._gpu_history) == 2
-    finally:
-        runread_module._gpu_history.clear()
-
-
-def test_the_404_route_does_not_sample_the_gpu(monkeypatch) -> None:
-    from rlvr import runread as runread_module
-
-    handler = runread_module._DashboardHandler.__new__(
-        runread_module._DashboardHandler
-    )
-    handler.path = "/missing"
-    sent: list[tuple] = []
-    monkeypatch.setattr(handler, "_send", lambda *args: sent.append(args))
-
-    def refuse() -> None:
-        raise AssertionError("the 404 route must not sample the GPU")
-
-    monkeypatch.setattr(runread_module, "sample_gpu", refuse)
-    handler._route()
-
-    assert sent and sent[0][0] == 404
-
-
-def test_the_data_route_samples_the_gpu(monkeypatch) -> None:
-    from rlvr import runread as runread_module
-
-    handler = runread_module._DashboardHandler.__new__(
-        runread_module._DashboardHandler
-    )
-    handler.path = "/data.json"
-    handler.paths = []
-    sent: list[tuple] = []
-    monkeypatch.setattr(handler, "_send", lambda *args: sent.append(args))
-    calls: list[int] = []
-    monkeypatch.setattr(runread_module, "sample_gpu", lambda: calls.append(1))
-
-    handler._route()
-
-    assert calls == [1]
-    assert sent and sent[0][0] == 200
-
-
-def test_the_page_and_data_routes_forbid_caching(monkeypatch) -> None:
-    from io import BytesIO
-
-    from rlvr import runread as runread_module
-
-    monkeypatch.setattr(runread_module, "sample_gpu", lambda: None)
-
-    for path in ("/", "/data.json"):
-        handler = runread_module._DashboardHandler.__new__(
-            runread_module._DashboardHandler
-        )
-        handler.path = path
-        handler.paths = []
-        handler.wfile = BytesIO()
-        sent: list[tuple] = []
-        monkeypatch.setattr(
-            handler, "send_response", lambda code: sent.append(("status", code))
-        )
-        monkeypatch.setattr(
-            handler,
-            "send_header",
-            lambda key, value: sent.append((key.lower(), value)),
-        )
-        monkeypatch.setattr(handler, "end_headers", lambda: sent.append(("end", None)))
-
-        handler._route()
-
-        assert ("cache-control", "no-store, max-age=0") in sent, path
-        assert ("pragma", "no-cache") in sent, path
-
-
-def test_render_html_escapes_an_arm_name_with_a_script_tag() -> None:
-    data = {
-        "generated_at": "2026-11-13T00:00:00Z",
-        "runs": [
-            {
-                "arm": "<script>alert(1)</script>",
-                "run_name": "t",
-                "run_dir": "runs/x/t",
-                "started": "t",
-                "elapsed_seconds": 1.0,
-                "status": "running",
-                "steps_done": 1,
-                "target_steps": None,
-                "latest": {},
-                "series": {"steps": [], "mean_reward": []},
-                "pass_at_1": {"checkpoint": {"steps": [], "values": []}, "final": {"steps": [], "values": []}},
-                "evaluations": [],
-                "distributions": {"reward": {"bins": [], "counts": []}, "tests_passed": {"bins": [], "counts": []}},
-            }
-        ],
-        "gpu": {"current": None, "history": []},
-    }
-    html = render_html(data)
-
-    assert "<script>alert(1)</script>" not in html
-    assert "\\u003cscript\\u003e" in html
-
-
-def test_render_html_is_self_contained_and_has_no_cdn() -> None:
-    html = render_html({"generated_at": "now", "runs": [], "gpu": {"current": None, "history": []}})
-
-    assert html.startswith("<!DOCTYPE html>")
-    assert "cdn.tailwindcss.com" not in html
-    assert "chart.umd" not in html
-    assert "<script src=" not in html
-    assert "<link" not in html
-    assert '<div id="root"></div>' in html
-    # The bundle is inlined, so the page draws without a second request.
-    assert '<script type="module">' in html
-    assert html.count('id="initial-data"') == 1
-
-
-def test_the_page_carries_the_payload_as_parseable_json(tmp_path) -> None:
-    run_dir = write_run(tmp_path / "runs", "code-score")
-    html = render_html(collect_dashboard([run_dir]))
-
-    start = html.index('id="initial-data">') + len('id="initial-data">')
-    end = html.index("</script>", start)
-    payload = json.loads(html[start:end])
-
-    assert payload["runs"][0]["arm"] == "code-score"
-    assert payload["runs"][0]["latest"]["mean_reward"] == pytest.approx(0.75)
-
-
-def test_the_built_page_ships_in_the_package() -> None:
-    from rlvr import runread as runread_module
-
-    page = runread_module.WEB_DIR / runread_module.PAGE_NAME
-    assert page.is_file()
-    assert "__RLVR_INITIAL_DATA__" in page.read_text(encoding="utf-8")
 
 
 def test_the_metrics_age_is_reported_in_seconds(tmp_path) -> None:
@@ -941,7 +599,6 @@ def test_dashboard_data_is_json_serializable(tmp_path) -> None:
     }
     assert expected <= set(run)
     assert decoded["generated_at"]
-    assert "gpu" in decoded
 
 
 def test_sparse_entropy_points_are_kept_as_gaps_not_zero(tmp_path) -> None:
@@ -986,10 +643,6 @@ def test_sparse_entropy_points_are_kept_as_gaps_not_zero(tmp_path) -> None:
     assert run["series"]["mean_entropy"] == [0.8, None, 0.7]
     # The KPI shows the last measurement, not a dash on a step without one.
     assert run["latest"]["mean_entropy"] == pytest.approx(0.7)
-
-    html = render_html(data)
-    # The entropy chart keeps the sampled series and drops the gaps.
-    assert "entropy per step" in html
 
 
 def test_latest_entropy_falls_back_to_the_last_measured_step(tmp_path) -> None:
@@ -1143,9 +796,6 @@ def test_stage_progress_is_blank_without_a_pool_size(tmp_path) -> None:
 
     assert progress["points"] == []
     assert progress["percent"] is None
-    html = render_html(data)
-    assert "stage completion per step (%)" in html
-    assert "stage done" in html
 
 
 def test_a_dropped_unsolved_prompt_leaves_the_stage_total(tmp_path) -> None:
@@ -1291,28 +941,6 @@ def test_questions_do_not_fail_when_a_question_file_is_absent(tmp_path, monkeypa
     assert row["text"] is None
 
 
-def test_gpu_tiles_are_reported_in_gib_not_mib(tmp_path) -> None:
-    rows = [
-        {
-            "step": 1,
-            "arm": "code-score",
-            "gpu_live_mib": 2048.0,
-            "gpu_cached_mib": 1024.0,
-            "gpu_fragmented_mib": 0.0,
-            "gpu_unaccounted_mib": 4096.0,
-            "gpu_total_mib": 49152.0,
-        }
-    ]
-    run_dir = write_run(tmp_path / "runs", "code-score", rows=rows)
-    html = render_html(collect_dashboard([run_dir]))
-
-    assert "gpu live GiB" in html
-    assert "gpu total GiB" in html
-    assert "gpu memory per step (GiB)" in html
-    assert "MiB" not in html
-    assert "gpu unaccounted GiB" in html
-
-
 def test_progress_is_counted_in_prompt_samples_not_starting_batches(tmp_path) -> None:
     rows = [
         {"step": 1, "arm": "code-score", "prompts": 2, "mean_reward": 0.5},
@@ -1337,10 +965,6 @@ def test_progress_is_counted_in_prompt_samples_not_starting_batches(tmp_path) ->
     assert run["prompt_sample_target"] == 10
     assert run["start_batch_prompts"] == 2
     assert run["entropy_every_steps"] == 500
-
-    html = render_html({"generated_at": "now", "runs": [run], "gpu": {"current": None, "history": [], "age_seconds": None}})
-    assert "prompt samples" in html
-    assert "prompts per step" in html
 
 
 def test_a_slow_step_is_still_running(tmp_path, monkeypatch) -> None:
@@ -1510,27 +1134,12 @@ def test_a_control_file_without_events_marks_the_prompt_without_a_step(tmp_path)
     assert run["questions"]["rows"][0]["dropped_step"] is None
 
 
-def test_the_page_has_the_dropped_wording(tmp_path) -> None:
-    run_dir = write_run(tmp_path / "runs", "code-score", rollouts=question_group(1, "mbpp-679", 8))
-    write_control(
-        run_dir,
-        ["mbpp-679"],
-        [{"step": 12, "action": "apply", "drop": ["mbpp-679"], "tests": []}],
-    )
-    html = render_html(collect_dashboard([run_dir]))
-
-    assert "show dropped (" in html
-    assert "hide dropped (" in html
-    assert "solved, then dropped" in html
-    assert " at step " in html
-
-
 def test_unchanged_poll_reuses_rollout_summary_but_refreshes_process_status(tmp_path, monkeypatch):
     import rlvr.runread as runread
 
     run_dir = write_run(tmp_path / "runs", evaluations=[])
     metrics = run_dir / "metrics.jsonl"
-    now = runread.time.time()
+    now = time.time()
     import os
     os.utime(metrics, (now - 200, now - 200))
     monkeypatch.setattr(runread, "_process_arms", lambda: {"code-score"})
@@ -1576,7 +1185,7 @@ def test_dashboard_tolerates_invalid_utf8_during_file_writes(tmp_path):
     assert collect_dashboard([run_dir])["runs"][0]["steps_done"] == 2
 
 
-def test_an_unstaged_run_renders_without_a_curriculum(tmp_path) -> None:
+def test_an_unstaged_run_has_bands_and_progress(tmp_path) -> None:
     rows = [
         {
             "step": 1,
@@ -1611,7 +1220,6 @@ def test_an_unstaged_run_renders_without_a_curriculum(tmp_path) -> None:
     assert run["stage_progress"]["band"] == "unstaged"
     assert run["stage_progress"]["total"] == 2
     assert run["stage_progress"]["solved"] == 1
-    assert "unstaged" in render_html(data)
 
 
 def test_a_metric_row_without_a_stage_key_does_not_break_the_dashboard(tmp_path) -> None:
