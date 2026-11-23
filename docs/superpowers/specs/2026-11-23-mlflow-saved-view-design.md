@@ -115,8 +115,9 @@ not assert private helpers or the order of dictionary keys.
 
 Four tests:
 
-1. The builder test checks the six sections in order, the three core cards in
-   order, the three core ranges and the run filter.
+1. The builder test checks the eight sections in order, the exact card
+   membership of each section, the three core cards in order, the three core
+   ranges and the run filter.
 2. The encoder test checks the envelope fields, the `deflate;` prefix, a zlib
    round trip, and the error above 20000 characters.
 3. The writer test checks a real temporary SQLite store. It reads the tag with
