@@ -86,8 +86,9 @@ SYSTEM_METRICS_INTERVAL = "1"
 #: is left alone by `close_dead`, because an old run may predate the sweep.
 LAST_WRITE_TAG = "rlvr/last_write_utc"
 
-#: The tag that records how long the run has been going. The value is a
-#: decimal string of seconds since the run started.
+#: The name used for the heartbeat tag and the heartbeat metric. The value is
+#: a decimal string of seconds since the run started. The spec maps the name
+#: to a metric on the parent run and to a tag on both runs.
 HEARTBEAT_TAG = "rlvr/heartbeat_seconds"
 
 #: Fields copied from `meta.json` to a tag. The rest of the metadata goes to
@@ -505,18 +506,22 @@ class MlflowMirror:
         The stage progress and the per band pass rate are logged here too,
         because the spec sends them to metrics rather than to a table. The
         heartbeat tags are refreshed on the parent and the child run, so a
-        crashed run leaves an old last write behind.
+        crashed run leaves an old last write behind. The parent run also gets
+        the heartbeat as a metric, because the spec maps the name to a metric.
         """
         if not self.run_id:
             raise RuntimeError("the parent run has not started")
-        self._write_heartbeat(datetime.now(timezone.utc))
+        index = int(step)
+        heartbeat = self._write_heartbeat(datetime.now(timezone.utc))
+        self._require_client().log_metric(
+            self.run_id, HEARTBEAT_TAG, heartbeat, step=index
+        )
         dashboard = collect_dashboard([self.run_dir])
         runs = dashboard.get("runs") or []
         if not runs:
             return
         run = runs[0]
         series = run.get("series") or {}
-        index = int(step)
         row = {
             name: values[-1]
             for name, values in series.items()
@@ -526,12 +531,13 @@ class MlflowMirror:
         self._log_stage(index, run)
         self._log_bands(index, run)
 
-    def _write_heartbeat(self, now: datetime) -> None:
+    def _write_heartbeat(self, now: datetime) -> float:
         """Refresh the last write and heartbeat tags on the parent and child.
 
         The last write is an ISO 8601 UTC string. The heartbeat is a decimal
         string of seconds since the run started. The child run gets its own
-        heartbeat, measured from the child's start time.
+        heartbeat, measured from the child's start time. The parent heartbeat
+        is returned so the caller can log it as a metric.
         """
         client = self._require_client()
         stamp = now.isoformat()
@@ -539,10 +545,11 @@ class MlflowMirror:
         client.set_tag(self.run_id, LAST_WRITE_TAG, stamp)
         client.set_tag(self.run_id, HEARTBEAT_TAG, f"{heartbeat:.3f}")
         if not self.gpu_run_id:
-            return
+            return heartbeat
         child_heartbeat = max(0.0, now.timestamp() - self._gpu_started_at)
         client.set_tag(self.gpu_run_id, LAST_WRITE_TAG, stamp)
         client.set_tag(self.gpu_run_id, HEARTBEAT_TAG, f"{child_heartbeat:.3f}")
+        return heartbeat
 
     def _log_stage(self, step: int, run: Mapping[str, Any]) -> None:
         """Log the stage progress points for one step."""
@@ -564,7 +571,12 @@ class MlflowMirror:
                     )
 
     def _log_bands(self, step: int, run: Mapping[str, Any]) -> None:
-        """Log the band pass rates once, at the final step."""
+        """Log the band pass rates at `step`.
+
+        The rate is cumulative. A live run logs it at every step. A rebuild
+        logs it once, at the final step, because the dashboard only carries
+        the final summary and repeating it would flatten the chart.
+        """
         client = self._require_client()
         if not self.run_id:
             raise RuntimeError("the parent run has not started")

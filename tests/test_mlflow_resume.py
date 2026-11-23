@@ -144,8 +144,9 @@ def test_step_writes_the_heartbeat_tags_on_both_runs(tmp_path: Path) -> None:
     mirror.step(1)
 
     client = MlflowClient()
-    for run_id in (mirror.run_id, mirror.gpu_run_id):
-        tags = client.get_run(run_id).data.tags
+    parent_tags = client.get_run(mirror.run_id).data.tags
+    child_tags = client.get_run(mirror.gpu_run_id).data.tags
+    for tags in (parent_tags, child_tags):
         stamp = tags.get("rlvr/last_write_utc")
         assert stamp is not None
         written = datetime.fromisoformat(stamp)
@@ -153,6 +154,13 @@ def test_step_writes_the_heartbeat_tags_on_both_runs(tmp_path: Path) -> None:
         heartbeat = tags.get("rlvr/heartbeat_seconds")
         assert heartbeat is not None
         assert float(heartbeat) >= 0.0
+
+    # The spec maps the heartbeat to a metric and the last write to a tag.
+    heartbeat = parent_tags["rlvr/heartbeat_seconds"]
+    metric = client.get_metric_history(mirror.run_id, "rlvr/heartbeat_seconds")
+    assert len(metric) == 1
+    assert metric[0].step == 1
+    assert metric[0].value == pytest.approx(float(heartbeat), abs=0.001)
     mirror.close()
 
 
