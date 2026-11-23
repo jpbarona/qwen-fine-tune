@@ -1221,6 +1221,22 @@ def test_dashboard_prints_the_remote_store(capsys, monkeypatch) -> None:
     assert "http://127.0.0.1:8081" in capsys.readouterr().out
 
 
+def test_dashboard_prints_the_uri_for_a_namespace_with_a_port(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """The function does not reject a port. Only `main` sees an explicit one."""
+
+    def fail_exec(path: str, argv: list[str]) -> None:
+        raise AssertionError("the remote path must not start a server")
+
+    monkeypatch.setattr("rlvr.cli.os.execv", fail_exec)
+    path = tmp_path / "config.toml"
+    path.write_text(CONFIG, encoding="utf-8")
+    args = Namespace(local=False, port=8081, runs_root=Path("runs"), config=path)
+    assert dashboard_command(args) == 0
+    assert "http://127.0.0.1:8081" in capsys.readouterr().out
+
+
 def test_dashboard_needs_no_config_file_for_the_remote_store(
     capsys, monkeypatch
 ) -> None:

@@ -7,8 +7,8 @@
 # The repository is mounted at /app, so a code change needs no rebuild. The
 # container gets the GPU, host shared memory, the host Docker socket for the
 # sandboxed test runner, and a cache volume for the compiled kernels. The
-# dashboard command starts the MLflow server with the same mounts and publishes
-# port 8081 on the host loopback.
+# dashboard arm prints the remote store URL and starts nothing. With
+# RLVR_LOCAL=1 it starts an offline MLflow server on port 8099 instead.
 
 set -euo pipefail
 
@@ -30,16 +30,19 @@ fi
 case "$arm" in
   code-score|hybrid|gated-judge|gated-process) ;;
   dashboard)
-    port="${RLVR_PORT:-8081}"
-    exec docker run --rm \
-      -v "$repo_root":/app \
-      -v "$repo_root":"$repo_root" \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      -v rlvr-kernel-cache:/root/.cache \
-      -p "127.0.0.1:$port:$port" \
-      -e RLVR_IMAGE_REF="$image_ref" \
-      -w /app \
-      "$image" rlvr dashboard --runs-root runs --port "$port"
+    if [ "${RLVR_LOCAL:-}" = "1" ]; then
+      exec docker run --rm \
+        -v "$repo_root":/app \
+        -v "$repo_root":"$repo_root" \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v rlvr-kernel-cache:/root/.cache \
+        -p "127.0.0.1:8099:8099" \
+        -e RLVR_IMAGE_REF="$image_ref" \
+        -w /app \
+        "$image" rlvr dashboard --local --port 8099 --runs-root runs
+    fi
+    echo "http://127.0.0.1:8081"
+    exit 0
     ;;
   *)
     echo "docker-run.sh: unknown arm '$arm'" >&2

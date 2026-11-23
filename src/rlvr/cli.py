@@ -350,6 +350,8 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument(
         "--port",
         type=int,
+        # None rather than 8099 so `main` can tell an explicit `--port` from the
+        # default and reject it when `--local` is absent.
         default=None,
         help="local server port (default: 8099)",
     )
@@ -1165,8 +1167,6 @@ def dashboard_command(args: argparse.Namespace) -> int:
     """Print the tracking URI, or start a local MLflow server with --local."""
     port = getattr(args, "port", None)
     if not getattr(args, "local", False):
-        if port is not None:
-            raise UsageError("--port needs --local")
         config_path = getattr(args, "config", None)
         if config_path is None:
             print(DEFAULT_TRACKING_URI)
@@ -1221,6 +1221,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "summary":
             return summary_command(args)
         if args.command == "dashboard":
+            # The parser stores no port when `--port` is absent, so a value here
+            # means the caller asked for one. Only `--local` reads it.
+            if args.port is not None and not args.local:
+                raise UsageError("--port needs --local")
             return dashboard_command(args)
         if args.command == "import-mlflow":
             return import_mlflow_command(args)
