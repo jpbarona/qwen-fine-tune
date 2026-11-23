@@ -4,7 +4,8 @@
     rlvr screen --questions <path> [--samples <n>] --output <dir> [--fake]
     rlvr eval-band --band <band> [--count 100] [--seed 2026] [--checkpoint <dir>] [--out <path>]
     rlvr summary <run-dir|runs-root> [...] [--html report.html] [--no-html]
-    rlvr dashboard [<run-dir> ...] [--runs-root <runs-root>] [--port 8081]
+    rlvr dashboard [--runs-root <runs-root>] [--port 8081]
+    rlvr import-mlflow --runs-root <runs-root> [--arm <arm>]
     rlvr publish --report report.html --remote <url-or-path> [--branch gh-pages]
 
 This build runs both the fake path and, on a GPU host with the `train` extra
@@ -28,6 +29,10 @@ is made.
 with arms side by side and writes a static, self-contained HTML report.
 `publish` force-pushes that report to a Pages branch. It needs a remote the
 caller's git can already write to.
+
+`import-mlflow` copies old run folders into the local MLflow store. It walks
+`runs/<arm>/<timestamp>/meta.json` when `--arm` is omitted, and replays each
+folder's metrics, tables and GPU samples.
 
 Exit codes: 0 success, 2 for a bad command line, unknown or unimplemented arm,
 bad config, a missing judge key, a bad run folder, a bad question set, or a
@@ -75,6 +80,7 @@ from .fake import (
 from .gpu import GPU_ROWS_NAME, GpuSampler
 from .judge import JudgeClient, MissingAPIKeyError
 from .memory import configure_expandable_segments, read_torch_memory
+from .mlflow_import import import_run, run_dirs
 from .mlflow_log import open_mirror
 from .pools import DEFAULT_PROMOTION_BAR, Pools, PoolsError, from_rows
 from .publish import PublishError, publish_report
@@ -317,6 +323,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=8081,
         help="port to serve on (default: 8081)",
+    )
+
+    import_mlflow = subparsers.add_parser(
+        "import-mlflow", help="copy old run folders into the MLflow store"
+    )
+    import_mlflow.add_argument(
+        "--runs-root",
+        type=Path,
+        default=Path("runs"),
+        help="folder that holds run folders (default: ./runs)",
+    )
+    import_mlflow.add_argument(
+        "--arm",
+        default=None,
+        help="only import this arm (default: every arm under the runs root)",
     )
 
     publish = subparsers.add_parser(
@@ -920,6 +941,27 @@ def summary_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def import_mlflow_command(args: argparse.Namespace) -> int:
+    """Copy old run folders into the local MLflow store."""
+    runs_root = args.runs_root
+    if not runs_root.is_dir():
+        raise UsageError(f"runs root not found: {runs_root}")
+    try:
+        folders = list(run_dirs(runs_root, args.arm))
+    except OSError as error:
+        raise UsageError(f"cannot read the runs root: {error}") from error
+    if not folders:
+        print(f"no run folders under {runs_root}")
+        return 0
+    for run_dir in folders:
+        try:
+            run_id = import_run(runs_root, run_dir)
+        except Exception as error:  # noqa: BLE001 - report the folder and stop
+            raise UsageError(f"cannot import {run_dir}: {error}") from error
+        print(f"imported {run_dir.parent.name}/{run_dir.name} -> {run_id}")
+    return 0
+
+
 def dashboard_command(args: argparse.Namespace) -> int:
     """Serve the live dashboard until Ctrl+C."""
     paths = [str(path) for path in args.paths]
@@ -971,6 +1013,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return summary_command(args)
         if args.command == "dashboard":
             return dashboard_command(args)
+        if args.command == "import-mlflow":
+            return import_mlflow_command(args)
         if args.command == "publish":
             return publish_command(args)
         raise UsageError(f"unknown command {args.command!r}")
