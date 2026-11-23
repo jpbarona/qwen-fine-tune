@@ -133,9 +133,9 @@ def test_build_view_state_puts_the_core_first() -> None:
     assert all(card["xAxisKey"] == "step" for card in core)
     assert all(card["yAxisKey"] == "metric" for card in core)
     assert [card["range"] for card in core] == [
-        {"yMin": -1.0, "yMax": 1.0},
-        {"yMin": 0.0, "yMax": 1.0},
-        {"yMin": 0.0, "yMax": 1.0},
+        {"yMin": -1.0, "yMax": 1.05},
+        {"yMin": 0.0, "yMax": 1.05},
+        {"yMin": 0.0, "yMax": 1.05},
     ]
 
     # A chart outside core keeps the auto range.
