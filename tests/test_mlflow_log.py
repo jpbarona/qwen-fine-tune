@@ -71,6 +71,39 @@ def test_a_null_metric_is_skipped(tmp_path: Path) -> None:
     mirror.close()
 
 
+def test_step_sends_one_batch_with_the_heartbeat_and_the_row(tmp_path: Path) -> None:
+    class RecordingClient:
+        def __init__(self) -> None:
+            self.batches: list[tuple[str, list]] = []
+
+        def set_tag(self, *args, **kwargs) -> None:
+            pass
+
+        def log_batch(self, run_id, metrics) -> None:
+            self.batches.append((run_id, list(metrics)))
+
+        def log_metric(self, *args, **kwargs) -> None:
+            raise AssertionError("a step must not log one metric at a time")
+
+    run_dir = make_run(tmp_path)
+    mirror = MlflowMirror(tmp_path / "runs", run_dir)
+    mirror.start({"arm": "code-score"})
+    mirror.close("FINISHED")
+    recorder = RecordingClient()
+    mirror._client = recorder
+
+    mirror.step({"step": 3, "pass_rate": 0.5, "grad_norm": 1.0, "rollouts": None})
+
+    assert len(recorder.batches) == 1
+    run_id, metrics = recorder.batches[0]
+    assert run_id == mirror.run_id
+    points = {metric.key: (metric.value, metric.step) for metric in metrics}
+    assert points["pass_rate"] == (0.5, 3)
+    assert points["grad_norm"] == (1.0, 3)
+    assert points["rlvr/heartbeat_seconds"][1] == 3
+    assert "rollouts" not in points
+
+
 def test_start_writes_the_run_ids_file(tmp_path: Path) -> None:
     run_dir = make_run(tmp_path)
     mirror = MlflowMirror(tmp_path / "runs", run_dir)
@@ -127,10 +160,10 @@ def test_a_failure_is_logged_and_not_raised(tmp_path: Path, monkeypatch) -> None
     mirror = MlflowMirror(tmp_path / "runs", run_dir)
     mirror.start({"arm": "code-score"})
 
-    def explode(self, _row, _step):
+    def explode(self, _row, _step, _timestamp):
         raise RuntimeError("read exploded")
 
-    monkeypatch.setattr(mlflow_log.MlflowMirror, "_log_row", explode)
+    monkeypatch.setattr(mlflow_log.MlflowMirror, "_row_metrics", explode)
     mirror.step({"step": 1, "pass_rate": 0.5})
 
     text = (run_dir / "mlflow-errors.log").read_text(encoding="utf-8")

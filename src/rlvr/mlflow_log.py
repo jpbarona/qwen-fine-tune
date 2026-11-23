@@ -26,6 +26,7 @@ import math
 import os
 import re
 import tempfile
+import time
 import warnings
 from datetime import datetime, timezone
 from functools import wraps
@@ -586,11 +587,20 @@ class MlflowMirror:
         index = row.get("step")
         if isinstance(index, bool) or not isinstance(index, int):
             return
+        from mlflow.entities import Metric
+
         heartbeat = self._write_heartbeat(datetime.now(timezone.utc))
-        self._require_client().log_metric(
-            self.run_id, HEARTBEAT_TAG, heartbeat, step=index
-        )
-        self._log_row(row, index)
+        stamp = int(time.time() * 1000)
+        metrics = [
+            Metric(
+                key=HEARTBEAT_TAG,
+                value=float(heartbeat),
+                step=index,
+                timestamp=stamp,
+            )
+        ]
+        metrics.extend(self._row_metrics(row, index, stamp))
+        self._require_client().log_batch(self.run_id, metrics=metrics)
 
     def _write_heartbeat(self, now: datetime) -> float:
         """Refresh the last write and heartbeat tags on the parent and child.
@@ -664,15 +674,20 @@ class MlflowMirror:
             )
             self._band_steps.add(key)
 
-    def _log_row(self, row: Mapping[str, Any], step: int) -> None:
-        """Log the series values of one metrics row at `step`."""
-        client = self._require_client()
-        if not self.run_id:
-            raise RuntimeError("the parent run has not started")
+    def _row_metrics(
+        self, row: Mapping[str, Any], step: int, timestamp: int
+    ) -> list[Any]:
+        """The non-null series values of one metrics row as `Metric` objects."""
+        from mlflow.entities import Metric
+
+        metrics: list[Any] = []
         for name in SERIES_FIELDS:
             value = _number(row.get(name))
             if value is not None:
-                client.log_metric(self.run_id, name, value, step=step)
+                metrics.append(
+                    Metric(key=name, value=value, step=step, timestamp=timestamp)
+                )
+        return metrics
 
     def _log_pass_at_1(self, payload: Mapping[str, Any]) -> None:
         """Log the checkpoint and final pass@1 values from the eval payload.
