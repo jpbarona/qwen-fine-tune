@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import sqlite3
 import tomllib
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -89,3 +92,77 @@ def test_env_example_lists_the_bucket_variables() -> None:
 def test_backup_script_is_importable_and_has_a_main() -> None:
     module = _load_backup_module()
     assert callable(module.main)
+
+
+def test_the_copy_holds_committed_rows_only(tmp_path: Path) -> None:
+    module = _load_backup_module()
+    source = tmp_path / "mlflow.db"
+    writer = sqlite3.connect(source)
+    try:
+        writer.execute("pragma journal_mode=wal")
+        writer.execute("create table runs (id integer)")
+        writer.execute("insert into runs values (1)")
+        writer.commit()
+        writer.execute("insert into runs values (2)")
+
+        target = tmp_path / "copy.db"
+        module.copy_database(source, target)
+
+        copied = sqlite3.connect(target)
+        try:
+            rows = copied.execute("select id from runs order by id").fetchall()
+        finally:
+            copied.close()
+    finally:
+        writer.rollback()
+        writer.close()
+
+    assert rows == [(1,)]
+
+
+def test_the_backup_returns_nonzero_when_the_upload_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_backup_module()
+    database = tmp_path / "mlflow.db"
+    sqlite3.connect(database).close()
+
+    class FailingClient:
+        def upload_file(self, *args: object, **kwargs: object) -> None:
+            raise OSError("bucket is down")
+
+    monkeypatch.setattr(module, "_client", lambda: FailingClient())
+
+    assert module.main(["--db", str(database)]) == 1
+
+
+def test_prune_leaves_objects_that_are_not_backups() -> None:
+    module = _load_backup_module()
+    prefix = "mlflow/v1/backups"
+    backups = [f"{prefix}/mlflow-2026-11-{day:02d}.db" for day in range(1, 17)]
+    foreign = f"{prefix}/aaa-notes.txt"
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.deleted: list[str] = []
+
+        def list_objects_v2(self, **kwargs: object) -> dict[str, object]:
+            return {"Contents": [{"Key": key} for key in [*backups, foreign]]}
+
+        def delete_object(self, **kwargs: object) -> None:
+            self.deleted.append(str(kwargs["Key"]))
+
+    client = FakeClient()
+    deleted = module.prune(client, "bucket", prefix, 14)
+
+    assert deleted == backups[:2]
+    assert foreign not in client.deleted
+
+
+def test_install_script_checks_its_prerequisites() -> None:
+    text = (REPO_ROOT / "deploy" / "install.sh").read_text(encoding="utf-8")
+    assert "import boto3" in text
+    assert "replace-with-the-access-key" in text
+    assert 'chmod 0600 "$ENV_FILE"' in text
+    assert 'chown -R opencode:opencode "$DATA_DIR"' in text
+    assert "systemctl restart mlflow.service" in text

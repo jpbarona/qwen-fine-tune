@@ -25,6 +25,11 @@ if [ ! -x "$PYTHON_BIN" ]; then
   echo "missing $PYTHON_BIN" >&2
   exit 1
 fi
+if ! "$PYTHON_BIN" -c 'import boto3' >/dev/null 2>&1; then
+  echo "missing boto3 in $REPO_DIR/.venv" >&2
+  echo "run this first: .venv/bin/pip install -e '.[tracking]'" >&2
+  exit 1
+fi
 
 mkdir -p "$DATA_DIR" "$ENV_DIR"
 
@@ -32,12 +37,19 @@ if [ ! -e "$ENV_FILE" ]; then
   install -m 0600 "$DEPLOY_DIR/mlflow.env.example" "$ENV_FILE"
   echo "wrote $ENV_FILE from the example, fill in the key values" >&2
 fi
+chmod 0600 "$ENV_FILE"
+
+if grep -Eq 'replace-with-the-access-key|replace-with-the-secret-key|<location>' "$ENV_FILE"; then
+  echo "$ENV_FILE still holds the example values" >&2
+  echo "edit it and set MLFLOW_S3_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_DEFAULT_REGION" >&2
+  exit 1
+fi
 
 if [ "$(id -u)" -eq 0 ]; then
   for unit in "${UNITS[@]}"; do
     install -m 0644 "$DEPLOY_DIR/$unit" "$UNIT_DIR/$unit"
   done
-  chown opencode:opencode "$DATA_DIR"
+  chown -R opencode:opencode "$DATA_DIR"
   chown -R opencode:opencode "$ENV_DIR"
   systemctl daemon-reload
   systemctl enable mlflow.service
@@ -52,5 +64,5 @@ else
   done
   echo "run these two commands as root to finish:"
   echo "  sudo install -m 0644$unit_args $UNIT_DIR"
-  echo "  sudo systemctl daemon-reload && sudo systemctl enable --now mlflow.service mlflow-backup.timer"
+  echo "  sudo systemctl daemon-reload && sudo systemctl enable mlflow.service && sudo systemctl enable --now mlflow-backup.timer && sudo systemctl restart mlflow.service"
 fi

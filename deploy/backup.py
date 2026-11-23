@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -22,6 +23,7 @@ DEFAULT_DB = Path("/home/opencode/Work/rl-grpo-data/mlflow/mlflow.db")
 DEFAULT_BUCKET = "opencodeagent1"
 DEFAULT_PREFIX = "mlflow/v1/backups"
 DEFAULT_KEEP = 14
+BACKUP_NAME = re.compile(r"^mlflow-\d{4}-\d{2}-\d{2}\.db$")
 
 
 def backup_key(now: datetime | None = None, prefix: str = DEFAULT_PREFIX) -> str:
@@ -59,9 +61,10 @@ def upload(client, local: Path, bucket: str, key: str) -> None:
 
 
 def prune(client, bucket: str, prefix: str, keep: int) -> list[str]:
-    """Delete old backups so that at most keep objects remain.
+    """Delete old backups so that at most keep backups remain.
 
-    Returns the keys that were deleted.
+    Only objects named like mlflow-<date>.db are counted or deleted. Any
+    other object under the prefix is left alone. Returns the deleted keys.
     """
     keys: list[str] = []
     token = None
@@ -75,8 +78,9 @@ def prune(client, bucket: str, prefix: str, keep: int) -> list[str]:
         if not token:
             break
 
-    keys.sort()
-    stale = keys[:-keep] if keep > 0 else []
+    backups = [key for key in keys if BACKUP_NAME.fullmatch(key.rsplit("/", 1)[-1])]
+    backups.sort()
+    stale = backups[:-keep] if keep > 0 else []
     for key in stale:
         client.delete_object(Bucket=bucket, Key=key)
     return stale
@@ -104,9 +108,18 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="mlflow-backup-") as tmp:
         local = Path(tmp) / "mlflow.db"
         copy_database(args.db, local)
-        upload(client, local, args.bucket, key)
+        try:
+            upload(client, local, args.bucket, key)
+        except Exception as exc:
+            print(f"upload of {key} failed: {exc}", file=sys.stderr)
+            return 1
 
-    deleted = prune(client, args.bucket, args.prefix, args.keep)
+    try:
+        deleted = prune(client, args.bucket, args.prefix, args.keep)
+    except Exception as exc:
+        print(f"prune of {args.prefix} failed: {exc}", file=sys.stderr)
+        return 1
+
     print(f"uploaded s3://{args.bucket}/{key}")
     for old in deleted:
         print(f"deleted s3://{args.bucket}/{old}")
