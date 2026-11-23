@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from rlvr.upload import MANIFEST_NAME, RunUploader, upload_prefix
+from rlvr.tracking.upload import MANIFEST_NAME, RunUploader, upload_prefix
 
 RUN_NAME = "20260101T000000Z"
 DESTINATION = "s3://b/runs/v1"
@@ -611,3 +611,28 @@ def test_worker_threads_are_daemons(tmp_path: Path) -> None:
         assert all(thread.daemon for thread in workers)
     finally:
         uploader.close()
+
+
+def test_close_stops_the_sweep_when_the_deadline_passes(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    for index in range(20):
+        (run_dir / f"extra-{index}.txt").write_text("x", encoding="utf-8")
+    client = StubS3(fail_times=10**6)
+    uploader = RunUploader(
+        run_dir,
+        "code-score",
+        RUN_NAME,
+        DESTINATION,
+        client=client,
+        retries=1,
+        interval=10.0,
+        backoff=0.2,
+    )
+
+    started = time.monotonic()
+    uploader.close(timeout=0.05)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 2.0
+    assert not client.calls
+    assert any("deadline" in error for error in uploader.errors)

@@ -237,7 +237,9 @@ class RunUploader:
 
         # Copy every file the run left behind, not a fixed list. The checkpoint
         # folder is already handled by the scan, and the manifest is written to
-        # the bucket last.
+        # the bucket last. This sweep respects the close deadline: a dead
+        # destination must cost the caller the timeout, not one retry budget per
+        # file.
         for path in sorted(self.run_dir.rglob("*")):
             if not path.is_file():
                 continue
@@ -248,6 +250,9 @@ class RunUploader:
                 f"{CHECKPOINTS_NAME}/"
             ):
                 continue
+            if time.monotonic() >= deadline:
+                self._record("close: deadline reached, remaining files were not uploaded")
+                break
             self._upload_file(path, relative)
 
         self._upload_manifest()
