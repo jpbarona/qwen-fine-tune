@@ -33,6 +33,12 @@ same index and the same train rotation.
 
 from __future__ import annotations
 
+from .constants import (
+    DEFAULT_SWEEP_GAP_RATIO,
+    MAX_SWEEP_GAP_RATIO,
+    MIN_SWEEP_GAP_RATIO,
+)
+
 import math
 import random
 from dataclasses import dataclass, field
@@ -71,13 +77,6 @@ __all__ = [
 #: passing group does not clear the count.
 DEFAULT_DEMOTE_AFTER = 3
 
-#: The gap between sweeps is this many times the sweep length. Three is the
-#: default, so a cycle spends about a quarter of its steps on parked work.
-DEFAULT_SWEEP_GAP_RATIO = 3
-
-#: The allowed range for the sweep gap ratio.
-MIN_SWEEP_GAP_RATIO = 3
-MAX_SWEEP_GAP_RATIO = 10
 
 #: The two labels a prompt can hold in the training schedule.
 TRAIN_LABEL = "train"

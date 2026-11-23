@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .reward import ARMS
+from .constants import ARMS
 
 __all__ = [
     "RunReport",

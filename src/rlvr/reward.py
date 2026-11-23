@@ -44,6 +44,13 @@ from __future__ import annotations
 import math
 from typing import Callable
 
+from .constants import (
+    ARMS,
+    DEFAULT_LENGTH_PENALTY_FLOOR,
+    DEFAULT_LENGTH_PENALTY_PER_TOKEN,
+    DEFAULT_LENGTH_SOFT_LIMIT,
+)
+
 __all__ = [
     "ARM_REWARDS",
     "ARMS",
@@ -73,11 +80,6 @@ __all__ = [
     "uses_output_judge",
     "uses_process_judge",
 ]
-
-#: Defaults for the code-arm length term. The config loader uses the same names.
-DEFAULT_LENGTH_SOFT_LIMIT = 900
-DEFAULT_LENGTH_PENALTY_PER_TOKEN = 0.001
-DEFAULT_LENGTH_PENALTY_FLOOR = 0.2
 
 #: Fixed code-arm scores for outcomes that are not a test fraction.
 TRUNCATION_REWARD = -1.0
@@ -116,9 +118,6 @@ TIER_EPSILON = 0.001
 #: The error class for code that does not compile. A rollout with no extracted
 #: code is reported this way by the runner, so there is no separate class.
 SYNTAX_ERROR_CLASS = "syntax_error"
-
-#: Arm names in the order used by the CLI and the run folders.
-ARMS: tuple[str, ...] = ("code-score", "hybrid", "gated-judge", "gated-process")
 
 #: Arms whose reward is composed from judge output.
 OUTPUT_JUDGE_ARMS = frozenset({"hybrid", "gated-judge", "gated-process"})

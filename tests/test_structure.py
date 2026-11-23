@@ -47,6 +47,13 @@ def test_the_seam_values_are_not_imported_from_the_training_loop() -> None:
     assert not offenders, "\n".join(offenders)
 
 
+def test_the_config_loader_does_not_reach_into_domains() -> None:
+    """Config is a base module. Its validation must not pull in the domains."""
+    domain = {"reward", "budget", "schedule", "model_profiles", "batching"}
+    reached = sorted(set(_local_imports(SRC / "config.py")) & domain)
+    assert not reached, f"config imports {', '.join(reached)}"
+
+
 def test_the_module_graph_has_no_cycle() -> None:
     sources = _sources()
     graph = {

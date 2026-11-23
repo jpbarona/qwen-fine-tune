@@ -10,7 +10,6 @@ Pure Python, no torch.
 
 from __future__ import annotations
 
-__all__ = ["DEFAULT_THINKING_BUDGET"]
+from .constants import DEFAULT_THINKING_BUDGET
 
-#: Tokens allowed for the reasoning block, the same on every step.
-DEFAULT_THINKING_BUDGET = 1024
+__all__ = ["DEFAULT_THINKING_BUDGET"]

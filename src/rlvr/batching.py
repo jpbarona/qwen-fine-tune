@@ -31,6 +31,8 @@ This module is pure Python and imports no torch.
 
 from __future__ import annotations
 
+from .constants import DEFAULT_MEMORY_FLOOR_MIB
+
 from dataclasses import dataclass, field
 
 from .memory import MemoryReport
@@ -50,10 +52,6 @@ START_PROMPTS = 2
 #: A step always takes at least one prompt.
 MIN_PROMPTS = 1
 
-#: Minimum free memory after a step, in MiB, before the batch grows. The
-#: effective floor is this figure or one group's measured footprint, whichever
-#: is larger.
-DEFAULT_MEMORY_FLOOR_MIB = 512
 
 
 def free_memory_mib(report: MemoryReport) -> float:
