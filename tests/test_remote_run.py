@@ -35,7 +35,11 @@ if [ -n "$gateway" ]; then
   printf '%s\\n' "$gateway"
 fi
 if [ "$launch" = 1 ]; then
-  exit "${FAKE_LAUNCH_STATUS:-0}"
+  status="${FAKE_LAUNCH_STATUS:-0}"
+  if [ "$status" = 0 ]; then
+    printf '%s\\n' "${FAKE_REMOTE_PID:-4321}"
+  fi
+  exit "$status"
 fi
 if [ "$probe" = 1 ]; then
   count=0
@@ -230,10 +234,15 @@ def test_start_remote_run_launches_on_the_box(tmp_path) -> None:
         assert "set +a" in command
         assert "code-score" in command
         assert f"export MLFLOW_TRACKING_URI=http://{GATEWAY}:8081" in command
-        assert "./scripts/docker-run.sh" in command
+        assert "setsid nohup ./scripts/docker-run.sh" in command
+        assert "> ~/run-code-score.log 2>&1 < /dev/null" in command
+        # The launch ssh keeps the link alive while the run is up.
+        assert "ServerAliveInterval=15" in ssh_args(tmp_path)
         # The container is launched on the box, not on this VM.
         assert not (tmp_path / "docker.log").exists()
         assert "run launched" in result.stdout
+        assert "pid 4321" in result.stdout
+        assert "~/run-code-score.log" in result.stdout
     finally:
         stop_tunnel(tmp_path)
 

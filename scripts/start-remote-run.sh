@@ -102,16 +102,27 @@ quoted_args=""
 for arg in "$arm" "$@"; do
   quoted_args="$quoted_args$(printf '%q' "$arg") "
 done
-remote_command="cd ~/rl-grpo && set -a && . ~/.env && set +a && export MLFLOW_TRACKING_URI=$(printf '%q' "$MLFLOW_TRACKING_URI") && ./scripts/docker-run.sh $quoted_args"
+remote_log="~/run-$arm.log"
+# The guard keeps a box with no environment file usable. The `setsid nohup`
+# detaches the container from this ssh session, so ssh returns at once and the
+# next arm can launch. The box sources its own environment file for the bucket
+# keys. The pid on stdout is the detached shell, not the training process.
+remote_command="cd ~/rl-grpo && set -a && . ~/.env && set +a; export MLFLOW_TRACKING_URI=$(printf '%q' "$MLFLOW_TRACKING_URI"); setsid nohup ./scripts/docker-run.sh $quoted_args > $remote_log 2>&1 < /dev/null & echo \$!"
 
-ssh -o BatchMode=yes -o ConnectTimeout=10 -i "$key_path" \
-  "$target" "$remote_command" >"$log_file" 2>&1
+remote_pid="$(ssh -o BatchMode=yes -o ConnectTimeout=10 \
+  -o ServerAliveInterval=15 -i "$key_path" \
+  "$target" "$remote_command" 2>"$log_file")"
 status=$?
 if [ "$status" -ne 0 ]; then
   echo "start-remote-run.sh: the launch on $bare_host failed with status $status" >&2
   echo "start-remote-run.sh: log $log_file" >&2
   exit "$status"
 fi
+if [ -z "$remote_pid" ]; then
+  echo "start-remote-run.sh: the launch on $bare_host returned no pid" >&2
+  echo "start-remote-run.sh: log $log_file" >&2
+  exit 1
+fi
 
-echo "run launched on $bare_host, log $log_file"
+echo "run launched on $bare_host (pid $remote_pid), log $remote_log"
 echo "store: $health"
