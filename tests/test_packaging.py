@@ -82,6 +82,14 @@ def test_service_runs_the_repo_venv() -> None:
     assert "127.0.0.1" in text
 
 
+def test_the_service_and_the_experiment_share_the_artifact_root() -> None:
+    text = (REPO_ROOT / "deploy" / "mlflow.service").read_text(encoding="utf-8")
+    root = "s3://opencodeagent1/mlflow/v1/artifacts"
+    assert f"--artifacts-destination {root}" in text
+    config = load_config(REPO_ROOT / "configs" / "real.toml")
+    assert config.mlflow.artifact_root == root
+
+
 def test_env_example_lists_the_bucket_variables() -> None:
     text = (REPO_ROOT / "deploy" / "mlflow.env.example").read_text(encoding="utf-8")
     for name in (

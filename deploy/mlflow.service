@@ -9,7 +9,7 @@ User=opencode
 Group=opencode
 WorkingDirectory=/home/opencode/Work/rl-grpo
 EnvironmentFile=/home/opencode/.config/mlflow/env
-ExecStart=/home/opencode/Work/rl-grpo/.venv/bin/mlflow server --host 127.0.0.1 --port 8081 --backend-store-uri sqlite:////home/opencode/Work/rl-grpo-data/mlflow/mlflow.db --artifacts-destination s3://opencodeagent1/mlflow/v1 --serve-artifacts --workers 1
+ExecStart=/home/opencode/Work/rl-grpo/.venv/bin/mlflow server --host 127.0.0.1 --port 8081 --backend-store-uri sqlite:////home/opencode/Work/rl-grpo-data/mlflow/mlflow.db --artifacts-destination s3://opencodeagent1/mlflow/v1/artifacts --serve-artifacts --workers 1
 Restart=always
 RestartSec=5
 
