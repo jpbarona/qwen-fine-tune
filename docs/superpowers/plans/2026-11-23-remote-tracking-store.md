@@ -527,6 +527,60 @@ git commit -m "Open the tunnel and launch a run against the remote store"
 
 ---
 
+### Task 10: Wire the bucket credentials and the default config
+
+**Why this exists:** the plan left two design requirements unassigned. Without
+them the live path cannot write a checkpoint or an eval table to the bucket.
+
+**Files:**
+- Modify: `scripts/docker-run.sh`
+- Modify: `configs/real.toml`, `configs/lfm-spread.toml`
+- Test: `tests/test_packaging.py`
+
+**Interfaces:**
+- Consumes: `MlflowSettings.bucket` and `artifact_root` from Task 1, `RunUploader` from Task 4.
+- Produces: the container receives `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `MLFLOW_S3_ENDPOINT_URL` and `AWS_DEFAULT_REGION` from the host shell, and the two box configs set `bucket = "s3://opencodeagent1/runs/v1"` and `artifact_root = "s3://opencodeagent1/mlflow/v1/artifacts"`.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+def test_docker_run_passes_the_bucket_credentials():
+    text = (REPO_ROOT / "scripts" / "docker-run.sh").read_text()
+    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+                 "MLFLOW_S3_ENDPOINT_URL", "AWS_DEFAULT_REGION"):
+        assert f"-e {name}" in text
+
+
+def test_the_box_configs_name_the_bucket():
+    for name in ("real.toml", "lfm-spread.toml"):
+        config = load_config(REPO_ROOT / "configs" / name)
+        assert config.mlflow.bucket == "s3://opencodeagent1/runs/v1"
+        assert config.mlflow.artifact_root == "s3://opencodeagent1/mlflow/v1/artifacts"
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `.venv/bin/pytest tests/test_packaging.py -k "credentials or name_the_bucket" -v`
+Expected: FAIL.
+
+- [ ] **Step 3: Implement**
+
+Add the four `-e` flags to the training `docker run` in `scripts/docker-run.sh`, beside the existing ones. Add the `[mlflow]` table with the two keys to both configs. Do not add a `tracking_uri` to either file, because the tunnel supplies it per box.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `.venv/bin/pytest tests/test_packaging.py tests/test_config.py -v`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/docker-run.sh configs/real.toml configs/lfm-spread.toml tests/test_packaging.py
+git commit -m "Pass the bucket credentials to the container and name the bucket in config"
+```
+
+---
+
 ### Task 9: Document the new path
 
 **Files:**
