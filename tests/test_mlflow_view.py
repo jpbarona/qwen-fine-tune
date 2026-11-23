@@ -20,6 +20,7 @@ os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 from mlflow.tracking import MlflowClient  # noqa: E402
 import pytest  # noqa: E402
 
+from rlvr.cli import main  # noqa: E402
 from rlvr.mlflow_view import (  # noqa: E402
     build_view_state,
     encode_view_state,
@@ -165,3 +166,32 @@ def test_write_view_tag_replaces_the_tag(tmp_path: Path) -> None:
     keys = [key for key in second.tags if key.startswith("mlflow.sharedViewState.")]
     assert keys == ["mlflow.sharedViewState.rlvr-study"]
     assert second.experiment_id == first.experiment_id
+
+
+def test_saved_view_command_writes_the_tag_and_prints_the_route(
+    tmp_path: Path, capsys
+) -> None:
+    runs_root = tmp_path / "runs"
+
+    assert main(["saved-view", "--runs-root", str(runs_root)]) == 0
+
+    out = capsys.readouterr().out
+    experiment = MlflowClient().get_experiment_by_name("rlvr")
+    assert experiment is not None
+    envelope = json.loads(experiment.tags["mlflow.sharedViewState.rlvr-study"])
+    state = json.loads(
+        zlib.decompress(base64.b64decode(envelope["state"].removeprefix("deflate;")))
+    )
+    assert state == build_view_state()
+
+    assert (
+        f"#/experiments/{experiment.experiment_id}/runs"
+        "?viewStateShareKey=rlvr-study&compareRunsMode=CHART"
+    ) in out
+
+    # A second run replaces the tag, so the store keeps one saved view.
+    assert main(["saved-view", "--runs-root", str(runs_root)]) == 0
+    again = MlflowClient().get_experiment_by_name("rlvr")
+    assert again is not None
+    keys = [key for key in again.tags if key.startswith("mlflow.sharedViewState.")]
+    assert keys == ["mlflow.sharedViewState.rlvr-study"]

@@ -1003,3 +1003,23 @@ weights stay in the cache volume. The kernel cache stays in a volume too.
 
 The image stays private. The token lives on the VM, and `docker-setup.sh` logs
 in when `GHCR_TOKEN` is set.
+
+## D46. The study page is a saved MLflow view
+
+Status: implemented 23 November 2026.
+
+The run page puts every metric in one default section, in alphabetical order,
+and the chart layout lives in the browser, keyed by the run id. A second browser
+starts blank, and every new run starts blank. The run page cannot hold the study
+layout, because it has no store for a layout and no way to share one.
+
+Decision: the study page is a saved view on the experiment Chart view.
+`rlvr saved-view` writes the view as an experiment tag on the `rlvr` experiment,
+and the page reads the tag named by the URL. The view has eight sections, with
+mean reward, pass rate and advantage share first in the core section, and fixed
+ranges on those three. A filter keeps the parent runs only, so the GPU child
+adds no noise to the model charts.
+
+The tag is one row, so a store rebuild is one command, and any browser shows the
+same layout. The run page stays for the tables, the artifacts and the GPU child
+run. Metric names, the run folder and the training path do not change.
