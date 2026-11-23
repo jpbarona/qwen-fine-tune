@@ -105,6 +105,46 @@ def test_resume_raises_without_a_run_folder(tmp_path) -> None:
         RunStore.resume(tmp_path / "runs", "code-score")
 
 
+def test_a_resumed_store_routes_writes_to_an_attached_mirror(tmp_path) -> None:
+    root = tmp_path / "runs"
+    RunStore(root, "code-score", timestamp=TIMESTAMP).write_meta({"arm": "code-score"})
+
+    class Recorder:
+        def __init__(self) -> None:
+            self.steps: list[int] = []
+            self.started = 0
+
+        def start(self, meta) -> None:
+            self.started += 1
+
+        def step(self, step) -> None:
+            self.steps.append(step)
+
+        def eval(self, payload) -> None:
+            pass
+
+        def labels(self) -> None:
+            pass
+
+        def gpu_sample(self, row) -> None:
+            pass
+
+        def rebuild(self) -> None:
+            pass
+
+        def close(self, status="FINISHED") -> None:
+            pass
+
+    store = RunStore.resume(root, "code-score")
+    recorder = Recorder()
+    store.attach_mirror(recorder)
+    store.append_metric({"step": 2})
+
+    assert recorder.steps == [2]
+    # A resumed store never writes meta again, so it never starts a new mirror run.
+    assert recorder.started == 0
+
+
 def test_truncate_drops_rollouts_and_metrics_past_a_step(tmp_path) -> None:
     store = RunStore(tmp_path / "runs", "code-score", timestamp=TIMESTAMP)
     for step in (1, 2, 3):

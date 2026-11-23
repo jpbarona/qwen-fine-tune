@@ -74,6 +74,7 @@ from .fake import (
 )
 from .judge import JudgeClient, MissingAPIKeyError
 from .memory import configure_expandable_segments, read_torch_memory
+from .mlflow_log import open_mirror
 from .pools import DEFAULT_PROMOTION_BAR, Pools, PoolsError, from_rows
 from .publish import PublishError, publish_report
 from .reward import (
@@ -696,6 +697,15 @@ def run_command(args: argparse.Namespace) -> int:
         except OSError as error:
             raise UsageError(f"cannot create the run folder: {error}") from error
 
+    # The mirror copies each run write into the MLflow store. A disabled or
+    # broken store hands back a null mirror, so training never depends on it.
+    # On resume the store is attached after the truncation, so the rebuild
+    # replays the kept records.
+    mirror = open_mirror(args.runs_root, store.run_dir, config.mlflow.enabled)
+    store.attach_mirror(mirror)
+    if args.resume:
+        mirror.rebuild()
+
     test_runner = build_test_runner(config, fake=args.fake)
 
     control_path = args.control if args.control is not None else store.run_dir / CONTROL_NAME
@@ -724,7 +734,12 @@ def run_command(args: argparse.Namespace) -> int:
         batch_policy=batch_policy,
         control=control,
     )
-    summary = experiment.run()
+    try:
+        summary = experiment.run()
+    except BaseException:
+        mirror.close(status="FAILED")
+        raise
+    mirror.close()
 
     print(f"arm={summary.arm} steps={summary.steps} rollouts={summary.rollouts}")
     print(

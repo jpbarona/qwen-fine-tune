@@ -54,6 +54,13 @@ Optional keys, with the defaults shown:
     [judge] base_url = (unset: the provider default endpoint)
     [judge] api_key_env = (unset: the provider default variable)
 
+    [mlflow] enabled = true
+    [mlflow] gpu_sample_seconds = 1.0
+
+`[mlflow]` is optional. A missing table means tracking is on with the defaults,
+so a config written before the mirror keeps its old behaviour. `enabled` turns
+the mirror off. `gpu_sample_seconds` is the interval for the GPU sampler.
+
 `eval_subset_seed` chooses the fixed checkpoint subset from the test pool. It is
 deliberately separate from `data.split_seed`, so the eval subset is not tied to
 the train/test cut.
@@ -135,7 +142,13 @@ from .schedule import (
     MIN_SWEEP_GAP_RATIO,
 )
 
-__all__ = ["Config", "ConfigError", "default_config_path", "load_config"]
+__all__ = [
+    "Config",
+    "ConfigError",
+    "MlflowSettings",
+    "default_config_path",
+    "load_config",
+]
 
 #: Resource path of the config used when --config is not given.
 DEFAULT_CONFIG_RESOURCE = "resources/default_config.toml"
@@ -170,12 +183,25 @@ DEFAULT_SEED = 0
 #: Sequence budget for one step, used when a pool schedule is active.
 DEFAULT_ROLLOUTS_PER_STEP = 608
 
+#: Defaults for the optional [mlflow] table. A missing table keeps tracking on,
+#: so a config written before the mirror still copies writes by default.
+DEFAULT_MLFLOW_ENABLED = True
+DEFAULT_GPU_SAMPLE_SECONDS = 1.0
+
 #: Pool policies the code implements.
 POOL_POLICIES: tuple[str, ...] = ("spread", "sweep")
 
 
 class ConfigError(ValueError):
     """The config file is missing, unreadable, or invalid."""
+
+
+@dataclass(frozen=True)
+class MlflowSettings:
+    """The optional [mlflow] table."""
+
+    enabled: bool = DEFAULT_MLFLOW_ENABLED
+    gpu_sample_seconds: float = DEFAULT_GPU_SAMPLE_SECONDS
 
 
 @dataclass(frozen=True)
@@ -220,6 +246,7 @@ class Config:
     rollouts_per_step: int = DEFAULT_ROLLOUTS_PER_STEP
     max_steps: int | None = None
     max_judge_calls: int | None = None
+    mlflow: MlflowSettings = MlflowSettings()
 
 
 def default_config_path() -> Path:
@@ -541,4 +568,13 @@ def load_config(path: str | Path) -> Config:
         ),
         max_steps=_optional_int_none(raw, "budget.max_steps"),
         max_judge_calls=_optional_int_none(raw, "budget.max_judge_calls"),
+        mlflow=MlflowSettings(
+            enabled=_optional_bool(raw, "mlflow.enabled", DEFAULT_MLFLOW_ENABLED),
+            gpu_sample_seconds=_optional_float(
+                raw,
+                "mlflow.gpu_sample_seconds",
+                DEFAULT_GPU_SAMPLE_SECONDS,
+                positive=True,
+            ),
+        ),
     )

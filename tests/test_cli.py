@@ -212,6 +212,7 @@ def test_run_writes_the_four_files(config_path, tmp_path) -> None:
         "eval.json",
         "meta.json",
         "metrics.jsonl",
+        "mlflow.json",
         "rollouts.jsonl",
     ]
     assert (run_dir / "meta.json").read_text(encoding="utf-8").startswith("{")

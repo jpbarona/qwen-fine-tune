@@ -337,6 +337,38 @@ def test_a_config_without_the_fake_table_loads(tmp_path) -> None:
     assert config.steps == 1
 
 
+def test_mlflow_defaults_when_the_table_is_absent(write_config) -> None:
+    config = load_config(write_config(GOOD))
+    assert config.mlflow.enabled is True
+    assert config.mlflow.gpu_sample_seconds == 1.0
+
+
+def test_mlflow_settings_are_read_from_the_table(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        GOOD + "\n[mlflow]\nenabled = false\ngpu_sample_seconds = 0.5\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    assert config.mlflow.enabled is False
+    assert config.mlflow.gpu_sample_seconds == 0.5
+
+
+@pytest.mark.parametrize(
+    "line, key",
+    [
+        ("enabled = 1", "mlflow.enabled"),
+        ("gpu_sample_seconds = 0", "mlflow.gpu_sample_seconds"),
+        ("gpu_sample_seconds = -1", "mlflow.gpu_sample_seconds"),
+    ],
+)
+def test_a_bad_mlflow_setting_is_named(tmp_path, line: str, key: str) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(GOOD + f"\n[mlflow]\n{line}\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match=key):
+        load_config(path)
+
+
 @pytest.mark.parametrize(
     "line, key",
     [
