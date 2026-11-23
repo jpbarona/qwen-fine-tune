@@ -180,10 +180,13 @@ runs/<arm>/<timestamp>/
     labels.jsonl     pool changes, zero-pass counts, saved queues
     eval.json        final pass@1 and every checkpoint evaluation
     control.json     live edits, see below
+    gpu.jsonl        one row per GPU sample, copied to the child run
+    mlflow.json      MLflow run ids and table append counts
     checkpoints/     adapter, optimizer state, manifest
 ```
 
-`<timestamp>` is UTC in the form `YYYYMMDDTHHMMSSZ`.
+`<timestamp>` is UTC in the form `YYYYMMDDTHHMMSSZ`. A store that fails appends
+one line to `mlflow-errors.log` and leaves the run folder intact.
 
 The step rows carry reward, pass rate, completion length, truncation, timings,
 GPU memory, gradient and update norms, pool counts, and the advantage share.
@@ -192,16 +195,33 @@ Copy a run off the box before you destroy it. The folder exists only there.
 
 ## Dashboard
 
+The view is MLflow. `rlvr dashboard` starts the MLflow server on the runs root:
+
 ```bash
 .venv/bin/rlvr dashboard --runs-root runs --port 8081
 ```
 
-It serves `http://127.0.0.1:8081` and refreshes twice per second while the tab is
-visible. It shows pass rate, pass@1, reward, truncation, step time, GPU memory,
-pool composition, group signal, and a questions table.
+It serves `http://127.0.0.1:8081`. The store is `runs/mlflow.db` and the
+artifacts are under `runs/mlartifacts`. The step series, the GPU child run and
+the tables are in the MLflow UI. A run writes its folder into the store as it
+trains. A failed store loses a copy and never stops training.
 
-The page reads process state as well as files. A run whose process is gone turns
-`stopped` after two minutes.
+The tunnel is the same as before:
+
+```bash
+ssh -N -L 100.67.80.52:8083:127.0.0.1:8081 -i ~/.ssh/id_ed25519 Ubuntu@<host>
+```
+
+Then open `http://100.67.80.52:8083/`.
+
+An old run folder is imported once:
+
+```bash
+.venv/bin/rlvr import-mlflow --runs-root runs
+```
+
+A folder with no `gpu.jsonl` imports without error. `--arm <arm>` imports one
+arm only.
 
 ## Analysis
 
@@ -262,8 +282,10 @@ It takes four injected services.
 | `schedule.py` | Spread and sweep policies, promotion and demotion |
 | `reward.py` | Error classes, truncation, length term |
 | `docker_runner.py` | Runs one code sample against its tests |
-| `dashboard.py` | Live page and `data.json` |
-| `cli.py` | `run`, `screen`, `dashboard`, `summary`, `eval-band`, `publish` |
+| `mlflow_log.py` | Writes each run into the local MLflow store |
+| `mlflow_import.py` | Replays old run folders into the store |
+| `runread.py` | Reads run folders into the payload the mirror and summary use |
+| `cli.py` | `run`, `screen`, `dashboard`, `import-mlflow`, `summary`, `eval-band`, `publish` |
 
 The seams are `Generator`, `TestRunner`, `Judge` and `Store`. The fake versions
 in `fake.py` use SHA-256, so a fake run repeats on any machine.
@@ -334,7 +356,6 @@ hash under `judge-cache/`.
 
 ```bash
 .venv/bin/python -m pytest -q
-cd dashboard && npm test
 ```
 
 CPU only, no network, about 40 seconds. Docker tests skip when the image is

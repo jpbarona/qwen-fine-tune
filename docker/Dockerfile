@@ -30,8 +30,8 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 RUN python3.12 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir -e ".[vllm]" \
-    && /opt/venv/bin/pip install --no-cache-dir "pytest>=9,<10"
+    && /opt/venv/bin/pip install --no-cache-dir -e ".[vllm,tracking]" \
+    && /opt/venv/bin/pip install --no-cache-dir "psutil" "nvidia-ml-py" "pytest>=9,<10"
 
 # The optional convolution kernel, built for the study GPU only.
 ARG CUDA_ARCH=8.6

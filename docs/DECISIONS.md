@@ -957,3 +957,23 @@ throughput.
 
 The image is private, so a box needs `GHCR_TOKEN` once. Making the package
 public removes that step.
+
+## D44. The MLflow mirror runs beside training and writes a child run
+
+Status: implemented 23 November 2026.
+
+The run folder stays the record. A mirror copies each write into a local MLflow
+store under the runs root. A failed store loses a copy and never stops training.
+Each run gets a parent run for the step series and a nested child run for the GPU
+samples. The two run ids and the table append counts go to `mlflow.json`, so
+`meta.json` stays immutable. The parent run carries the heartbeat as a metric and
+as a tag on both runs. A resumed run deletes its runs and rebuilds them from the
+local files. A dead run is marked failed by the next run of the same arm.
+
+The dashboard command now starts `mlflow server` on the same runs root and the
+same port. The React page and the web layer are gone. An old run folder is
+imported once with `rlvr import-mlflow`.
+
+Reason: the run folder already held every number the page showed. A local MLflow
+store gives the same series, the tables and the child run without a custom web
+server to maintain.

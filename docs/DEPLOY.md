@@ -74,13 +74,17 @@ completion, and gives up after eight empty replies.
 
 ## Dashboard
 
-The dashboard binds to localhost. Tunnel it from this VM:
+The view is MLflow. It binds to localhost. Tunnel it from this VM:
 
 ```bash
 ssh -N -L 100.67.80.52:8083:127.0.0.1:8081 -i ~/.ssh/id_ed25519 Ubuntu@<host>
 ```
 
 Then open `http://100.67.80.52:8083/`.
+
+The store and artifacts live under the runs root. The image serves the same
+server with `./scripts/docker-run.sh dashboard`. The store starts empty. Import
+an old run folder once with `rlvr import-mlflow --runs-root runs`.
 
 ## Before the box is destroyed
 
