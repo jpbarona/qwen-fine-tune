@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import importlib.util
 import tomllib
 from pathlib import Path
+from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_backup_module() -> ModuleType:
+    path = REPO_ROOT / "deploy" / "backup.py"
+    spec = importlib.util.spec_from_file_location("deploy_backup_under_test", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_the_vllm_extra_pins_the_whole_gpu_stack() -> None:
@@ -54,3 +66,26 @@ def test_no_extra_pins_torch_via_a_range() -> None:
 def test_requires_python_is_3_12_or_newer() -> None:
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert pyproject["project"]["requires-python"] == ">=3.12"
+
+
+def test_service_runs_the_repo_venv() -> None:
+    text = (REPO_ROOT / "deploy" / "mlflow.service").read_text(encoding="utf-8")
+    assert "/home/opencode/Work/rl-grpo/.venv/bin/mlflow" in text
+    assert "--workers 1" in text
+    assert "127.0.0.1" in text
+
+
+def test_env_example_lists_the_bucket_variables() -> None:
+    text = (REPO_ROOT / "deploy" / "mlflow.env.example").read_text(encoding="utf-8")
+    for name in (
+        "MLFLOW_S3_ENDPOINT_URL",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_DEFAULT_REGION",
+    ):
+        assert name in text
+
+
+def test_backup_script_is_importable_and_has_a_main() -> None:
+    module = _load_backup_module()
+    assert callable(module.main)
