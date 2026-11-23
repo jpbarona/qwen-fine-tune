@@ -20,9 +20,10 @@ experiment tag. The tag holds the chart sections, the chart order and each
 chart's y range. The page loads the tag from the URL. Any browser shows the
 same layout with no setup.
 
-The view has six sections. Core holds mean reward, pass rate and advantage
-share, in that order. Quality, optim, speed, data and gpu hold the rest. The
-three core charts have fixed ranges. A filter keeps parent runs only.
+The view has eight sections. Core holds mean reward, pass rate and advantage
+share, in that order. Quality, optim, speed, data and gpu hold the model
+metrics. Band and stage keep their own sections. The three core charts have
+fixed ranges. A filter keeps parent runs only.
 
 A CLI command writes the tag from code, so the layout is reproducible and
 survives a store rebuild.
@@ -79,8 +80,22 @@ survives a store rebuild.
 - Charts use the MLflow line card shape with `type: "LINE"`, `uuid`,
   `metricSectionId`, `metricKey`, `selectedMetricKeys`, `displayName`,
   `xAxisKey: "step"`, `yAxisKey: "metric"` and `range`.
-- Section order is core, quality, optim, speed, data, gpu. Card order inside
-  core is mean reward, pass rate, advantage share.
+- Section order is core, quality, optim, speed, data, gpu, band, stage. Card
+  order inside core is mean reward, pass rate, advantage share.
+- Section membership is exact:
+  - core: mean_reward, pass_rate, advantage_share.
+  - quality: pass_at_1/checkpoint, pass_at_1/final, mean_entropy,
+    truncation_rate, group_spread, group_sd.
+  - optim: grad_norm, update_norm.
+  - speed: step_seconds, generation_seconds, scoring_seconds,
+    scoring_wait_seconds, update_seconds, completion_tokens_per_second,
+    sequences_per_second.
+  - data: prompts, train_prompts, parked_prompts, sequences, cache_hits,
+    mean_completion_tokens.
+  - gpu: the five memory series.
+  - band: one pass rate card per band.
+  - stage: one solved card and one total card per band.
+- The heartbeat metric stays on the run page and is not in the view.
 - Fixed ranges only on core. Mean reward is -1 to 1. Pass rate and advantage
   share are 0 to 1. Every other chart keeps the auto range.
 - The search filter is ``tags.`rlvr/run_dir` != ''``. The parent run carries
