@@ -84,4 +84,7 @@ if [ -z "${CXX:-}" ]; then
   export CXX=g++
 fi
 
-exec "$rlvr_venv/bin/rlvr" run --arm "$arm" "$@"
+# Call the module, not the console script. The image's console script was
+# generated at build time and still names the pre-refactor import path. The
+# module path follows the mounted source, so a code move cannot break the run.
+exec "$rlvr_venv/bin/python" -m rlvr.app.cli run --arm "$arm" "$@"
