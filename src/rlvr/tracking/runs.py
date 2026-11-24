@@ -350,6 +350,10 @@ class RunStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, path)
+            # mkstemp creates 0600. The run folder is read by the host user
+            # after the container writes it as root, so the file must be
+            # readable outside the container.
+            os.chmod(path, 0o644)
         except BaseException:
             try:
                 os.unlink(temporary)

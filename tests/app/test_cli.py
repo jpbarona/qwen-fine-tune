@@ -1673,30 +1673,101 @@ def test_a_run_tags_the_checkpoints_uri_before_training_ends(
     ]
 
 
-def test_a_broken_uploader_does_not_stop_the_run(tmp_path, monkeypatch) -> None:
+class UntouchedExperiment(QuietExperiment):
+    """Raises when training starts, so a startup stop can be proven."""
+
+    def run(self):
+        raise AssertionError("training started without a working uploader")
+
+
+def test_a_broken_uploader_stops_the_run_before_training(
+    tmp_path, monkeypatch, capsys
+) -> None:
     class BrokenUploader(StubUploader):
         def __init__(self, *args, **kwargs) -> None:
             raise RuntimeError("no boto3 here")
 
     monkeypatch.setattr("rlvr.app.cli.RunUploader", BrokenUploader)
+    monkeypatch.setattr("rlvr.app.cli.Experiment", UntouchedExperiment)
     config_path = write_bucket_config(tmp_path)
     runs_root = tmp_path / "runs"
 
-    args = Namespace(
-        arm="code-score",
-        config=config_path,
-        fake=True,
-        runs_root=runs_root,
-        resume=False,
-        control=None,
+    code = main(
+        [
+            "run",
+            "--arm",
+            "code-score",
+            "--fake",
+            "--config",
+            str(config_path),
+            "--runs-root",
+            str(runs_root),
+        ]
     )
-    assert run_command(args) == 0
-    assert (runs_root / "code-score").is_dir()
-    # The prefix comes from the config, so it is tagged even with no uploader.
-    parents, _ = parents_and_children()
-    assert parents[0].data.tags["rlvr/checkpoints_uri"].startswith(
-        "s3://bucket/runs/v1/code-score/"
+
+    assert code == 2
+    message = capsys.readouterr().err
+    assert "s3://bucket/runs/v1" in message
+    assert "no boto3 here" in message
+    assert "stopped before training" in message
+
+
+def test_a_missing_boto3_stops_the_run_when_a_bucket_is_set(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    def missing_client():
+        raise ModuleNotFoundError("No module named 'boto3'")
+
+    monkeypatch.setattr("rlvr.tracking.upload._default_client", missing_client)
+    monkeypatch.setattr("rlvr.app.cli.Experiment", UntouchedExperiment)
+    config_path = write_bucket_config(tmp_path)
+    runs_root = tmp_path / "runs"
+
+    code = main(
+        [
+            "run",
+            "--arm",
+            "code-score",
+            "--fake",
+            "--config",
+            str(config_path),
+            "--runs-root",
+            str(runs_root),
+        ]
     )
+
+    assert code == 2
+    message = capsys.readouterr().err
+    assert "No module named 'boto3'" in message
+    assert "tracking extra" in message
+
+
+def test_an_uploader_that_never_started_stops_the_run(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    class NeverStartedUploader(StubUploader):
+        started = False
+
+    monkeypatch.setattr("rlvr.app.cli.RunUploader", NeverStartedUploader)
+    monkeypatch.setattr("rlvr.app.cli.Experiment", UntouchedExperiment)
+    config_path = write_bucket_config(tmp_path)
+    runs_root = tmp_path / "runs"
+
+    code = main(
+        [
+            "run",
+            "--arm",
+            "code-score",
+            "--fake",
+            "--config",
+            str(config_path),
+            "--runs-root",
+            str(runs_root),
+        ]
+    )
+
+    assert code == 2
+    assert "stopped before training" in capsys.readouterr().err
 
 
 def test_a_close_that_raises_does_not_stop_the_run(tmp_path, monkeypatch) -> None:

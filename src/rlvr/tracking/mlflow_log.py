@@ -354,6 +354,9 @@ def _write_atomic(path: Path, text: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
+        # mkstemp creates 0600. The host user reads these files after the
+        # container writes them as root, so keep them readable.
+        os.chmod(path, 0o644)
     except BaseException:
         try:
             os.unlink(temporary)

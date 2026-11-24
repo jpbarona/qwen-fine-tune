@@ -93,8 +93,17 @@ def _default_client() -> Any:
     Imported here so a caller that injects a stub never needs boto3 installed.
     """
     import boto3
+    from botocore.config import Config
 
-    options: dict[str, str] = {}
+    options: dict[str, Any] = {
+        # A stalled bucket request must not hold the run open. Without these,
+        # boto3 waits on the socket and the uploader close never returns.
+        "config": Config(
+            connect_timeout=5,
+            read_timeout=20,
+            retries={"max_attempts": 2, "mode": "standard"},
+        )
+    }
     endpoint = os.environ.get("MLFLOW_S3_ENDPOINT_URL") or os.environ.get(
         "AWS_ENDPOINT_URL"
     )
@@ -159,6 +168,10 @@ class RunUploader:
         self._workers: list[threading.Thread] = []
         self._thread: threading.Thread | None = None
         self._closed = False
+        #: True only when the scan and worker threads are all running. The
+        #: caller checks this at startup, because a run that names a bucket
+        #: must not train without a working uploader.
+        self.started = False
 
     def start(self) -> None:
         """Start the background scan. Safe to call more than once."""
@@ -179,6 +192,8 @@ class RunUploader:
             self._thread.start()
         except Exception as error:
             self._record(f"start: {error}")
+            return
+        self.started = True
 
     def wait_for_idle(self, timeout: float = 10.0) -> None:
         """Wait until the first scan and every queued file has finished."""

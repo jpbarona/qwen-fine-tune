@@ -177,3 +177,8 @@ Format: each line names a problem and its fix in one short chunk, joined by an a
 159. SPEC, PLAN and SMOKE are deleted as superseded history
 160. README test duration is corrected to five minutes
 161. A test checks every relative Markdown link resolves
+162. A stale image console script still named the old module path
+163. run.sh starts the package module, so a code-only pull runs
+164. run.sh pins CC=gcc, because the image missed the triton patch
+165. A named bucket with no boto3 stops the run before training
+166. The container writes no bytecode into the mounted repository

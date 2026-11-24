@@ -138,21 +138,42 @@ def docker_run_records(tmp_path: Path) -> list[list[str]]:
     ]
 
 
-def test_docker_run_passes_the_bucket_credentials(tmp_path: Path) -> None:
-    records = docker_run_records(tmp_path)
-    run = next(record for record in records if record[:1] == ["run"])
-    forwarded = {
+def forwarded_environment(run: list[str]) -> set[str]:
+    return {
         run[index + 1]
         for index, argument in enumerate(run)
         if argument == "-e" and index + 1 < len(run)
     }
+
+
+def test_docker_run_passes_the_bucket_credentials(tmp_path: Path) -> None:
+    records = docker_run_records(tmp_path)
+    run = next(record for record in records if record[:1] == ["run"])
     assert {
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
         "MLFLOW_S3_ENDPOINT_URL",
         "AWS_DEFAULT_REGION",
         "MLFLOW_TRACKING_URI",
-    } <= forwarded
+    } <= forwarded_environment(run)
+
+
+def test_docker_run_writes_no_bytecode_into_the_repository(tmp_path: Path) -> None:
+    records = docker_run_records(tmp_path)
+    run = next(record for record in records if record[:1] == ["run"])
+    assert "PYTHONDONTWRITEBYTECODE=1" in forwarded_environment(run)
+
+
+def test_the_run_launcher_uses_the_package_module_not_the_console_script() -> None:
+    text = (REPO_ROOT / "run.sh").read_text(encoding="utf-8")
+    assert '-m rlvr run --arm "$arm"' in text
+    assert '/bin/rlvr" run' not in text
+
+
+def test_the_run_launcher_sets_a_c_compiler_for_the_triton_driver() -> None:
+    text = (REPO_ROOT / "run.sh").read_text(encoding="utf-8")
+    assert "export CC=gcc" in text
+    assert "export CXX=g++" in text
 
 
 def test_the_box_configs_name_the_bucket() -> None:

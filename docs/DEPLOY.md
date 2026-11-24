@@ -22,17 +22,17 @@ ssh-keygen -f ~/.ssh/known_hosts -R <host>
 ## First boot
 
 ```bash
-scp -i ~/.ssh/id_ed25519 -r docker scripts configs \
-  Ubuntu@<host>:~/rl-grpo/
+./scripts/sync-to-box.sh <host>
 ssh -i ~/.ssh/id_ed25519 Ubuntu@<host>
 cd ~/rl-grpo
 GHCR_TOKEN=... ./scripts/docker-setup.sh
 ```
 
 The box does not clone the repository. It is private and the box has no key, so
-copy the tree from this VM. `scp` and `rsync` both work.
+`sync-to-box.sh` copies the tree, its git history and `screens/` from this VM.
+The script refuses a worktree, because a worktree `.git` points at this VM.
 
-The screen file is not in git either. Restore it once:
+The screen file is not in git either. Restore it locally once:
 
 ```bash
 rclone copy hetzner-dumps:opencodeagent1/dumps/screens/2026-11-21-lfm-base \
