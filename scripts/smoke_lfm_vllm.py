@@ -217,6 +217,8 @@ def main() -> int:
         gpu_memory_utilisation=utilisation,
         max_model_len=args.max_model_len,
         max_lora_rank=args.rank,
+        # The script samples greedily, but the engine requires the run seed.
+        seed=1,
         max_num_seqs=1,
         enforce_eager=True,
     )
