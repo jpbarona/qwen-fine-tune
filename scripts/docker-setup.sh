@@ -29,6 +29,8 @@ image="${RLVR_IMAGE:-ghcr.io/jpbarona/rlvr:latest}"
 registry="${image%%/*}"
 test_image="python:3.12-slim"
 toolkit_url="https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list"
+gpgkey_url="https://nvidia.github.io/libnvidia-container/gpgkey"
+keyring="/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
 
 die() {
   printf 'docker-setup.sh: %s\n' "$*" >&2
@@ -309,14 +311,28 @@ fi
 
 if [ "$toolkit_installed" -eq 0 ]; then
   if [ "$root_ok" -eq 0 ]; then
-    die "the NVIDIA container toolkit is missing and this shell has no root access. run:"$'\n'"  curl -fsSL -o /tmp/nvidia-ctk.list $toolkit_url"$'\n'"  sudo cp /tmp/nvidia-ctk.list /etc/apt/sources.list.d/nvidia-container-toolkit.list"$'\n'"  sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit"$'\n'"  sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"$'\n'"then rerun this script"
+    die "the NVIDIA container toolkit is missing and this shell has no root access. run:"$'\n'"  curl -fsSL -o /tmp/nvidia-ctk.key $gpgkey_url"$'\n'"  sudo gpg --dearmor --yes -o $keyring /tmp/nvidia-ctk.key"$'\n'"  curl -fsSL -o /tmp/nvidia-ctk.list $toolkit_url"$'\n'"  sed 's#deb https://#deb [signed-by=$keyring] https://#g' /tmp/nvidia-ctk.list | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list"$'\n'"  sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit"$'\n'"  sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"$'\n'"then rerun this script"
   fi
   echo "installing the NVIDIA container toolkit"
+  if ! command -v gpg >/dev/null 2>&1; then
+    die "gpg is missing, so the toolkit signing key cannot be installed. run: sudo apt-get install -y gnupg"
+  fi
+  if ! curl -fsSL -o /tmp/nvidia-ctk.key "$gpgkey_url"; then
+    die "could not download $gpgkey_url. check the network, then run: curl -fsSL -o /tmp/nvidia-ctk.key $gpgkey_url"
+  fi
+  if ! as_root mkdir -p /usr/share/keyrings ||
+    ! as_root gpg --dearmor --yes -o "$keyring" /tmp/nvidia-ctk.key; then
+    die "could not install the toolkit signing key. run: sudo gpg --dearmor --yes -o $keyring /tmp/nvidia-ctk.key"
+  fi
   if ! curl -fsSL -o /tmp/nvidia-ctk.list "$toolkit_url"; then
     die "could not download $toolkit_url. check the network, then run: curl -fsSL -o /tmp/nvidia-ctk.list $toolkit_url"
   fi
-  if ! as_root cp /tmp/nvidia-ctk.list /etc/apt/sources.list.d/nvidia-container-toolkit.list; then
-    die "could not write the toolkit apt source. run: sudo cp /tmp/nvidia-ctk.list /etc/apt/sources.list.d/nvidia-container-toolkit.list"
+  if ! sed "s#deb https://#deb [signed-by=$keyring] https://#g" \
+    /tmp/nvidia-ctk.list > /tmp/nvidia-ctk.signed.list; then
+    die "could not add the signing key path to $toolkit_url. run: sed 's#deb https://#deb [signed-by=$keyring] https://#g' /tmp/nvidia-ctk.list"
+  fi
+  if ! as_root cp /tmp/nvidia-ctk.signed.list /etc/apt/sources.list.d/nvidia-container-toolkit.list; then
+    die "could not write the toolkit apt source. run: sudo cp /tmp/nvidia-ctk.signed.list /etc/apt/sources.list.d/nvidia-container-toolkit.list"
   fi
   if ! as_root apt-get update -qq; then
     die "apt-get update failed after the toolkit source was added. run: sudo apt-get update"
