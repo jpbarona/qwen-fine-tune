@@ -66,10 +66,16 @@ For a run that writes to the store on this VM, use
 `./scripts/start-remote-run.sh` instead. The Dashboard section covers it.
 
 `docker-setup.sh` installs Docker and the NVIDIA container runtime when missing,
-logs in when `GHCR_TOKEN` is set, then pulls the image and the small Python image
-the test runner uses. A new box reaches the first step in about ten minutes:
-three for the pull, one for the model, and the rest is the first vLLM kernel
-compile. Pull, never build, on a run box.
+adds the caller to the docker group when the caller is missing from it, logs in
+when `GHCR_TOKEN` is set, then pulls the image and the small Python image the
+test runner uses. The current SSH session keeps its old groups, so the script
+runs the pull through `sg docker` and prints the new session step. A new box
+reaches the first step in about ten minutes: three for the pull, one for the
+model, and the rest is the first vLLM kernel compile. Pull, never build, on a
+run box.
+
+When the caller has no root and no docker access, the script stops before the
+pull and prints the `usermod`, `newgrp` and rerun commands.
 
 `docker-run.sh` starts the container with:
 
