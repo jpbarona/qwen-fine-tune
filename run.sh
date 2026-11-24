@@ -75,13 +75,18 @@ if [ -n "${CUDA_HOME:-}" ]; then
   esac
 fi
 
-# torch passes CC to nvcc as the host compiler. A plain gcc whose major version
-# has no g++ partner cannot compile C++, so name g++ directly.
+# triton compiles its C driver with whatever CC names. g++ rejects the CUDA 13
+# headers, so CC must be a C compiler and gcc is the one the image carries. A
+# site-packages patch made the same choice at build time, and a stale image can
+# miss it, so the setting lives here and a code-only pull still starts.
 if [ -z "${CC:-}" ]; then
-  export CC=g++
+  export CC=gcc
 fi
 if [ -z "${CXX:-}" ]; then
   export CXX=g++
 fi
 
-exec "$rlvr_venv/bin/rlvr" run --arm "$arm" "$@"
+# Call the module, not the console script. The image's console script was
+# generated at build time and still names the pre-refactor import path. The
+# module path follows the mounted source, so a code move cannot break the run.
+exec "$rlvr_venv/bin/python" -m rlvr run --arm "$arm" "$@"

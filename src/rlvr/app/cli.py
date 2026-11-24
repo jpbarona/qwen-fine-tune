@@ -42,7 +42,9 @@ The store is the one `--config` names, else `MLFLOW_TRACKING_URI`, else the
 local `mlflow.db` under the runs root.
 
 A run with `[mlflow] bucket` set starts the uploader beside training, tags the
-run with `rlvr/checkpoints_uri`, and never stops training for an upload fault.
+run with `rlvr/checkpoints_uri`, and keeps going when an upload fails. A bucket
+the uploader cannot start for stops the run before training, because the
+checkpoints would otherwise be lost in silence.
 
 `saved-view` writes the study saved view to the `rlvr` experiment and prints the
 hash route that opens it. A second call replaces the same tag.
@@ -711,6 +713,19 @@ def start_gpu_sampler(sampler: GpuSampler) -> GpuSampler | None:
     return sampler
 
 
+def _uploader_start_error(
+    destination: str, detail: BaseException | None = None
+) -> UsageError:
+    """The error for a bucket that the uploader cannot start for."""
+    reason = f": {detail}" if detail is not None else ""
+    return UsageError(
+        f"cannot start the checkpoint uploader for {destination!r}{reason}. "
+        "Training would run without copying checkpoints to the bucket, so the "
+        "run stopped before training. Install the tracking extra so boto3 is "
+        "present, or fix the bucket settings, or unset [mlflow] bucket."
+    )
+
+
 def run_command(args: argparse.Namespace) -> int:
     # PyTorch reads PYTORCH_CUDA_ALLOC_CONF once, at allocator startup, so set
     # it before anything can import torch. A value the user already set wins.
@@ -862,9 +877,11 @@ def run_command(args: argparse.Namespace) -> int:
 
     # The uploader copies checkpoints and the run folder to the bucket beside
     # training. It starts here, one line above the try, so every exit from the
-    # run reaches its close. A missing boto3, a bad destination or a dead
-    # network leaves the run folder intact and the run keeps going, so a failed
-    # start is a line on stderr and no uploader.
+    # run reaches its close. A dead network during the run still leaves the run
+    # folder intact and the run keeps going, because the uploader retries and
+    # records the fault. A bad destination or a missing boto3 is different: the
+    # bucket would never receive a checkpoint, so the run must stop before the
+    # first training step instead of losing the checkpoints in silence.
     uploader: RunUploader | None = None
     if config.mlflow.bucket:
         try:
@@ -876,9 +893,10 @@ def run_command(args: argparse.Namespace) -> int:
                 concurrency=config.mlflow.upload_concurrency,
             )
             uploader.start()
-        except Exception as error:  # noqa: BLE001 - the uploader must not stop training
-            print(f"uploader did not start: {error}", file=sys.stderr)
-            uploader = None
+        except Exception as error:  # noqa: BLE001 - report it as a usage error
+            raise _uploader_start_error(config.mlflow.bucket, error) from error
+        if not getattr(uploader, "started", True):
+            raise _uploader_start_error(config.mlflow.bucket)
 
     failed = False
     try:

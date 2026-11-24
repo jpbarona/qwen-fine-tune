@@ -159,6 +159,10 @@ class RunUploader:
         self._workers: list[threading.Thread] = []
         self._thread: threading.Thread | None = None
         self._closed = False
+        #: True only when the scan and worker threads are all running. The
+        #: caller checks this at startup, because a run that names a bucket
+        #: must not train without a working uploader.
+        self.started = False
 
     def start(self) -> None:
         """Start the background scan. Safe to call more than once."""
@@ -179,6 +183,8 @@ class RunUploader:
             self._thread.start()
         except Exception as error:
             self._record(f"start: {error}")
+            return
+        self.started = True
 
     def wait_for_idle(self, timeout: float = 10.0) -> None:
         """Wait until the first scan and every queued file has finished."""

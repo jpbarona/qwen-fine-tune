@@ -112,8 +112,9 @@ screen. It fails with the exact fix command. The install uses the `vllm` and
 `./setup.sh --check` reports without changing anything. `./setup.sh --fast`
 skips the optional convolution kernel.
 
-`run.sh` exports `CUDA_HOME` and `CC` for every run, so the kernels build without
-a manual export.
+`run.sh` exports `CUDA_HOME`, `CC=gcc` and `CXX=g++` for every run, so the
+kernels build without a manual export. It starts `python -m rlvr`, so a stale
+console script in an old image cannot break a run.
 
 ## Setup cost
 
@@ -252,7 +253,10 @@ A run with `[mlflow] bucket` set copies its checkpoints and run folder to
 `s3://opencodeagent1/runs/v1/<arm>/<started>/` while it trains. The uploader
 reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `MLFLOW_S3_ENDPOINT_URL`
 from the box environment, so keep them in `$HOME/.env`. The key is scoped to the
-`runs/` prefix.
+`runs/` prefix. If the uploader cannot start, for example when boto3 is missing
+from the image, the run stops before training and prints the bucket and the
+reason. A bucket the config names must receive the checkpoints, or the run must
+not happen.
 
 After a dropped link, replay one run folder into the store:
 

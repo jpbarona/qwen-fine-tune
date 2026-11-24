@@ -56,6 +56,9 @@ fi
 runner_tmp="$repo_root/.runner-tmp"
 mkdir -p "$runner_tmp"
 
+# The container runs as root and imports the repository from the mount. Python
+# would write root-owned __pycache__ folders into that mount and a later rsync
+# by the host user would fail. No bytecode is written for this process tree.
 exec docker run --rm --gpus all --ipc=host \
   -v "$repo_root":/app \
   -v "$repo_root":"$repo_root" \
@@ -64,6 +67,7 @@ exec docker run --rm --gpus all --ipc=host \
   -e RLVR_VENV=/opt/venv \
   -e RLVR_IMAGE_REF="$image_ref" \
   -e TMPDIR="$runner_tmp" \
+  -e PYTHONDONTWRITEBYTECODE=1 \
   -e OPENROUTER_API_KEY \
   -e OPENCODE_GO_API_KEY \
   -e MLFLOW_TRACKING_URI \

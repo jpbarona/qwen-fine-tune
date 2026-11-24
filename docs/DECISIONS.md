@@ -1142,3 +1142,30 @@ reports stay as reports and say so at the top. `SPEC.md`, `PLAN.md` and
 
 A test resolves every relative Markdown link in the shared docs, so a deleted
 file cannot leave a pointer behind.
+
+## D54. A code-only change starts the run, and a named bucket must be live
+
+Status: implemented 24 November 2026.
+
+A fresh GPU box pulled `ghcr.io/jpbarona/rlvr:latest` at digest
+`sha256:ed97f3ea87e269f3fe615de4bbcce68a311c261268d6c0a910f627f771f94ba5` and hit
+three faults that the mounted source could fix. The image console script still
+imported the pre-refactor module path. The pulled image missed the
+`triton/runtime/build.py` patch, so triton compiled its C driver with g++ and the
+CUDA 13 headers failed. The run then printed `uploader did not start: No module
+named 'boto3'` and trained, so the bucket named in the config received no
+checkpoints. The container also left root-owned `__pycache__` folders in the
+mount, and a later rsync by the host user failed.
+
+Decision: the runtime carries every one of those fixes, so a code-only pull does
+not need an image rebuild. `run.sh` calls `python -m rlvr` instead of the console
+script, which follows the mounted source. `run.sh` exports `CC=gcc` and
+`CXX=g++`, so triton's C driver uses a C compiler whatever the image contains,
+and the Dockerfile keeps the same pin for a fresh build. `scripts/docker-run.sh`
+passes `PYTHONDONTWRITEBYTECODE=1` and the Dockerfile sets it as well.
+
+The uploader start is now fatal, which narrows D49. When `[mlflow] bucket` is
+set and the uploader cannot start, the run exits with code 2 before the first
+training step and prints the bucket and the reason. An upload that fails during
+a run still retries, records the fault and does not stop training. The training
+loop, reward and config keys do not change.
