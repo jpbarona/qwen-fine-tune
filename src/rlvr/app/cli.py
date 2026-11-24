@@ -65,6 +65,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping, Sequence
 
+from rlvr.app.stop import StopRequest, mirror_status, stop_on_signals
 from rlvr.core.batching import START_PROMPTS, BatchSizePolicy
 from rlvr.core.config import (
     Config,
@@ -898,9 +899,17 @@ def run_command(args: argparse.Namespace) -> int:
         if not getattr(uploader, "started", True):
             raise _uploader_start_error(config.mlflow.bucket)
 
+    stopped = False
     failed = False
+    exit_code = 0
+    summary = None
     try:
-        summary = experiment.run()
+        with stop_on_signals():
+            summary = experiment.run()
+    except StopRequest as stop:
+        stopped = True
+        exit_code = stop.exit_code
+        print(f"rlvr: {stop.name} received, stopping after upload", file=sys.stderr)
     except BaseException:
         failed = True
         raise
@@ -916,7 +925,10 @@ def run_command(args: argparse.Namespace) -> int:
                 )
             except Exception as error:  # noqa: BLE001 - the uploader must not stop training
                 print(f"uploader did not stop cleanly: {error}", file=sys.stderr)
-        mirror.close(status="FAILED" if failed else "FINISHED")
+        mirror.close(status=mirror_status(stopped=stopped, failed=failed))
+
+    if stopped:
+        return exit_code
 
     print(f"arm={summary.arm} steps={summary.steps} rollouts={summary.rollouts}")
     print(

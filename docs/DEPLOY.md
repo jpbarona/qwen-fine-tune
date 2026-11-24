@@ -75,6 +75,20 @@ completion, and gives up after eight empty replies.
 A run that should write to the store on this VM goes through
 `./scripts/start-remote-run.sh` instead. The Dashboard section covers it.
 
+## Stopping a run
+
+`docker stop` sends SIGTERM. The run then closes the uploader, which scans the
+run folder once more and copies the rest to the bucket, and marks its MLflow
+runs KILLED. The scan needs time, so give the container 120 seconds:
+
+```bash
+docker stop -t 120 <container>
+```
+
+Find the container id with `docker ps`. The Docker default gives 10 seconds and
+then sends SIGKILL, which skips the final scan and leaves the MLflow runs
+RUNNING.
+
 ## Dashboard
 
 The store lives on this VM, not on the box. One MLflow server serves every box,
