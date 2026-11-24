@@ -93,8 +93,17 @@ def _default_client() -> Any:
     Imported here so a caller that injects a stub never needs boto3 installed.
     """
     import boto3
+    from botocore.config import Config
 
-    options: dict[str, str] = {}
+    options: dict[str, Any] = {
+        # A stalled bucket request must not hold the run open. Without these,
+        # boto3 waits on the socket and the uploader close never returns.
+        "config": Config(
+            connect_timeout=5,
+            read_timeout=20,
+            retries={"max_attempts": 2, "mode": "standard"},
+        )
+    }
     endpoint = os.environ.get("MLFLOW_S3_ENDPOINT_URL") or os.environ.get(
         "AWS_ENDPOINT_URL"
     )
