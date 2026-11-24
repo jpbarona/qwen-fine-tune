@@ -665,6 +665,7 @@ def build_generator(config: Config, *, fake: bool, trainable: bool = True):
             gpu_memory_utilisation=VLLM_GPU_MEMORY_UTILISATION,
             max_model_len=config.max_prompt_tokens + config.max_completion_tokens,
             max_lora_rank=config.lora_rank,
+            seed=config.seed,
         )
     except ImportError as error:
         raise UsageError(

@@ -217,6 +217,7 @@ def main() -> int:
         gpu_memory_utilisation=utilisation,
         max_model_len=args.max_model_len,
         max_lora_rank=args.rank,
+        seed=1,
         max_num_seqs=1,
         enforce_eager=True,
     )
