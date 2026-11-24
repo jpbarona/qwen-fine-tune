@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import importlib
 import os
+import signal
 import subprocess
 import sys
 from argparse import Namespace
@@ -22,6 +23,7 @@ from rlvr.app.cli import (
     sync_mlflow_command,
     sync_mlflow_settings,
 )
+from rlvr.app.stop import StopRequest
 from rlvr.core.config import load_config
 from rlvr.evaluation.data import load_split, prompt_id_for
 from rlvr.evaluation.fake import FakeJudge
@@ -1582,6 +1584,25 @@ class FailingExperiment:
         raise RuntimeError("training died")
 
 
+class StoppedExperiment:
+    """A stand-in experiment that reports a SIGTERM stop."""
+
+    def __init__(self, **kwargs) -> None:
+        pass
+
+    def run(self):
+        raise StopRequest(signal.SIGTERM)
+
+
+class RecordingMirror(NullMirror):
+    """A mirror that records the status its close receives."""
+
+    statuses: list[str] = []
+
+    def close(self, status: str = "FINISHED") -> None:
+        RecordingMirror.statuses.append(status)
+
+
 def write_bucket_config(tmp_path: Path) -> Path:
     path = tmp_path / "bucket.toml"
     path.write_text(CONFIG + '\n[mlflow]\nbucket = "s3://bucket/runs/v1"\n', encoding="utf-8")
@@ -1790,3 +1811,22 @@ def test_the_uploader_closes_when_the_run_raises(tmp_path, monkeypatch) -> None:
         run_command(args)
 
     assert [call[0] for call in StubUploader.calls] == ["init", "start", "close"]
+
+
+def test_a_sigterm_stop_closes_the_uploader_and_marks_the_run_killed(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    StubUploader.calls = []
+    RecordingMirror.statuses = []
+    monkeypatch.setattr("rlvr.app.cli.RunUploader", StubUploader)
+    monkeypatch.setattr("rlvr.app.cli.Experiment", StoppedExperiment)
+    monkeypatch.setattr(
+        "rlvr.app.cli.open_mirror", lambda *args, **kwargs: RecordingMirror()
+    )
+    args = run_args(tmp_path, write_bucket_config(tmp_path))
+
+    assert run_command(args) == 143
+
+    assert [call[0] for call in StubUploader.calls] == ["init", "start", "close"]
+    assert RecordingMirror.statuses == ["KILLED"]
+    assert "SIGTERM" in capsys.readouterr().err
