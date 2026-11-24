@@ -51,8 +51,7 @@ hash route that opens it. A second call replaces the same tag.
 
 Exit codes: 0 success, 2 for a bad command line, unknown or unimplemented arm,
 bad config, a missing judge key, a bad run folder, a bad question set, or a
-failed publish. A run stopped by SIGTERM returns 143 and one stopped by SIGINT
-returns 130. Messages for those cases go to stderr without a traceback.
+failed publish. Messages for those cases go to stderr without a traceback.
 """
 
 from __future__ import annotations
@@ -900,11 +899,6 @@ def run_command(args: argparse.Namespace) -> int:
         if not getattr(uploader, "started", True):
             raise _uploader_start_error(config.mlflow.bucket)
 
-    # SIGTERM from `docker stop` and Ctrl-C both ask for a clean stop. The
-    # handler covers the training call only. When it raises, the block ends,
-    # the handler goes back to the default action, and the next signal kills at
-    # once. The shutdown path below still runs, so the uploader scans the run
-    # folder once more and the mirror ends the MLflow runs.
     stopped = False
     failed = False
     exit_code = 0

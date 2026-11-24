@@ -1585,8 +1585,6 @@ class FailingExperiment:
 
 
 class StoppedExperiment:
-    """A stand-in experiment that reports a SIGTERM stop."""
-
     def __init__(self, **kwargs) -> None:
         pass
 
@@ -1595,8 +1593,6 @@ class StoppedExperiment:
 
 
 class RecordingMirror(NullMirror):
-    """A mirror that records the status its close receives."""
-
     statuses: list[str] = []
 
     def close(self, status: str = "FINISHED") -> None:

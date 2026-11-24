@@ -1,5 +1,3 @@
-"""Tests for the stop signal handler."""
-
 from __future__ import annotations
 
 import signal
