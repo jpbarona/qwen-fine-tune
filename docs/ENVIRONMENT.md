@@ -39,13 +39,20 @@ Never print a token or copy one into a tracked file.
 
 ## MLflow
 
-- Server: `127.0.0.1:8081`, one worker, SQLite store.
+- Server: `100.67.80.52:8081` on the tailnet, one worker, SQLite store. The
+  server binds the tailnet address only, not loopback.
+- CORS: `--cors-allowed-origins http://100.67.80.52:8081`. Without it the page
+  loads but every POST returns 403 and the runs table shows `INTERNAL_ERROR`.
 - Store: `/home/opencode/Work/rl-grpo-data/mlflow/mlflow.db`.
 - Artifacts: `s3://opencodeagent1/mlflow/v1/artifacts`, through the artifact
   proxy. Tested end to end on 23 November 2026.
 - Log: `/home/opencode/Work/rl-grpo-data/mlflow/mlflow.log`.
-- Supervision: a tmux session named `mlflow` restarts the server five seconds
-  after any exit, because systemd cannot be used here.
+- Supervision: `deploy/mlflow-serve.sh` in a tmux session named `mlflow`. It
+  restarts the server five seconds after any exit, because systemd cannot be
+  used here.
+- Saved view: after a new store, run `rlvr saved-view --runs-root
+  /home/opencode/Work/rl-grpo-data/mlflow`. Open the printed route. The tag
+  holds the eight-section chart layout.
 - Backup: `deploy/backup.py` copies the store to
   `s3://opencodeagent1/mlflow/v1/backups`. Nothing schedules it on this VM. Run
   it by hand:

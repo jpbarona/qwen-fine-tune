@@ -54,12 +54,16 @@ inside them name the flat module layout that PR #5 replaced.
   backup, the install steps and the restore steps.
 - `../deploy/mlflow.service`: the server on `127.0.0.1:8081`, one worker,
   sqlite backend, S3 artifacts.
+- `../deploy/mlflow-serve.sh`: the tailnet server with the CORS origin and the
+  restart loop, for the tmux session.
 - `../deploy/mlflow-backup.timer` and `mlflow-backup.service`: the nightly
   `sqlite3 .backup` copy to the bucket, 14 kept.
 - `../scripts/open-tunnel.sh`: the reverse forward, the retry loop and the
   health probe from the box.
 - `../scripts/start-remote-run.sh`: tunnel, health gate, detached launch of one
   arm on the box.
+- `../scripts/sync-to-box.sh`: copy this checkout, its history and the screen to
+  a fresh box.
 - `../configs/real.toml` and `../configs/lfm-spread.toml`: the `[mlflow]` table
   names the bucket and the artifact root. The tracking URI comes from the
   tunnel, never from a config file.

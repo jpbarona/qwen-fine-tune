@@ -86,6 +86,10 @@ if [ -z "${CXX:-}" ]; then
   export CXX=g++
 fi
 
+# The container runs as root and the repository is a bind mount. A readable
+# umask leaves run files readable from the host user after the run.
+umask 022
+
 # Call the module, not the console script. The image's console script was
 # generated at build time and still names the pre-refactor import path. The
 # module path follows the mounted source, so a code move cannot break the run.

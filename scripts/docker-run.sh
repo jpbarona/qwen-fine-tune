@@ -17,6 +17,14 @@ if [ "$#" -lt 1 ]; then
   exit 2
 fi
 
+# A container cannot start without docker access. Say which command fixes it
+# instead of surfacing the daemon's permission error.
+if ! docker info >/dev/null 2>&1; then
+  echo "docker-run.sh: $(id -un) cannot reach the docker daemon. run:" >&2
+  echo "  newgrp docker    # or open a new SSH session" >&2
+  exit 1
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image="${RLVR_IMAGE:-ghcr.io/jpbarona/rlvr:latest}"
 image_ref="$(docker image inspect "$image" --format '{{index .RepoDigests 0}}' 2>/dev/null || printf '%s' "$image")"
