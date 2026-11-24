@@ -76,6 +76,11 @@ exec docker run --rm --gpus all --ipc=host \
   -e RLVR_IMAGE_REF="$image_ref" \
   -e TMPDIR="$runner_tmp" \
   -e PYTHONDONTWRITEBYTECODE=1 \
+  -e GIT_CONFIG_COUNT=1 \
+  -e GIT_CONFIG_KEY_0=safe.directory \
+  -e GIT_CONFIG_VALUE_0='*' \
+  -e CC=gcc \
+  -e CXX=g++ \
   -e OPENROUTER_API_KEY \
   -e OPENCODE_GO_API_KEY \
   -e MLFLOW_TRACKING_URI \
